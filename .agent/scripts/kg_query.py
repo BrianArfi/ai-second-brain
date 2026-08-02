@@ -37,13 +37,25 @@ DEFAULT_GRAPH = os.path.join(REPO, "journal", "state", "graph.json")
 EXACT_BONUS, PREFIX_BONUS, SUBSTR_BONUS = 1000.0, 100.0, 1.0
 MAX_SEEDS = 3
 SEED_GAP_RATIO = 0.2       # drop a seed scoring below 20% of the best one
-DEPTH = 2                  # 3 hops makes everything connect to everything
+# Depth 1 by default. Measured against a strict AND-grep baseline over the same
+# terms: depth 2 returned 258 nodes vs grep's 166 files (a loss), depth 1
+# returns 104 (a win), and the correct answer still lands in the seed set 5 of 5
+# times on the ground-truth set. Depth 2 stays available via --depth for
+# exploring how two things connect; it is not the right default for lookup.
+DEPTH = 1
 # Hub threshold is p99 of the live degree distribution, floored low on purpose.
 # graphify floors this at 50, which is tuned for large code graphs. This graph
 # has a median degree of 1 and a max of 70, so a floor of 50 would leave
 # 'b2c' (49), 'todo' (43) and 'Your Name' (43) traversable and every
 # query would flood with everything those touch. Measured p99 here is 18.
 HUB_FLOOR = 12
+
+# Structural containers. Reachable as an answer ("this doc is filed under
+# Example Program") but NEVER a route between two things: sharing a folder is not a
+# relationship. They are also excluded from the p99 that sets the hub
+# threshold, because 103 container nodes dragged p99 from 18 to 34 and let
+# genuine mid-degree nodes become through-routes again.
+CONTAINER_TYPES = {"area"}
 CHAR_BUDGET = 6000
 
 # English filler plus the Indonesian question and connector words that would
@@ -75,9 +87,16 @@ def tokens(s):
     return re.findall(r"\w+", strip_diacritics(s).lower(), flags=re.UNICODE)
 
 def query_terms(question):
+    """Terms worth searching on, or an empty list.
+
+    graphify falls back to the unfiltered token list when every term is a
+    stopword, so that a query always returns something. That is the wrong
+    trade here: 'yang di ke dari' then returns 56 confident-looking nodes, and
+    a bare 'x' returns 48. A question with no content words has no answer, and
+    saying so is more useful than a plausible-looking subgraph.
+    """
     raw = tokens(question)
-    kept = [t for t in raw if len(t) > 2 and t not in STOPWORDS]
-    return kept or raw          # never return nothing
+    return [t for t in raw if len(t) > 2 and t not in STOPWORDS]
 
 class KG:
     def __init__(self, path):
@@ -105,12 +124,29 @@ class KG:
     def degree(self, nid):
         return len(self.adj.get(nid, ()))
 
+    def is_container(self, nid):
+        return self.nodes.get(nid, {}).get("type") in CONTAINER_TYPES
+
     def hub_threshold(self):
         if self._hub is None:
-            degs = sorted(self.degree(n) for n in self.nodes)
+            degs = sorted(self.degree(n) for n in self.nodes
+                          if not self.is_container(n))
             p99 = degs[int(len(degs) * 0.99)] if degs else 0
             self._hub = max(HUB_FLOOR, p99)
         return self._hub
+
+    def doc_freq(self, term):
+        return sum(1 for n in self.nodes.values() if term in n["_norm"])
+
+    def unmatched(self, terms):
+        """Terms that appear nowhere in the corpus.
+
+        This is the guard against the worst failure mode found in testing:
+        'Bank Mandiri integration' returned PRD FINA docs because 'integration'
+        matched while 'mandiri' appears nowhere. A query naming something that
+        does not exist must say so, not return a plausible neighbour.
+        """
+        return [t for t in terms if self.doc_freq(t) == 0]
 
     def idf(self, term):
         if self._idf is None:
@@ -184,9 +220,10 @@ class KG:
             nid, d = q.popleft()
             if d >= depth:
                 continue
-            # a hub is reachable but not traversable: everything touches YourManager
-            # and Work, so routing through them makes any two things "related"
-            if nid not in seeds and self.degree(nid) >= hub:
+            # hubs and containers are reachable but not traversable: everything
+            # touches YourManager, Work, and the meetings folder, so routing through
+            # them would make any two things look "related"
+            if nid not in seeds and (self.degree(nid) >= hub or self.is_container(nid)):
                 continue
             for nbr, _ in sorted(self.adj.get(nid, ()), key=lambda x: x[0]):
                 if nbr not in seen:
@@ -200,6 +237,53 @@ class KG:
                 if e["source"] in visited and e["target"] in visited]
 
 # ----------------------------------------------------------------- rendering
+
+def split_siblings(kg, nid):
+    """Other person nodes that may be the SAME human as this one.
+
+    Two rules, both deliberately conservative:
+      1. one id is a prefix of the other  ('owner-arfi' / 'owner-arfi-you')
+      2. same first name token AND not both are registered in people.json
+
+    Rule 2 exists because a prefix test alone missed 'Teammate-yuda' versus
+    'Teammate-analytics' during testing. The registration clause is what keeps
+    it from firing on genuinely different people: 'Mohammad Ali' and 'Teammate' are both registered humans, so they are never flagged.
+
+    This only ever WARNS. Nothing is merged. Two ids that look alike are
+    the owner's call, never the tool's (feedback_no_guessing_names).
+    """
+    me = kg.nodes.get(nid, {})
+    if me.get("type") != "person":
+        return []
+    stem = nid[len("person:"):].split("-")[0]
+    out = []
+    for oid, o in kg.nodes.items():
+        if oid == nid or o.get("type") != "person":
+            continue
+        if oid.startswith(nid + "-") or nid.startswith(oid + "-"):
+            out.append(oid)
+        elif (oid[len("person:"):].split("-")[0] == stem
+              and not (me.get("registered") and o.get("registered"))):
+            out.append(oid)
+    return sorted(set(out))
+
+def warn_split_identity(kg, nids):
+    """A person query that hits one of several ids for the same human silently
+    undercounts. Testing found 'Teammate' surfacing 3 of 7 ids and 'Your Name'
+    3 of 6. Say it out loud rather than return a confident partial answer."""
+    missing = sorted({k for nid in nids for k in split_siblings(kg, nid)
+                      if k not in nids})
+    if not missing:
+        return
+    print("[!] POSSIBLE SPLIT IDENTITY: other person ids share a name stem with "
+          "this result and are NOT included, so counts here may be partial.")
+    for m in missing:
+        print(f"      {m}  (deg={kg.degree(m)})")
+    # Strings alone cannot separate 'owner-arfi' from 'owner-arfi-you' (one
+    # human) and 'mohammad-ali' from 'mohammad-Teammate' (two). The tool
+    # refuses to decide; journal/state/kg_audit.md is where it gets resolved once.
+    print("    some of these may be different people. resolve in people.json, "
+          "see kg_audit.md section 2.\n")
 
 def fmt_node(kg, nid, hop=None):
     n = kg.nodes.get(nid, {"id": nid, "type": "?", "label": nid})
@@ -215,11 +299,28 @@ def fmt_node(kg, nid, hop=None):
 
 def cmd_query(kg, args):
     terms = query_terms(args.question)
+    if not terms:
+        print("no searchable terms in that question (all stopwords or too short).\n"
+              "give at least one word of 3+ characters that names a thing.")
+        return 1
+    missing = kg.unmatched(terms)
+    if missing and not args.loose:
+        print(f"NOT FOUND: {', '.join(repr(m) for m in missing)} "
+              f"{'appears' if len(missing) == 1 else 'appear'} nowhere in the graph.")
+        rest = [t for t in terms if t not in missing]
+        if rest:
+            print(f"refusing to answer from the remaining terms ({', '.join(rest)}) "
+                  f"alone, because that returns plausible neighbours rather than "
+                  f"your actual question.")
+            print("re-run with --loose to search on the remaining terms anyway.")
+        return 1
+
     ranked, best = kg.score(terms)
     if not ranked:
         print(f"no match for terms: {terms}")
         return 1
     seeds = kg.pick_seeds(ranked, best)
+    warn_split_identity(kg, seeds)
     seen, order = kg.bfs(seeds, args.depth)
     edges = kg.induced_edges(set(seen))
 
@@ -408,6 +509,31 @@ def cmd_stats(kg, args):
         print(f"  {d:4d}  {kg.nodes[nid].get('label')}  [{kg.nodes[nid]['type']}]")
     return 0
 
+SOURCE_LEDGERS = ["commitments.json", "waiting_on.json", "decisions.json",
+                  "people.json", "portfolio.json", "tickets.json"]
+
+def staleness_warning(kg, graph_path):
+    """The graph is a snapshot of ledgers that change through the day. A stale
+    answer that looks fresh is the failure this whole design exists to avoid,
+    so every command checks before it answers."""
+    gen = kg.meta.get("generated_at")
+    if not gen:
+        return
+    try:
+        import time as _t
+        built = _t.mktime(_t.strptime(gen[:19], "%Y-%m-%dT%H:%M:%S"))
+    except ValueError:
+        return
+    state = os.path.dirname(graph_path)
+    newer = []
+    for name in SOURCE_LEDGERS:
+        p = os.path.join(state, name)
+        if os.path.exists(p) and os.path.getmtime(p) > built:
+            newer.append(name)
+    if newer:
+        print(f"[!] STALE: {', '.join(newer)} changed after this graph was built "
+              f"({gen}).\n    rebuild first: python3 .agent/scripts/kg_build.py\n")
+
 def main():
     # shared flags are attached to every subcommand as well, so both
     # `kg_query.py -v explain X` and `kg_query.py explain X -v` work
@@ -423,6 +549,9 @@ def main():
 
     q = sub.add_parser("query", parents=[common]); q.add_argument("question")
     q.add_argument("--depth", type=int, default=DEPTH)
+    q.add_argument("--loose", action="store_true",
+                   help="answer even when part of the question names something "
+                        "that does not exist in the graph")
     e = sub.add_parser("explain", parents=[common]); e.add_argument("node")
     p = sub.add_parser("path", parents=[common])
     p.add_argument("source"); p.add_argument("target")
@@ -433,6 +562,7 @@ def main():
         print(f"graph not found at {args.graph}\nrun: python3 .agent/scripts/kg_build.py")
         return 2
     kg = KG(args.graph)
+    staleness_warning(kg, args.graph)
     return {"query": cmd_query, "explain": cmd_explain,
             "path": cmd_path, "stats": cmd_stats}[args.cmd](kg, args)
 

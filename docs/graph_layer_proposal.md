@@ -167,6 +167,82 @@ Added beyond the original spec, because the same class of bug kept appearing:
 - **Initiative alias detection.** `portfolio` stores lowercase slugs and `project` stores display names, so one initiative lands as two nodes. 22 candidate pairs found. Reported, never auto-merged.
 - **Page disambiguation.** A person and that person's own `People/` page share a label. Resolved through the `page` field in `people.json`, which is data rather than a guess. Genuine ambiguity still refuses: `explain "Work"` matches 809 nodes and returns nothing.
 
+### Phase 1 evaluation, 2 Aug 2026
+
+Run with `scratchpad/kg_eval.py`: provenance audit, retrieval recall, a grep
+comparison, robustness cases, and coverage gaps.
+
+**Provenance: clean.** 736 edges were re-derived from the source JSON
+independently of the builder (`owed_to` 89, `blocked_on` 193, `decided_by` 67,
+`involves` 110, `sourced_from` 204, `escalates_to` 73). **0 mismatches.** Only
+one relation is ever labelled INFERRED, `attended_by`, as designed.
+
+**Ground truth: 5 of 5.** Five questions whose answers are independently
+verifiable put the correct node in the **seed set** every time, at depth 1.
+
+**The grep comparison in the first report was wrong.** It used a grep that
+matched ANY term, which is a strawman. Against a strict AND-grep over the same
+terms, depth 2 returned **258 nodes vs grep's 166 files, a loss**. Depth 1
+returns **104**, a genuine win, and keeps ground-truth accuracy at 5 of 5.
+Depth 1 is now the default.
+
+The honest read: the win is **ranking**, not volume. Grep hands back 30 to 45
+files in arbitrary order. The graph puts the right item at the top and shows
+what it connects to. Volume reduction is real but modest.
+
+**Four defects found and fixed during evaluation:**
+
+| Defect | Effect | Fix |
+|---|---|---|
+| Documents had no body text indexed | all 1.282 findable by filename only | headings and bold lead-ins as `search_text`, capped at 3.000 chars. Now 1.271 of 1.282 carry text. |
+| Stopword-only and junk queries | `'x'` returned 48 nodes, `'yang di ke dari'` returned 56, all confident-looking | dropped graphify's never-return-nothing fallback. Junk now returns nothing and says why. |
+| 1.029 isolated nodes | 795 documents and 115 tickets connected to nothing | `filed_under` path edges plus ticket `owner`/`project`/`initiative_id`. Now 132 isolated. |
+| Hub threshold drifted | adding 103 folder nodes pushed p99 from 18 to 34, re-opening mid-degree nodes as through-routes | folders are containers: never traversable, and excluded from the p99 calculation. Sharing a folder is not a relationship. |
+
+### Adversarial trap tests, 2 Aug 2026
+
+The recall numbers above measure how good the tool is when it is right. These
+measure how convincing it is when it is wrong, which matters more. Two of three
+traps failed on first run.
+
+**Trap 1, things that do not exist. FAILED, now fixed.** Every invented topic
+returned confident results: `Bank Mandiri integration` returned PRD FINA docs,
+`blockchain NFT loyalty pilot` returned the Q3 B2C Superapp Plan at score 801,
+`Zalando marketplace onboarding` returned 115 nodes. Cause: the scorer answered
+from whichever terms happened to match and ignored the one term that proved the
+subject was absent. Fixed with an unmatched-term gate: a query naming something
+with zero occurrences now returns `NOT FOUND: 'zalando' appears nowhere` and
+refuses to answer from the remaining words. `--loose` overrides. All four
+invented queries now refuse; all control queries still work; ground truth held
+at 5 of 5.
+
+**Trap 2, split identity. FAILED, now warned.** `Teammate` surfaced 3 of 7
+person ids for the same human, `Your Name` 3 of 6, silently. The prefix rule
+used by `explain` missed it, because `Teammate-yuda` and `Teammate-analytics`
+are not prefixes of each other. The sibling rule is now: prefix match, OR same
+first name token where not both ids are registered in `people.json`. Query and
+explain both warn that a result may be partial.
+
+The residual false positive is accepted and documented: `mohammad-ali` flags
+`mohammad-Teammate`, who is a different human. No string heuristic can
+separate that from `owner-arfi` versus `owner-arfi-you`. The tool warns and
+refuses to decide; `kg_audit.md` section 2 is where it gets resolved once.
+
+**Trap 3, staleness. PASSED as data, FAILED as behaviour, now fixed.** No ledger
+was newer than the graph at test time, but nothing checked. Every command now
+compares the graph's `generated_at` against the mtime of all six source ledgers
+and prints a `[!] STALE` banner naming the files that moved.
+
+**Known limits, unresolved:**
+
+- 114 commitments remain isolated: no `to_slug`, no portfolio, no meeting.
+- Non-Latin queries return nothing. Labels are Latin script.
+- Self-retrieval recall of 90 of 90 is a weak test. It proves the scorer can
+  find an item from its own words, not that it answers a real question well.
+  Only the 5-question ground-truth set speaks to that, and 5 is a small n.
+- **The Phase 2 kill criterion is still untested.** Nothing here proves the
+  graph beats grep inside a real evening harvest.
+
 **Phase 2 (~200 LOC).** Wire into the existing evening harvest. Measure against the real criterion: on the same evening update, does query-first beat grep-first on **files opened** and on **facts missed**. Accuracy is judged by rechecking every surfaced fact against the primary source.
 
 **Phase 3, only if Phase 2 wins.** Rebuild hook on ledger write, MCP server so subagents query it as a tool, and an HTML view on the localhost dashboard.

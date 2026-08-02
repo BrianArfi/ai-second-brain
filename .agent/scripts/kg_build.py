@@ -62,6 +62,26 @@ FATHOM_ID = re.compile(r"fathom\.video/calls/(\d+)")
 MOM_ROW = re.compile(r"^\|\s*([A-Za-z][A-Za-z /]*?)\s*\|\s*(.+?)\s*\|\s*$", re.M)
 MOM_PARTICIPANTS_LINE = re.compile(r"^\*\*Participants\*\*\s*:\s*(.+)$", re.M)
 MOM_TITLE = re.compile(r"^#\s+MOM:\s*(.+)$", re.M)
+HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$", re.M)
+BOLD_LEAD = re.compile(r"^\*\*(.{3,80}?)\*\*", re.M)
+CODE_FENCE = re.compile(r"^```.*?^```", re.M | re.S)
+
+# A document indexed by filename alone is unfindable by topic. Headings and
+# bold lead-ins are the document's own table of contents: deterministic to
+# extract, cheap, and they carry the vocabulary someone would actually search.
+DOC_TEXT_CAP = 3000
+
+def doc_search_text(txt):
+    body = CODE_FENCE.sub("", txt)
+    parts = HEADING.findall(body)[:120] + BOLD_LEAD.findall(body)[:80]
+    seen, out = set(), []
+    for p in parts:
+        p = re.sub(r"[`*\[\]]", "", p).strip()
+        key = p.lower()
+        if p and key not in seen:
+            seen.add(key)
+            out.append(p)
+    return " | ".join(out)[:DOC_TEXT_CAP]
 
 # --------------------------------------------------------------------------- io
 
@@ -290,14 +310,51 @@ def add_portfolio(g, blob):
                          status=(init.get("status") if isinstance(init, dict) else None))
             g.edge(iid, tid, "owned_by_team", EXTRACTED, "portfolio.json:teams")
 
-def add_tickets(g, blob):
+def add_tickets(g, people, blob):
     for t in items_of(blob, "tickets"):
         key = t.get("key") or t.get("id")
         if not key:
             continue
-        g.node("ticket:" + str(key), "ticket",
-               f"{key} {(t.get('title') or t.get('summary') or '')[:80]}".strip(),
-               status=t.get("status"), search_text=t.get("title") or t.get("summary"))
+        title = t.get("title") or t.get("summary") or ""
+        nid = g.node("ticket:" + str(key), "ticket", f"{key} {title[:80]}".strip(),
+                     status=t.get("status"), due=t.get("due"),
+                     priority=t.get("priority"), search_text=title)
+        owner = t.get("owner")
+        if owner:
+            pid = people.resolve_name(owner)
+            if pid:
+                g.edge(nid, pid, "owned_by", EXTRACTED, "tickets.json:owner")
+            else:
+                fid = g.node("person:" + slugify_name(owner), "person", owner,
+                             registered=False)
+                g.edge(nid, fid, "owned_by", AMBIGUOUS,
+                       "tickets.json:owner (name not in people.json)")
+        for field in ("project", "initiative_id"):
+            val = t.get(field)
+            if not is_placeholder(val):
+                iid = g.node("initiative:" + slugify_name(val), "initiative", str(val))
+                g.edge(nid, iid, "belongs_to", EXTRACTED, f"tickets.json:{field}")
+
+def add_doc_areas(g):
+    """Connect documents to the folder they are filed under.
+
+    A path is a literal fact, so these edges are EXTRACTED. Without them 795
+    documents sit at degree 0: findable by search but connected to nothing, so
+    traversal from them returns their own node and stops. Area nodes get large
+    degrees on purpose; hub avoidance keeps queries from routing through them.
+    """
+    for nid, n in list(g.nodes.items()):
+        if n.get("type") != "document":
+            continue
+        d = os.path.dirname(n.get("source_file") or "")
+        if not d:
+            continue
+        aid = g.node("area:" + d, "area", d.split("/")[-1], path=d)
+        g.edge(nid, aid, "filed_under", EXTRACTED, "repo path")
+        parent = os.path.dirname(d)
+        if parent:
+            pid = g.node("area:" + parent, "area", parent.split("/")[-1], path=parent)
+            g.edge(aid, pid, "inside", EXTRACTED, "repo path")
 
 # ------------------------------------------------------------------- documents
 
@@ -329,7 +386,8 @@ def add_documents(g, people):
         except OSError:
             continue
         title = os.path.splitext(os.path.basename(path))[0].replace("_", " ")
-        did = g.node("doc:" + rp, "document", title, source_file=rp)
+        did = g.node("doc:" + rp, "document", title, source_file=rp,
+                     search_text=doc_search_text(txt))
 
         for m in MD_LINK.finditer(txt):
             target = resolve_link(path, m.group(1))
@@ -507,8 +565,9 @@ def build():
     add_waiting(g, people, load_json("waiting_on.json"))
     add_decisions(g, people, load_json("decisions.json"))
     add_portfolio(g, load_json("portfolio.json"))
-    add_tickets(g, load_json("tickets.json"))
+    add_tickets(g, people, load_json("tickets.json"))
     dead = add_documents(g, people)
+    add_doc_areas(g)
     pruned = g.prune_dangling()
     return g, people, dead, pruned
 
