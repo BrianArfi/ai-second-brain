@@ -87,9 +87,9 @@ NON_MEETING_TITLES = {
 # every day. A registry `client` other than Work is authoritative; for rows
 # the registry has not seen yet, these title tokens mark known personal work.
 PERSONAL_TITLE_TOKENS = {
-    "tln", "you", "goakal", "hsi", "podcast", "qawwam",
+    "tln", "you", "goakal", "hsi", "podcast", "qawwam", "skripsi",
 }
-PERSONAL_TITLE_PHRASES = ("ai circle", "suami qawwam")
+PERSONAL_TITLE_PHRASES = ("ai circle", "suami qawwam", "bimbingan skripsi")
 
 # Narration the agentic draft CLI prints to stdout when it writes the real
 # minutes into its own sandbox workspace instead of the repo.
