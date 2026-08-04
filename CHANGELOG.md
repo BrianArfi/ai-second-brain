@@ -6,6 +6,29 @@ Entries are written in the private working repo and carried to the public templa
 (`ai-second-brain`) by the sync pipeline, which strips credentials, tokens, real client
 names, and personal data. This file is copied verbatim, so it reads the same in both.
 
+## 2026-08-04
+
+### Added
+- **`mom_reconcile.py` now cross-checks against Google Calendar and scans MOM
+  content, not just size.** Coverage used to be enumerated from meeting
+  recordings alone, so a meeting nobody hit record on produced zero rows and
+  was indistinguishable from no meeting having happened. A second enumeration
+  pass now runs against the calendar connector; any substantial calendar
+  event matching no recording lands in a new `uncounted` bucket that trips
+  the same non-zero exit as a missing or bad MOM (calendar-fetch failures are
+  logged and swallowed rather than blocking the primary check). Separately,
+  a minutes file used to count as covered purely by clearing a byte-size
+  threshold, which let a hollow draft with zero decisions pass. `inspect_mom`
+  now also scans content for decisions (a heading, or a ticket-style
+  reference) and action items (a checkbox, or a bulleted section), and
+  downgrades to suspect when both are absent, independent of size.
+- **`docs/OKF_ADAPTATION.md`**: notes on adopting Google Cloud's Open
+  Knowledge Format (v0.2). The harness's memory system already conforms to
+  its one required field; the doc covers the optional `generated`/`verified`
+  provenance fields worth layering on top, and states the principle behind
+  the `mom_reconcile.py` fix above: a guard that cannot verify something must
+  report "unverified," never "pass."
+
 ## 2026-07-18
 
 ### Breaking
