@@ -32,9 +32,22 @@ Coverage for a Fathom recording resolves in this order:
 
 A MOM that exists but is tiny, or is filed under a non-meeting calendar block,
 counts as SUSPECT rather than covered: a false-positive MOM reads as done and
-hides the miss, which is worse than an outright gap. A recording that ended
-less than the grace window ago has legitimately not been minuted yet and is
-bucketed as PENDING, which does NOT trip the gap alarm.
+hides the miss, which is worse than an outright gap. Size is also not proof
+of substance: a MOM that clears the byte threshold but contains zero
+decisions and zero action items is downgraded to SUSPECT too (an 11-minute
+Vexa draft cleared MIN_MOM_BYTES by 156 bytes on 30 Jul 2026 while capturing
+nothing). A recording that ended less than the grace window ago has
+legitimately not been minuted yet and is bucketed as PENDING, which does NOT
+trip the gap alarm.
+
+Fathom enumeration is still blind to a meeting nobody ever hit record on --
+it produces zero rows, which looks identical to no meeting having happened.
+So the day is enumerated a second time from Google Calendar (best-effort: a
+calendar-fetch failure does not affect authoritativeness, only Fathom does),
+and any substantial calendar event that matches no Fathom row lands in
+UNCOUNTED, which also trips the gap alarm. Root-caused on 30 Jul 2026: 7
+calendar meetings, only 5 had notes, and 2 (ExampleCo daily standup, Product x
+Ops Weekly) were never recorded and never appeared as a gap.
 
 Usage:
   python3 meeting-recorder/mom_reconcile.py [--date YYYY-MM-DD] [--quiet]
@@ -61,6 +74,7 @@ MEETINGS_GLOB = os.path.join(REPO_ROOT, "Clients", "Work", "**", "meetings", "*.
 SYNC_SCRIPT = os.path.join(REPO_ROOT, "scripts", "fathom_registry_sync.py")
 OUT_PATH = os.path.join(REPO_ROOT, "journal", "state", "mom_coverage.json")
 HEARTBEAT = os.path.join(REPO_ROOT, ".agent", "scripts", "heartbeat.py")
+GCAL_SCRIPT = os.path.join(REPO_ROOT, ".agent", "skills", "google-calendar-connector", "gcal_manager.py")
 
 WIB = datetime.timezone(datetime.timedelta(hours=7))
 JOB = "mom-reconcile"
@@ -75,6 +89,16 @@ GRACE_MINUTES = 90
 
 # Safety cap on live Fathom pagination when enumerating a single day.
 LIVE_MAX_PAGES = 20
+
+# Calendar blocks shorter than this clear the title filter but are not
+# substantial enough to need a MOM of their own (a 10-minute placeholder hold).
+MIN_EVENT_MINUTES = 15
+
+# Fathom bots typically join a few minutes after the calendar start and the
+# recording can end a few minutes either side of the invite; a Fathom row is
+# treated as covering a calendar event if their time ranges land within this
+# many minutes of overlap.
+TIME_OVERLAP_BUFFER_MIN = 20
 
 NON_MEETING_TITLES = {
     "prayer", "focus time", "home", "lunch", "break", "ooo",
@@ -223,6 +247,134 @@ def fetch_live_recordings(date, registry):
                     "raise LIVE_MAX_PAGES or narrow the date")
     return rows, None
 
+def _compute_gcal_window(date):
+    """gcal_manager's --days-back/--days-forward is relative to `now`, not an
+    absolute date, so a --date backfill needs the offset pair translated to
+    bracket the target day rather than today."""
+    today = datetime.datetime.strptime(today_wib(), "%Y-%m-%d").date()
+    target = datetime.datetime.strptime(date, "%Y-%m-%d").date()
+    diff = (today - target).days
+    if diff >= 0:
+        return diff + 1, 0
+    return 0, (-diff) + 1
+
+def fetch_calendar_events(date):
+    """Second enumeration source, alongside live Fathom (see module docstring).
+    Returns (events, error); error is None on success, or a short string when
+    the calendar could not be reached."""
+    days_back, days_forward = _compute_gcal_window(date)
+    try:
+        proc = subprocess.run(
+            [sys.executable, GCAL_SCRIPT, "list",
+             "--days-back", str(days_back), "--days-forward", str(days_forward),
+             "--profile", "work", "--json"],
+            capture_output=True, text=True, timeout=60,
+        )
+    except Exception as e:
+        return [], f"cannot run gcal_manager: {e}"
+    if proc.returncode != 0:
+        return [], f"gcal_manager exited {proc.returncode}: {(proc.stderr or '').strip()[:200]}"
+    try:
+        events = json.loads(proc.stdout)
+    except ValueError as e:
+        return [], f"gcal_manager returned non-JSON: {e}"
+
+    return [e for e in events
+            if (e.get("status") or "").lower() != "cancelled"
+            and _wib_date(e.get("start")) == date], None
+
+def _is_non_substantial_calendar_title(title):
+    """Personal, prayer, and focus-time blocks are not meetings needing a MOM.
+    Reuses the same title heuristics reconcile() already applies to Fathom
+    rows (NON_MEETING_TITLES, PERSONAL_TITLE_PHRASES/TOKENS) so calendar
+    enumeration does not invent gaps for non-meeting calendar time."""
+    t = (title or "").strip().lower()
+    if not t or t in NON_MEETING_TITLES:
+        return True
+    if any(p in t for p in PERSONAL_TITLE_PHRASES):
+        return True
+    tokens = set(re.split(r"[^a-z0-9]+", t))
+    return bool(tokens & PERSONAL_TITLE_TOKENS)
+
+def _event_duration_minutes(start, end):
+    s, e = _parse_utc(start), _parse_utc(end)
+    if not s or not e:
+        return None
+    return (e - s).total_seconds() / 60.0
+
+def _substantial_calendar_events(events):
+    """Drop non-meeting titles and sub-MIN_EVENT_MINUTES blocks a title match
+    alone would miss. All-day / dateless entries have no reliable duration and
+    are dropped as a side effect of requiring a time-of-day component."""
+    kept = []
+    for e in events:
+        if _is_non_substantial_calendar_title(e.get("summary")):
+            continue
+        start, end = e.get("start") or "", e.get("end") or ""
+        if "T" not in start or "T" not in end:
+            continue
+        duration = _event_duration_minutes(start, end)
+        if duration is not None and duration < MIN_EVENT_MINUTES:
+            continue
+        kept.append(e)
+    return kept
+
+def _minutes_since_midnight(hhmm):
+    try:
+        h, m = hhmm.split(":")
+        return int(h) * 60 + int(m)
+    except (AttributeError, ValueError):
+        return None
+
+def _fathom_matches_calendar_event(event, rows):
+    """True if some Fathom row this day is plausibly the same meeting: a high
+    title-similarity score (the same Jaccard/ratio blend and MATCH_THRESHOLD
+    bar used for filename matching) AND overlapping wall-clock time -- title
+    alone would let two same-day meetings sharing a generic name ("Weekly
+    Sync") cross-match."""
+    want = set(slug_tokens(event.get("summary") or ""))
+    ev_start = _minutes_since_midnight(_wib_hhmm(event.get("start")))
+    ev_end = _minutes_since_midnight(_wib_hhmm(event.get("end"))) or ev_start
+    for _rec_id, entry in rows:
+        have = set(slug_tokens(title_of(entry)))
+        if not want or not have:
+            continue
+        jaccard = len(want & have) / len(want | have)
+        ratio = difflib.SequenceMatcher(None, " ".join(sorted(want)),
+                                        " ".join(sorted(have))).ratio()
+        if max(jaccard, ratio) < MATCH_THRESHOLD:
+            continue
+        rec_start = _minutes_since_midnight(entry.get("time_wib"))
+        if rec_start is None or ev_start is None:
+            continue
+        rec_end = _minutes_since_midnight(_wib_hhmm(entry.get("recording_end_utc"))) or rec_start
+        if (rec_start - TIME_OVERLAP_BUFFER_MIN) <= ev_end and \
+           (ev_start - TIME_OVERLAP_BUFFER_MIN) <= rec_end:
+            return True
+    return False
+
+def find_uncounted_meetings(date, rows):
+    """Calendar events with no matching Fathom row for the day: meetings
+    nobody hit record on, invisible to fetch_live_recordings because it only
+    ever sees what Fathom captured. Calendar enumeration is best-effort and
+    additive -- a failure here is logged and swallowed rather than turning an
+    otherwise-verified Fathom day into "cannot verify"."""
+    events, cal_err = fetch_calendar_events(date)
+    if cal_err:
+        print(f"[mom-reconcile] calendar enumeration skipped: {cal_err}", file=sys.stderr)
+        return []
+    uncounted = []
+    for e in _substantial_calendar_events(events):
+        if _fathom_matches_calendar_event(e, rows):
+            continue
+        uncounted.append({
+            "title": e.get("summary") or "untitled",
+            "start": e.get("start"),
+            "end": e.get("end"),
+            "reason": "on calendar, no Fathom recording found for this day",
+        })
+    return uncounted
+
 def within_grace(end_utc):
     """True if the recording ended less than GRACE_MINUTES ago (still fair to
     be un-minuted). Unknown end time is treated as outside grace."""
@@ -252,6 +404,42 @@ def mom_on_disk(mom_path):
     p = mom_path if os.path.isabs(mom_path) else os.path.join(REPO_ROOT, mom_path)
     return p if os.path.isfile(p) else None
 
+# Byte size alone let an 11-minute Vexa draft with zero decisions clear
+# MIN_MOM_BYTES by 156 bytes on 30 Jul 2026 and read as covered. These scan
+# the full body for the two things minutes actually exist to record.
+DECISION_HEADING_RE = re.compile(r"^#{2,3}\s*decisions?\b", re.IGNORECASE | re.MULTILINE)
+DECISION_TICKET_RE = re.compile(r"\bDEC-\d+\b")
+ACTION_TASK_RE = re.compile(r"^- \[[ xX]\]", re.MULTILINE)
+ACTION_HEADING_RE = re.compile(r"^#{2,3}\s*action items?\b", re.IGNORECASE | re.MULTILINE)
+BULLET_LINE_RE = re.compile(r"^\s*[-*]\s+\S")
+
+def _has_decisions(text):
+    return bool(DECISION_HEADING_RE.search(text) or DECISION_TICKET_RE.search(text))
+
+def _has_action_items(text):
+    if ACTION_TASK_RE.search(text):
+        return True
+    m = ACTION_HEADING_RE.search(text)
+    if not m:
+        return False
+    # A bare heading with nothing under it is not an action item. Stop at the
+    # next heading (same level or higher) so a bullet under a later, unrelated
+    # section cannot count.
+    for line in text[m.end():].splitlines():
+        if re.match(r"^#{1,3}\s", line):
+            break
+        if BULLET_LINE_RE.match(line):
+            return True
+    return False
+
+def _mom_has_substance(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except OSError:
+        return True  # unreadable is already caught by inspect_mom's earlier size check
+    return _has_decisions(text) or _has_action_items(text)
+
 def inspect_mom(path):
     """Return (ok, reason). ok=False means it exists but should not count."""
     try:
@@ -268,6 +456,8 @@ def inspect_mom(path):
     for marker in STUB_MARKERS:
         if marker in head:
             return False, f"stub: contains {marker!r}, real minutes live elsewhere"
+    if not _mom_has_substance(path):
+        return False, "0 decisions and 0 action items despite passing size threshold"
     return True, ""
 
 def resolve_coverage(rec_id, entry, registry, claimed=None):
@@ -443,6 +633,7 @@ def _empty_result(date, authoritative, reason=""):
         "pending": [],
         "out_of_scope": [],
         "covered_detail": [],
+        "uncounted": [],
     }
 
 def reconcile(date):
@@ -457,6 +648,10 @@ def reconcile(date):
                               reason=f"live fathom unreachable: {live_err}")
 
     rows.sort(key=lambda r: r[1].get("time_wib") or "")
+
+    # Calendar cross-check happens against the Fathom rows for this day, so it
+    # runs once here rather than inside the per-recording loop below.
+    uncounted = find_uncounted_meetings(date, rows)
 
     covered, missing, suspect, pending, out_of_scope = [], [], [], [], []
     claimed = set()  # MOM paths already assigned; one MOM covers one recording
@@ -510,6 +705,7 @@ def reconcile(date):
         "pending": pending,
         "out_of_scope": out_of_scope,
         "covered_detail": covered,
+        "uncounted": uncounted,
     }
 
 def main():
@@ -537,7 +733,9 @@ def main():
 
     # PENDING recordings ended within the grace window and are not yet due, so
     # they are deliberately excluded from the gap set that trips the alarm.
-    gaps = result["missing"] + result["suspect"]
+    # UNCOUNTED is included: a calendar event nobody recorded is exactly the
+    # kind of miss this script exists to surface, not a softer category.
+    gaps = result["missing"] + result["suspect"] + result.get("uncounted", [])
     if not args.quiet:
         for r in result["covered_detail"]:
             print(f"  OK      {r['time_wib']}  {r['matched_meeting']}  -> {r['mom_path']}")
@@ -549,6 +747,8 @@ def main():
             print(f"  SUSPECT {r['time_wib']}  {r['matched_meeting']}  ({r['reason']})")
         for r in result.get("out_of_scope", []):
             print(f"  SKIP    {r['time_wib']}  {r['matched_meeting']}  ({r['reason']})")
+        for r in result.get("uncounted", []):
+            print(f"  UNCOUNTED {r.get('start')}  {r['title']}  ({r['reason']})")
 
     # A non-authoritative result cannot be graded. Never let it exit 0: that is
     # exactly the false clean of 17 Jul 2026 (registry blind mid-day). The day
@@ -565,11 +765,15 @@ def main():
     summary = (f"{date}: {result['covered']}/{result['total']} meetings minuted"
                f", {len(result['missing'])} missing, {len(result['suspect'])} suspect"
                f", {len(result.get('pending', []))} pending"
-               f", {len(result.get('out_of_scope', []))} non-work skipped")
+               f", {len(result.get('out_of_scope', []))} non-work skipped"
+               f", {len(result.get('uncounted', []))} uncounted (calendar, never recorded)")
     print(f"[mom-reconcile] {summary}")
 
     if gaps:
-        titles = ", ".join(f"{r['time_wib']} {r['matched_meeting']}" for r in gaps[:5])
+        # uncounted entries carry start/title, not time_wib/matched_meeting
+        # (they never had a Fathom row to take those fields from).
+        titles = ", ".join(f"{r.get('time_wib') or r.get('start')} "
+                            f"{r.get('matched_meeting') or r.get('title')}" for r in gaps[:5])
         if not args.no_heartbeat:
             heartbeat("fail", f"{summary}: {titles}")
         return 1
