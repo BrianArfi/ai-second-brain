@@ -408,6 +408,7 @@ Deeper references:
 - **`docs/MEETING_RECORDER.md`** for the built-in meeting recorder: records and transcribes on your own machine (macOS, Windows, Linux) and drafts the minutes. This is the default source of meeting notes; a cloud recorder is optional.
 - **`docs/DASHBOARD.md`** to run the local visual dashboard at `http://localhost:3737`.
 - **`docs/ARCHITECTURE.md`** for how the pieces fit together.
+- **`docs/OKF_ADAPTATION.md`** for why the memory system follows Google Cloud's Open Knowledge Format, and the verification principle it applies to `mom_reconcile.py`.
 - **`docs/UPDATING.md`** to pull the latest template updates into your fork (or just type `/update-harness`).
 - **`docs/INSTALL_ID.md`** untuk panduan instalasi langkah demi langkah dalam Bahasa Indonesia (workshop companion).
 
