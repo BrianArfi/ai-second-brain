@@ -56,6 +56,7 @@ Not a chat box. A system that carries your context, reaches your tools, and gets
 - 📚 **Learns and remembers.** Correct it once and it keeps the lesson across every future session. It does not start from zero each morning.
 - 🤖 **Runs a team, not a chat.** Big jobs fan out to a fleet of cheap fast workers in parallel, then one flagship model synthesizes. Faster and far cheaper.
 - 🔒 **Guardrails that hold.** Nothing is sent, posted, or deleted without your explicit approval. Credentials never leave your machine.
+- 🌳 **Everything has a home.** A work tree describes the shape of your work, and every tracked item names one node in it. "What is happening with this client?" becomes a lookup, not a search.
 - ⚡ **Fifteen minutes to first value.** A conversational brain with no API keys or OAuth, then connect real tools when you are ready.
 
 ---
@@ -418,7 +419,8 @@ Deeper references:
 
 ```
 .agent/skills/      Connectors and skills (Drive, Docs, Slack, Calendar, meetings, Jira, and more)
-.agent/scripts/     Shared helpers, including the machine detection used at session start
+.agent/scripts/     Shared helpers, including work_tree.py and the machine detection used at session start
+journal/state/      The work tree: the single taxonomy every tracked item points at
 .agent/workflows/   Reusable multi-step workflow definitions
 .claude/commands/   Saved workflows you can invoke by name or in plain language
 .claude/agents/     Subagent definitions (harvester, reviewer)

@@ -1,0 +1,39 @@
+{
+ "_note": "The shape of your work, and the single taxonomy every tracked item points at. Every record in a ledger, every todo line, and every tracker item names exactly one node id from this file. Structure is yours: Domain > Client or Product > Initiative > Item > Thread is one shape that works, but depth is not fixed. Node ids are PERMANENT: renaming one orphans everything filed under it, so change `label` instead and leave `id` alone. Retire a node with \"status\": \"archived\" rather than deleting it. Maintain with .agent/scripts/work_tree.py; `refs` and `sources` are filled by whatever links your tickets and documents in.",
+ "schema_version": 1,
+ "period": "REPLACE ME - the reporting window this snapshot describes",
+ "roots": [
+  {
+   "id": "root-work",
+   "label": "Work",
+   "kind": "domain",
+   "status": "active",
+   "summary": "Replace with your own top-level areas. Two or three is plenty to start.",
+   "children": [
+    {
+     "id": "example-client",
+     "label": "Example Client",
+     "kind": "client",
+     "status": "active",
+     "summary": "One node per client, product or programme you actually track.",
+     "children": [
+      {
+       "id": "example-initiative",
+       "label": "Example Initiative",
+       "kind": "initiative",
+       "status": "active",
+       "summary": "The level most tickets file against: a thing with a start, an end, and someone waiting on it."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "root-personal",
+   "label": "Personal",
+   "kind": "domain",
+   "status": "active",
+   "summary": "Work that is yours rather than a client's. Delete this root if you do not want it here."
+  }
+ ]
+}

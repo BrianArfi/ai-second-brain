@@ -6,6 +6,30 @@ Entries are written in the private working repo and carried to the public templa
 (`ai-second-brain`) by the sync pipeline, which strips credentials, tokens, real client
 names, and personal data. This file is copied verbatim, so it reads the same in both.
 
+## 2026-08-14
+
+### Added
+- **The work tree, and the rule that everything files into it.**
+  `journal/state/work_tree.json` is an outline of the work, and every tracked
+  item names exactly one node in it. That is what turns "what is happening with
+  this client" into a lookup rather than a search: the items under a node were
+  filed there on purpose, not because they happen to share a word with it.
+
+  It ships as a starter outline rather than an empty file, because a new user
+  needs to see the shape before deciding whether it is theirs.
+  `.agent/scripts/work_tree.py` owns the invariants that make node ids safe to
+  depend on: unique across the tree, permanent (renaming one orphans everything
+  filed under it), retired by an `archived` status rather than deletion, and
+  written under a lock. It degrades to whatever the workspace actually has, so
+  `coverage` reports zero records rather than failing in a workspace with no
+  ledgers yet.
+
+  The rule in `CLAUDE.md.template` carries one clause that matters more than
+  the rest: when the right node is not obvious, ask rather than guess, batched
+  into a single question at the end of the turn. An item filed under a
+  plausible-but-wrong node reports as tracked and never surfaces again, which
+  is worse than one that was never filed at all.
+
 ## 2026-08-04
 
 ### Added

@@ -42,9 +42,33 @@ Clients/
 
 journal/
 ├── todo.md                Master task list (P0/P1 priorities)
-└── master_followup_tracker.md  GENERATED view over the PM ledgers (commitments/waiting_on/decisions);
-                                 never hand-edited, rendered by project-tracking-update/scripts/render_followup_tracker.py
+├── master_followup_tracker.md  GENERATED view over the PM ledgers (commitments/waiting_on/decisions);
+│                                never hand-edited, rendered by project-tracking-update/scripts/render_followup_tracker.py
+└── state/
+    └── work_tree.json     The shape of your work: the single taxonomy
 ```
+
+**The work tree is the spine.** `journal/state/work_tree.json` is an outline of
+what you are working on, and every tracked item names exactly one node in it.
+That is what makes "what is happening with X" a lookup rather than a search: the
+items under a node were filed there on purpose, not because they happen to share
+a word with it.
+
+Node ids are permanent identifiers, not labels in a report. Renaming one orphans
+everything filed under it, so retire a node with `status: archived` instead.
+`.agent/scripts/work_tree.py` owns those invariants and is what every other
+script should call rather than parsing the JSON itself:
+
+```bash
+python3 .agent/scripts/work_tree.py find "<text>"   # which node is this?
+python3 .agent/scripts/work_tree.py coverage        # what is filed, what is not
+python3 .agent/scripts/work_tree.py validate        # id and mapping drift
+```
+
+The rule that makes it hold, spelled out in `CLAUDE.md`: when the right node is
+not obvious, ask rather than guess. An item filed under a plausible-but-wrong
+node reports as tracked and never surfaces again, which is worse than one that
+was never filed at all.
 
 ### Layer 2 — Automation Engine
 
