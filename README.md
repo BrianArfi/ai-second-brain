@@ -451,6 +451,11 @@ credentials), makes sure every script parses, and reports skills that are missin
 
 Found a security problem? Do not open an issue. Follow [`SECURITY.md`](SECURITY.md).
 
+## Versioning
+
+Releases are tagged `vX.Y.Z`. What counts as breaking, and what a release means
+for a fork, is in [`docs/VERSIONING.md`](docs/VERSIONING.md).
+
 ## License
 
 [Apache-2.0](LICENSE). Use it, fork it, sell what you build with it.

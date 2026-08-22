@@ -6,6 +6,38 @@ Entries are written in the private working repo and carried to the public templa
 (`ai-second-brain`) by the sync pipeline, which strips credentials, tokens, real client
 names, and personal data. This file is copied verbatim, so it reads the same in both.
 
+Dated headings below are the history. From v0.1.0 on, releases also carry a
+version, and the rule is in [`docs/VERSIONING.md`](docs/VERSIONING.md).
+
+## v0.1.0 - 2026-08-23
+
+First tagged release. The template has been usable for months; what changed is
+that it is now legally usable, and that a machine checks it before it ships.
+
+### Added
+- **Apache-2.0.** The repository was public with no LICENSE, which under
+  copyright means all rights reserved. Nobody could legally fork it. The name
+  and the artwork stay out of the grant, so a fork picks its own name. See
+  [`NOTICE`](NOTICE).
+- `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, and issue and pull
+  request templates.
+- `tools/repo_check.py`: one gate for personal data, script syntax, and skill
+  frontmatter, with a self-test for its own rules. Findings that already exist
+  are recorded in `tools/repo_check_baseline.txt`, so CI fails on new leaks only
+  and the baseline can only shrink.
+- CI (`.github/workflows/checks.yml`) that runs the gate and proves `install.sh`
+  still produces a working workspace on Linux and macOS.
+
+### Fixed
+- `docs/UPDATING.md` and `/update-harness` both said `CLAUDE.md`, `journal/` and
+  `Dashboard.md` were gitignored and could never conflict. None of them was.
+  `CLAUDE.md` is now ignored, and the four tracked seed files are documented
+  with the resolution to use. A fork used to hit a conflict on its first update
+  while being told that was impossible.
+- `/update-harness` finished conflict resolution with `git add -A`, which sweeps
+  up whatever untracked personal files happen to be in the tree. It now stages
+  only the files it resolved.
+
 ## 2026-08-14
 
 ### Added

@@ -76,7 +76,7 @@ Rules that get a skill rejected if broken:
 1. **No credential in the repository.** Read from `token.env` or the
    environment. Never a default value that is a real key.
 2. **No personal data.** No real client names, no Google Doc IDs, no email
-   addresses, no `/Users/...` or `/home/...` paths, no ticket keys. There is an
+   addresses, no absolute home directories, no ticket keys. There is an
    automated scrub check and it fails the build.
 3. **Anything that sends, publishes, or deletes is approval-gated.** The
    convention in this repository is an explicit `--approved` flag with no
