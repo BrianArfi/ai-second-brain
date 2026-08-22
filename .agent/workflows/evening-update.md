@@ -66,6 +66,16 @@ the owner acts off email too, so sweep it every evening (the runner does NOT pul
    - Never mark done on guesswork; if unverifiable, leave open and note "unverified as of [date]".
    - Refresh `journal/state/portfolio.json` `updated_wib` + any initiative whose health/workstream status changed today, then regenerate the mirror via `python3 .agent/scripts/portfolio_render.py`.
    - Target end-state: zero tickets showing "stale ≥3d" on the dashboard Today tab without an explanatory comment.
+5c. **Work tree refresh (mandatory, narrow — the dashboard Work tab has no other writer):**
+   - `journal/state/work_tree.json` is read by `/api/work-tree` and `dashboard/public/tab-work.js` and written by NOTHING else. Before this step existed it sat frozen at 30 Jul 2026 for five days while SAIB shipped a BRD revision, so the tab showed a client card whose `next` pointed at a session that never happened and whose `blocker` was `null` while the work was in fact blocked. A stale tree is worse than an empty one: it reads as live.
+   - **Only touch threads that actually moved today.** Derive the moved set mechanically, do not scan all 51 threads: `files_modified` + `files_created` + `jira` + `slack` + `portfolio` from `_temp/harvest_evening_[date].json`, today's new MOMs, and the ledger deltas from step 5a. Typical night is under 12 threads. A thread with no evidence of movement is left byte-identical.
+   - For each moved thread rewrite only `progress`, `blocker`, `next`, and `status`, and add `"updated_wib": "<ISO+07:00>"`. Append any new primary artifact to `sources` (doc, Figma, published page, Slack permalink). Never invent a node: a genuinely new workstream gets added under its existing parent with the same field set.
+   - Then set the top-level `"refreshed_wib"` to now. Leave `period` and `generated_wib` alone: those belong to the weekly regeneration in `/weekly-report`, and overwriting them would claim a full-tree refresh this step does not do.
+   - **The judgment is the whole point, so do not delegate this to a subagent or to agy.** You have already formed it while writing the `(Malam)` section, and this step is a write pass, not a fresh analysis. Costed 4 Aug 2026 against `journal/state/token_usage.json`: as a byproduct here it is roughly $1.50 to $3 a night on top of a run that already costs about $11, because the harvest is already paid for. The same job as a standalone offloaded cron costs about $0.40 and produces `blocker: "waiting on estimate from Teammate"`, which is worthless. The value lives in the sentence a scrape cannot write, for example "80 hours is identical across all four options, so the client has nothing to choose between."
+   - `blocker` must name the specific obstruction and who owns it, or be `null`. Banned as filler: "waiting on feedback", "pending review", "in progress". If nothing blocks it, `null` is the honest answer.
+   - Validate before moving on: `python3 -c "import json; json.load(open('journal/state/work_tree.json'))"`. A malformed tree makes the whole tab go blank, not just one card.
+   - Say in one line of the recap how many threads were refreshed out of the total, so a night where the moved set comes back empty is visible rather than silent.
+
 6. Sync Fathom meeting notes and Work Document Index.
 7. Run GitHub sync to push all changes.
 8. Present to the owner:

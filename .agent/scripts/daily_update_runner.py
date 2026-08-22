@@ -674,8 +674,11 @@ def _main_logic(mode, dry_run=False):
             write_output(sections)
     """
 
-    # ── Step 6: Todo.md scan (Morning mode - load current priorities) ──
-    if is_morning:
+    # ── Step 6: Todo.md scan (both modes - load current priorities) ──
+    # Runs in evening too. The evening rubric check compares the briefing's
+    # stated P0 count against sections.todo_p0, so gating this on morning made
+    # verify_briefing_numbers.py report MISMATCH unconditionally every night.
+    if True:
         print("[6] Loading current todo.md priorities...", flush=True)
         todo_path = os.path.join(BASE_DIR, 'journal', 'todo.md')
         try:
@@ -685,12 +688,14 @@ def _main_logic(mode, dry_run=False):
             else:
                 with open(todo_path, 'r', encoding='utf-8') as f:
                     todo_content = f.read()
-                # Extract open P0 items
+                # Match the structured marker, not a bare "P0" substring, so
+                # prose that merely mentions P0 cannot inflate the count.
+                # No cap: the length of this list IS the number the rubric
+                # verifies against, so truncating it makes the check lie.
                 open_p0 = []
                 for line in todo_content.split('\n'):
-                    if '[ ]' in line and ('P0' in line or 'P0' in line):
+                    if line.lstrip().startswith('- [ ]') and '<!-- P0 -->' in line:
                         open_p0.append(line.strip())
-                open_p0 = open_p0[:15]
             harvest.set_todo_p0(open_p0)
             sections.append(f"## Current Open P0 Items (from todo.md)\n")
             for item in open_p0:
@@ -765,8 +770,8 @@ def _main_logic(mode, dry_run=False):
 
         # LinkedIn Content Prompt
         sections.append(f"## LinkedIn Content Check\n")
-        sections.append(f"> **Reminder**: Target 1 post/day di LinkedIn.\n")
-        sections.append(f"> Sudah posting hari ini? Jika belum, pertimbangkan angle dari aktivitas hari ini.\n")
+        sections.append(f"> **Reminder**: target 1 post per day on LinkedIn.\n")
+        sections.append(f"> Posted today? If not, look for an angle in today's activity.\n")
         sections.append(f"> Content Pillars: AI (priority), Career, Startup, Family.\n")
         write_output(sections, output_file)
 
@@ -807,6 +812,25 @@ def _main_logic(mode, dry_run=False):
                                    'scripts', 'render_followup_tracker.py')
     out = _step("Followup Tracker Render", [sys.executable, tracker_script], timeout=60)
     sections.append(f"## Followup Tracker Render\n```\n{out}\n```\n")
+    write_output(sections, output_file)
+
+    # ── Ledger self-checks ───────────────────────────────────────────
+    # Both of these answer a question the harvest above cannot: is what the
+    # ledger says still true. On 22 Aug the briefing led on three decisions that
+    # had already been made, because every source it read agreed with the stale
+    # record. Deterministic, offline, and both exit 1 when they find something.
+    print("[10.7] Checking decision consistency...", flush=True)
+    consistency_script = os.path.join(BASE_DIR, '.agent', 'scripts', 'decision_consistency.py')
+    out = _step("Decision Consistency", [sys.executable, consistency_script, 'check'],
+                timeout=120)
+    sections.append(f"## Decision Consistency\n```\n{out}\n```\n")
+
+    print("[10.8] Checking unresolved meeting speakers...", flush=True)
+    speaker_script = os.path.join(BASE_DIR, 'meeting-recorder', 'speaker_map.py')
+    if os.path.exists(speaker_script):
+        out = _step("Unresolved Speakers", [sys.executable, speaker_script, 'pending'],
+                    timeout=120)
+        sections.append(f"## Unresolved Speakers\n```\n{out}\n```\n")
     write_output(sections, output_file)
 
     # ── Write morning plan file (Morning only) ───────────────────────

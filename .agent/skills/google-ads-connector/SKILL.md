@@ -1,3 +1,8 @@
+---
+name: google-ads-connector
+description: Reads Google Ads metrics for Search, Display, and YouTube. Not built yet: it is blocked on a developer token that needs approval. Read the credential checklist before starting.
+---
+
 # google-ads-connector (You): credential checklist + spec
 
 Read Google Ads (Search/Display/YouTube) metrics for You. **Build priority #3** (most setup

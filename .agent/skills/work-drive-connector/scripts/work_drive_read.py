@@ -15,7 +15,17 @@ from googleapiclient.http import MediaIoBaseDownload
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, '..'))
-TOKEN_FILE = os.path.join(SKILL_DIR, 'token_drive_work.json')
+# The Work token this skill actually holds is `token.json`: it is the same file
+# `gdocs_create.py --account work` authenticates with (its ACCOUNTS map points at
+# this skill directory), so both writers and this reader stay on one credential and
+# one refresh. `token_drive_work.json` is the older name `work_drive_auth.py`
+# writes, kept as a fallback so an existing auth run is not orphaned.
+TOKEN_FILE = next(
+    (p for p in (os.path.join(SKILL_DIR, 'token.json'),
+                 os.path.join(SKILL_DIR, 'token_drive_work.json'))
+     if os.path.exists(p)),
+    os.path.join(SKILL_DIR, 'token_drive_work.json'),
+)
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 
 EXPORT = {

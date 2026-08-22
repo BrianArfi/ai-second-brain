@@ -5,8 +5,8 @@ description: Reconstruct the owner's working hours per day from digital traces (
 
 # work-hours
 
-Answers: kapan gw mulai kerja, ngerjain apa aja paralel barengan, total jam berapa,
-dan berapa leverage-nya (output paralel ÷ jam aktual).
+Answers: when the owner started work, what ran in parallel, how many hours in total,
+and what the leverage was (parallel output / actual hours).
 
 ## Capabilities
 
@@ -90,6 +90,8 @@ the data current — no cron required.
 
 Optional cron (background freshness with the dashboard closed; needs the owner to
 install it, a session permission gate blocks agents from editing crontab):
+
+Cron runs on the WSL automation host only. Do not install on macOS.
 
 ```
 */20 * * * * flock -n /tmp/work_hours.lock /bin/bash -c 'cd . && python3 .agent/skills/work-hours/scripts/work_hours.py sweep --backfill 2 --quiet && python3 .agent/scripts/heartbeat.py --job work-hours --status ok' >> ./.agent/skills/work-hours/work_hours_cron.log 2>&1

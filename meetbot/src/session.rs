@@ -242,6 +242,23 @@ async fn drive(
     set_phase(phase, SessionPhase::Joining).await;
     log_status(&db, meeting_id, MeetingStatus::Joining, None);
 
+    // Create the capture sink BEFORE the browser starts: Chrome reads
+    // PULSE_SINK once at launch, so a sink that appears later is a sink Chrome
+    // never plays into.
+    if cfg.capture_transport == CaptureTransport::Pulse {
+        if let Some(sink) = cfg.pulse_sink.as_deref() {
+            match crate::pulse::ensure_null_sink(sink) {
+                Ok(true) => tracing::info!(sink, "created the meetbot capture sink"),
+                Ok(false) => tracing::debug!(sink, "capture sink already present"),
+                Err(e) => {
+                    return Outcome::failed(format!(
+                        "could not prepare the PulseAudio capture sink: {e:#}"
+                    ));
+                }
+            }
+        }
+    }
+
     let opts = BrowserOptions {
         chromium_path: cfg.chromium_path.clone(),
         headless: cfg.headless,
@@ -249,6 +266,7 @@ async fn drive(
         user_data_dir: None,
         profile_template: cfg.profile_template.clone(),
         window_size: (1280, 720),
+        pulse_sink: cfg.pulse_sink.clone(),
     };
 
     let meet = match MeetSession::launch(&opts).await {
@@ -390,6 +408,15 @@ async fn drive(
     // only injects the tap. `_ingest` must outlive the call: dropping it closes
     // the frames channel, which is precisely the end-of-capture signal.
     let mut _ingest: Option<crate::audio::IngestServer> = None;
+    // The PulseAudio transport captures OUTSIDE the browser: Chrome plays the
+    // meeting into a sink and a recorder thread reads that sink's monitor. It
+    // must outlive the call for the same reason `_ingest` must -- dropping it
+    // stops the capture -- and it publishes the peak counter `watch_call` uses
+    // to decide the bot is deaf, since there is no tap in the page to read.
+    let mut _pulse: Option<crate::pulse::PulseRecorder> = None;
+    let mut pulse_stats: Option<Arc<crate::pulse::PulseStats>> = None;
+    let mut pulse_speaker: Option<Arc<std::sync::Mutex<Option<String>>>> = None;
+    let mut pulse_source: Option<String> = None;
     let capture_error = match cfg.capture_transport {
         CaptureTransport::Cdp => match meet.start_capture(frame_tx).await {
             Ok(()) => None,
@@ -411,6 +438,31 @@ async fn drive(
                 Err(e) => Some(format!("audio ingest server failed to bind: {e:#}")),
             }
         }
+        CaptureTransport::Pulse => match cfg.pulse_source.as_deref() {
+            // No default source on purpose: Pulse's default is a microphone, so
+            // a missing config would record the room instead of the meeting and
+            // look like it was working.
+            None => Some(
+                "capture_transport is \"pulse\" but pulse_source is not set. It must name \
+                 the monitor of the sink Chrome plays into, e.g. \"RDPSink.monitor\"; run \
+                 `python3 tools/pulse_probe.py` to list this host's sources."
+                    .to_string(),
+            ),
+            Some(source) => {
+                let speaker = Arc::new(std::sync::Mutex::new(None));
+                match crate::pulse::PulseRecorder::start(source, frame_tx, Arc::clone(&speaker)) {
+                    Ok(rec) => {
+                        tracing::info!(source, "recording the PulseAudio monitor");
+                        pulse_stats = Some(Arc::clone(&rec.stats));
+                        pulse_speaker = Some(speaker);
+                        pulse_source = Some(source.to_string());
+                        _pulse = Some(rec);
+                        None
+                    }
+                    Err(e) => Some(format!("pulse capture failed: {e:#}")),
+                }
+            }
+        },
     };
 
     let exit = match capture_error {
@@ -427,6 +479,9 @@ async fn drive(
                     Duration::from_secs(cfg.lonely_grace_sec),
                     Duration::from_secs(cfg.empty_room_grace_sec),
                     stop_once_rx,
+                    pulse_stats.clone(),
+                    pulse_speaker.clone(),
+                    pulse_source.clone(),
                 )
                 .await;
             bridge.abort();
@@ -1031,6 +1086,7 @@ mod tests {
             // would drag the operator's live Google session into a test.
             profile_template: None,
             window_size: (1280, 720),
+            pulse_sink: None,
         };
 
         let meet = tokio::time::timeout(Duration::from_secs(60), MeetSession::launch(&opts))
@@ -1185,7 +1241,7 @@ mod tests {
             &[crate::db::NewSegment {
                 start_time: 0.0,
                 end_time: 1.0,
-                speaker: Some("Fred".into()),
+                speaker: Some("YourManager".into()),
                 text: "this was already transcribed".into(),
                 language: Some("en".into()),
             }],

@@ -20,7 +20,12 @@ are waiting on the owner for), this is the mirror: things the owner is waiting o
   after `since`.
 - `report [--all]`: briefing-ready markdown. Breached items first (🚨 ESCALATE lines),
   then open items with an SLA countdown. `--all` also includes answered/dropped.
-- `close <id>` / `drop <id>`: manual close (owner delivered / no longer needed).
+- `close <id> [--note "..."]` / `drop <id> [--note "..."]`: manual close (owner delivered /
+  no longer needed). **Always pass `--note`.** It stores the reason on the record as
+  `close_note`. Without it the record keeps only a status and a timestamp, so a later
+  session cannot tell whether the thing was delivered, reassigned, or abandoned, and the
+  only way back is to re-derive it from Slack. `--note` is optional so the cron sweeps that
+  call `close` unattended keep working.
 - `touch <id>`: record a nudge — resets `since` to now (SLA clock restarts) and stamps
   `last_nudge_at`.
 
@@ -46,7 +51,9 @@ python3 .agent/skills/waiting-watchdog/scripts/waiting_watchdog.py report
 python3 .agent/skills/waiting-watchdog/scripts/waiting_watchdog.py report --all
 
 # owner delivered -> close; no longer needed -> drop; sent a nudge -> touch
-python3 .agent/skills/waiting-watchdog/scripts/waiting_watchdog.py close WAIT-0001
+# always say why, with the evidence
+python3 .agent/skills/waiting-watchdog/scripts/waiting_watchdog.py close WAIT-0001 \
+  --note "Delivered 30 Jul 12:41 UTC: Teammate posted the filtered sheet to Teammate (slack ts 1785415269.452499)"
 python3 .agent/skills/waiting-watchdog/scripts/waiting_watchdog.py drop  WAIT-0002
 python3 .agent/skills/waiting-watchdog/scripts/waiting_watchdog.py touch WAIT-0001
 ```
@@ -56,7 +63,9 @@ python3 .agent/skills/waiting-watchdog/scripts/waiting_watchdog.py touch WAIT-00
 - State: `journal/state/waiting_on.json`. Item schema (`WAIT-NNNN`):
   `{id, owner, owner_slug, what, since, sla_hours, escalate_to, escalation_path,
   source{type, permalink}, status: open|breached|answered|dropped, breached_at,
-  last_nudge_at, first_seen, closed_at, notes, needs_escalation}`.
+  last_nudge_at, first_seen, closed_at, close_note, notes, needs_escalation}`.
+  `close_note` is written by `close --note` / `drop --note` and is the only place the
+  reason for a close survives. Records closed before 11 Aug 2026 do not have one.
 - `needs_escalation` (bool): set by `sweep` on every run for `status=breached` items
   where `last_nudge_at` is `None` or older than `breached_at` -- i.e. breached with no
   nudge sent since the breach. Cleared (`false`) by `touch`/`close`/`drop`/`reopen`, or

@@ -203,6 +203,31 @@ def _consume_send_token(tok, item_id):
 WIB = timezone(timedelta(hours=7))  # template note: set your timezone offset here
 VEXA_AUTO_LOG = '/tmp/vexa_auto.log'
 
+def _load_node_paths():
+    """node id -> readable path, for showing a record's home on its card.
+
+    Read once at import: the tree changes when someone edits it, which on this
+    server means a restart anyway, and a per-request walk of 127 nodes on a
+    lookup endpoint is not worth the freshness.
+    """
+    out = {}
+    try:
+        tree = json.loads(WORK_TREE_PATH.read_text(encoding='utf-8'))
+    except Exception:
+        return out
+
+    def rec(node, path):
+        here = path + [node.get('label', node['id'])]
+        out[node['id']] = ' > '.join(here)
+        for child in node.get('children') or []:
+            rec(child, here)
+
+    for root in tree.get('roots') or []:
+        rec(root, [])
+    return out
+
+_NODE_PATHS = _load_node_paths()
+
 # Job -> log file + heartbeat-job-name map for GET /api/job-log. Hardcoded from the
 # authoritative CRON_REGISTRY in .agent/skills/harness-health/scripts/harness_health.py
 # (heartbeat_job mirrors 'job' for every entry except mention-ledger, which has no
@@ -1312,9 +1337,9 @@ PROJECT_PATH_MAP = {
     'ecommerce':          'Work/Ecommerce',
     'pim':                'Work/PIM',
     'work id':           'Work/Work ID',
-    'safaraya':           'Secondary/Safaraya',
-    'gogogo':             'Secondary/Gogogo',
-    'gogogo ecosystem':   'Secondary/Gogogo',
+    'ExampleProduct':           'Secondary/ExampleProduct',
+    'ExampleProduct':             'Secondary/ExampleProduct',
+    'ExampleProduct ecosystem':   'Secondary/ExampleProduct',
     'operations platform':'Secondary/Operations Platform',
 }
 
@@ -1684,7 +1709,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             if isinstance(jira_key, str):
                 jira_key = jira_key.strip()
                 if jira_key and not re.match(r'^[A-Z]+-\d+$', jira_key):
-                    self._send_json(400, json.dumps({'error': f'invalid jira_key {jira_key!r}, expected format like MP-123'}))
+                    self._send_json(400, json.dumps({'error': f'invalid jira_key {jira_key!r}, expected format like ABC-123'}))
                     return
             parent_id = body.get('parent_id')
             if isinstance(parent_id, str):
@@ -3951,7 +3976,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                         created_wib, created_ago = _fmt_ts(it.get('first_seen'))
                     followup_wib, followup_ago = _fmt_ts(it.get(followup_field))
                     breached_wib, breached_ago = _fmt_ts(it.get('breached_at'))
+                    closed_wib, closed_ago = _fmt_ts(it.get('closed_at') or it.get('decided_at'))
                     nudges = it.get('nudge_count')
+                    src_type = src.get('type') if isinstance(src, dict) else ''
+                    sla = it.get('sla_hours')
                     results.append({
                         'id': iid, 'kind': kind, 'prefix': prefix,
                         'title': title, 'status': it.get('status') or '',
@@ -3966,8 +3994,27 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                         'created_wib': created_wib, 'created_ago': created_ago,
                         'followup_wib': followup_wib, 'followup_ago': followup_ago,
                         'breached_wib': breached_wib, 'breached_ago': breached_ago,
+                        'closed_wib': closed_wib, 'closed_ago': closed_ago,
                         'nudge_count': nudges if isinstance(nudges, int) else None,
                         'notes': _notes(it.get('notes')),
+                        # ── definition fields: what this record actually means.
+                        # A deep-linked card has to answer "what is this ticket
+                        # and how is it defined" without opening the JSON.
+                        'sla_hours': sla if isinstance(sla, (int, float)) else None,
+                        'escalate_to': it.get('escalate_to') or it.get('escalation_path') or '',
+                        'initiative_id': it.get('initiative_id') or '',
+                        # Where this record lives in the work tree. Every record
+                        # carries one (CLAUDE.md, "Every Ticket Belongs To A
+                        # Work-Tree Node"); 'unfiled' means it still needs a home.
+                        'node': it.get('node') or 'unfiled',
+                        'node_path': _NODE_PATHS.get(it.get('node') or '', ''),
+                        'portfolio': it.get('portfolio') or '',
+                        'confidence': it.get('confidence') or '',
+                        'source_type': src_type or '',
+                        'superseded_by': it.get('superseded_by') or '',
+                        'decision': str(it.get('decision') or '') if kind == 'decisions' else '',
+                        'closed_by': it.get('closed_by') or '',
+                        'deep_link': f'/#find/{iid}',
                     })
 
             # rank: exact-id match first, then id-prefix hits, then text hits;
@@ -3979,9 +4026,17 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             results.sort(key=lambda r: (_rank(r), r['id']))
             results = results[:40]
 
-            # Jira deep-link for a bare ticket key (Work board)
+            # Jira deep-link for a bare ticket key (Work board). COM-/WAIT-/DEC-
+            # are LOCAL ledger prefixes, never Jira keys: offering
+            # /browse/WAIT-0223 sends the owner to a 404 and, worse, reads as "this
+            # item lives in Jira" when the record is sitting in this repo. A
+            # local prefix that found nothing means the ledger is stale or the ID
+            # is wrong, which is what the empty state should say.
             jira = None
             m = re.match(r'^([A-Za-z]{2,5})-(\d+)$', q)
+            local_prefixes = {'com', 'wait', 'dec'}
+            if m and m.group(1).lower() in local_prefixes:
+                m = None
             if m and not any(r['id'].lower() == ql for r in results):
                 key = f'{m.group(1).upper()}-{m.group(2)}'
                 jira = {'key': key,

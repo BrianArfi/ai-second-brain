@@ -37,7 +37,7 @@ First, determine **Client**, **Project**, and **Intent**.
 
 **Client Detection Patterns:**
 - "Work", "B2C", "Seller", "PIM", "OMS", "Ecom", "Example Program", "Gaith", "ExampleVendor", "Teammate", "Teammate" -> Client: `Work`
-- "Secondary", "Safaraya", "Gogogo", "FINA", "Agentic AI", "Manfred", "Maharama" -> Client: `Secondary`
+- "Secondary", "ExampleProduct", "ExampleProduct", "ExampleProject", "Agentic AI", "ExampleProduct", "ExampleProduct" -> Client: `Secondary`
 - "You", "LinkedIn", "AI Circle", "content", "podcast" -> Context: `Personal/Content`
 
 **Intent Detection Patterns:**

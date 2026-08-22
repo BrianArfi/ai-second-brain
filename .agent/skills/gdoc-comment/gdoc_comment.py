@@ -50,6 +50,12 @@ def chromium_executable():
     env = os.environ.get("GDOC_CHROMIUM")
     if env and Path(env).exists():
         return env
+    if sys.platform == "darwin":
+        # The corrupt-snapshot workaround below is Linux-only: it globs
+        # ~/.cache/ms-playwright/*/chrome-linux64/chrome, which never exists on
+        # macOS (browsers live in ~/Library/Caches/ms-playwright/*/chrome-mac*).
+        # Probing with --no-sandbox is also wrong here. Let Playwright resolve it.
+        return None
     import glob, subprocess
     cands = sorted(glob.glob(os.path.expanduser(
         "~/.cache/ms-playwright/chromium-*/chrome-linux64/chrome")),
@@ -85,11 +91,16 @@ def cmd_login(args):
             url = page.url
             # docs.google.com/document home (not the accounts/signin flow) => logged in
             if "accounts.google.com" not in url and "docs.google.com" in url:
-                # confirm an authed signal: the "Blank document" / docs UI shows the avatar
+                # Confirm via the session cookie, not the DOM. The old check looked
+                # for SignOutOptions / "Start a new document" / [aria-label*=Account],
+                # none of which match the current Docs home: on 9 Aug 2026 a genuinely
+                # successful sign-in was reported as "could not confirm" and burned the
+                # full 5-minute timeout, even though the saved profile then opened a
+                # doc authenticated on the first try.
                 try:
-                    if page.locator("a[href*='SignOutOptions'], img[alt*='Google Account']").count() > 0 \
-                       or page.locator("text=Start a new document").count() > 0 \
-                       or page.locator("[aria-label*='Account']").count() > 0:
+                    if any(c["name"] in ("SID", "__Secure-3PSID")
+                           and c["domain"].endswith("google.com")
+                           for c in ctx.cookies()):
                         ok = True
                         break
                 except Exception:
@@ -118,14 +129,29 @@ def post_one(page, anchor, text):
     page.wait_for_timeout(500)
     # open comment on the current selection
     page.keyboard.press(f"{mod}+Alt+m")
-    page.wait_for_timeout(1200)
-    # type into the focused comment box
+    page.wait_for_timeout(1800)
+    # Confirm the comment draft box actually opened and holds focus BEFORE typing.
+    # Without this the function always returned True, so a failed anchor (or a
+    # swallowed shortcut) was still reported as "posted" and the keystrokes went
+    # into the document canvas instead.
+    focused = page.evaluate("""() => {
+        const a = document.activeElement;
+        return !!a && (a.getAttribute('contenteditable') === 'true'
+                       || a.tagName === 'TEXTAREA');
+    }""")
+    if not focused:
+        return False
     page.keyboard.type(text, delay=8)
     page.wait_for_timeout(400)
     # submit
     page.keyboard.press(f"{mod}+Enter")
-    page.wait_for_timeout(1500)
-    return True
+    page.wait_for_timeout(2000)
+    # the draft box closes on a successful submit; if it is still focused, it did not post
+    still_open = page.evaluate("""() => {
+        const a = document.activeElement;
+        return !!a && a.getAttribute('aria-label') === 'Comment draft';
+    }""")
+    return not still_open
 
 def cmd_comment(args):
     items = (json.load(sys.stdin) if args.items == "-"
@@ -158,9 +184,12 @@ def cmd_comment(args):
             pass
         for it in items:
             try:
-                post_one(page, it["anchor"], it["text"])
-                posted += 1
-                print(f"[comment] posted on anchor: {it['anchor'][:50]!r}")
+                if post_one(page, it["anchor"], it["text"]):
+                    posted += 1
+                    print(f"[comment] posted on anchor: {it['anchor'][:50]!r}")
+                else:
+                    print(f"[comment] NOT posted (comment box never opened or never "
+                          f"closed): {it['anchor'][:50]!r}", file=sys.stderr)
             except Exception as e:
                 print(f"[comment] FAILED on {it['anchor'][:50]!r}: {e}", file=sys.stderr)
             page.wait_for_timeout(800)
@@ -189,6 +218,18 @@ def verify(doc_id, account, items):
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
     d = build("drive", "v3", credentials=creds)
+    # An Office file opened in the Docs editor keeps its comments INSIDE the file
+    # (word/comments.xml), not in Drive's comment store, so comments().list always
+    # returns [] and every item below would be reported "NOT ANCHORED" even when it
+    # posted fine. Seen on the Project Wolf .docx, 9 Aug 2026. Say so instead of lying.
+    mime = d.files().get(fileId=doc_id, fields="mimeType").execute().get("mimeType", "")
+    if mime != "application/vnd.google-apps.document":
+        print("\n=== verification SKIPPED ===")
+        print(f"  {doc_id} is {mime},")
+        print("  not a native Google Doc. Drive's comments API cannot see comments on")
+        print("  Office files. Verify by downloading the file and reading")
+        print("  word/comments.xml, or ask the owner to convert it to a Google Doc.")
+        return
     cs = d.comments().list(
         fileId=doc_id,
         fields="comments(id,anchor,resolved,quotedFileContent(value),content)"

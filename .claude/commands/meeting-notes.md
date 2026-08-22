@@ -14,9 +14,12 @@ Produce, in this order:
    result. Someone who missed it should be able to stop reading here.
 2. **Decisions** — only things genuinely settled. A topic that was discussed and
    left open is not a decision; it belongs in Open questions.
-3. **Action items** — one line each: what, who owns it, and by when. Use the
-   owner named in the notes. Never assign an item to me by default just because
-   the owner was not stated; write "owner unclear" and flag it.
+3. **Action items** — one line each: what, who owns it, by when, and its
+   work-tree node as `[node:<id>]`. Use the owner named in the notes. Never
+   assign an item to me by default just because the owner was not stated; write
+   "owner unclear" and flag it. A meeting usually maps to one node, so decide it
+   once for the meeting and let the items inherit it; ask if the meeting itself
+   does not obviously belong anywhere.
 4. **Open questions** — what was raised and not resolved, with who needs to
    answer.
 

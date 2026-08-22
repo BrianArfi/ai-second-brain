@@ -245,6 +245,23 @@ def cmd_list_tables(docs, args):
     if t_idx == 0:
         print("[INFO] No tables in this doc.")
 
+def _guard_version(args, tbl_el, new_cells):
+    """Refuse a revision row whose version is not above every version already there.
+
+    See .agent/scripts/doc_version_guard.py for why this exists.
+    """
+    if getattr(args, 'allow_version_regression', False) or not new_cells:
+        return
+    sys.path.insert(0, os.path.join(SKILL_DIR, '..', '..', 'scripts'))
+    from doc_version_guard import check_new_version
+    rows = [[_cell_text(c) for c in r['tableCells']]
+            for r in tbl_el['table']['tableRows']]
+    try:
+        check_new_version(new_cells[0], rows, where='this document')
+    except ValueError as e:
+        print(f"[BLOCKED] {e}")
+        sys.exit(1)
+
 def cmd_insert_row(docs, args):
     doc = get_doc(docs, args.id)
     tables = [el for kind, el in walk_body(doc) if kind == 'table']
@@ -254,6 +271,7 @@ def cmd_insert_row(docs, args):
     tbl_el = tables[args.table]
     tbl = tbl_el['table']
     n_rows, n_cols = tbl['rows'], tbl['columns']
+    _guard_version(args, tbl_el, args.cells.split('|') if args.cells else [])
     row_idx = args.row if args.row >= 0 else n_rows - 1  # -1 = insert below last row
 
     # Step 1: insert the empty row
@@ -292,11 +310,142 @@ def cmd_insert_row(docs, args):
     print(f"[OK] Row inserted into table #{args.table} at row {row_idx + 1} "
           f"with {len(cells)} cell(s). Doc: https://docs.google.com/document/d/{args.id}/edit")
 
+def _cell_text(cell):
+    return ''.join(
+        _para_text(c) for c in cell.get('content', []) if 'paragraph' in c
+    ).strip()
+
+def cmd_set_cell(docs, args):
+    """Replace the text of ONE table cell.
+
+    `replace` is global and cannot target a cell whose whole content is a common
+    string - a version cell reading "1.4" would also rewrite every "1.4" in the
+    changelog. This addresses the cell by coordinate instead.
+    """
+    doc = get_doc(docs, args.id)
+    tables = [el for kind, el in walk_body(doc) if kind == 'table']
+    if args.table >= len(tables) or args.table < 0:
+        print(f"[ERROR] Table #{args.table} not found (doc has {len(tables)}). Use list-tables.")
+        sys.exit(1)
+    tbl = tables[args.table]['table']
+    if args.row < 0 or args.row >= tbl['rows']:
+        print(f"[ERROR] Row {args.row} out of range (table #{args.table} has {tbl['rows']} rows).")
+        sys.exit(1)
+    if args.col < 0 or args.col >= tbl['columns']:
+        print(f"[ERROR] Column {args.col} out of range (table #{args.table} has {tbl['columns']} columns).")
+        sys.exit(1)
+
+    cell = tbl['tableRows'][args.row]['tableCells'][args.col]
+    current = _cell_text(cell)
+    if args.col == 0:
+        _guard_version(args, tables[args.table], [getattr(args, 'with') or ''])
+    if args.expect is not None and args.expect not in current:
+        print(f"[ERROR] Cell ({args.row},{args.col}) of table #{args.table} does not contain --expect text.")
+        print(f"        expected: {args.expect!r}")
+        print(f"        cell is:  {current[:300]!r}")
+        print("        Nothing changed.")
+        sys.exit(2)
+
+    text_start, text_end = cell['startIndex'] + 1, cell['endIndex'] - 1
+    requests = []
+    if text_end > text_start:
+        requests.append({'deleteContentRange': {
+            'range': {'startIndex': text_start, 'endIndex': text_end}
+        }})
+    value = getattr(args, 'with')
+    if value:
+        requests.append({'insertText': {'location': {'index': text_start}, 'text': value}})
+
+    result = batch(docs, args.id, requests)
+    assert_drive_result(result, 'gdoc_surgical set-cell')
+    print(f"[OK] Table #{args.table} cell ({args.row},{args.col}): {current[:60]!r} -> {value[:60]!r}. "
+          f"Doc: https://docs.google.com/document/d/{args.id}/edit")
+
+def cmd_insert_table(docs, args):
+    """Append a table at the end of the doc and fill it.
+
+    --rows is pipe-separated cells, one row per `--rows` flag repetition, so
+    column counts are taken from the first row.
+    """
+    rows = [r.split('|') for r in args.rows]
+    n_rows, n_cols = len(rows), max(len(r) for r in rows)
+
+    create = batch(docs, args.id, [{
+        'insertTable': {'endOfSegmentLocation': {}, 'rows': n_rows, 'columns': n_cols}
+    }])
+    assert_drive_result(create, 'gdoc_surgical insert-table')
+
+    # Re-fetch: every index below shifted. Fill bottom-right to top-left so an
+    # earlier insertion never moves a target that has not been written yet.
+    time.sleep(1)
+    doc = get_doc(docs, args.id)
+    tables = [el for kind, el in walk_body(doc) if kind == 'table']
+    new_tbl = tables[-1]['table']
+    requests = []
+    for r_i in range(n_rows - 1, -1, -1):
+        cells = rows[r_i]
+        for c_i in range(min(len(cells), n_cols) - 1, -1, -1):
+            value = cells[c_i].strip()
+            if not value:
+                continue
+            cell = new_tbl['tableRows'][r_i]['tableCells'][c_i]
+            requests.append({'insertText': {
+                'location': {'index': cell['startIndex'] + 1}, 'text': value,
+            }})
+    batch(docs, args.id, requests)
+    print(f"[OK] Table {n_rows}x{n_cols} appended as table #{len(tables) - 1}. "
+          f"Doc: https://docs.google.com/document/d/{args.id}/edit")
+
+def cmd_delete_row(docs, args):
+    doc = get_doc(docs, args.id)
+    tables = [el for kind, el in walk_body(doc) if kind == 'table']
+    if args.table >= len(tables) or args.table < 0:
+        print(f"[ERROR] Table #{args.table} not found (doc has {len(tables)}). Use list-tables.")
+        sys.exit(1)
+    tbl_el = tables[args.table]
+    tbl = tbl_el['table']
+    n_rows = tbl['rows']
+    if args.row < 0 or args.row >= n_rows:
+        print(f"[ERROR] Row {args.row} out of range (table #{args.table} has {n_rows} rows).")
+        sys.exit(1)
+
+    row = tbl['tableRows'][args.row]
+    row_text = ' | '.join(
+        ''.join(_para_text(c) for c in cell.get('content', []) if 'paragraph' in c).strip()
+        for cell in row.get('tableCells', [])
+    )
+
+    # Deleting a row is irreversible and row indexes shift under any concurrent
+    # edit, so the caller must name text they expect to find in the row. This is
+    # the same "read before writing" rule the other commands enforce by making
+    # replace exit 2 on zero matches.
+    if args.expect not in row_text:
+        print(f"[ERROR] Row {args.row} of table #{args.table} does not contain --expect text.")
+        print(f"        expected: {args.expect!r}")
+        print(f"        row is:   {row_text[:300]!r}")
+        print("        Nothing deleted. Re-run list-tables/read and check the row index.")
+        sys.exit(2)
+
+    print(f"[INFO] Deleting table #{args.table} row {args.row}: {row_text[:200]}")
+    result = batch(docs, args.id, [{
+        'deleteTableRow': {
+            'tableCellLocation': {
+                'tableStartLocation': {'index': tbl_el['startIndex']},
+                'rowIndex': args.row, 'columnIndex': 0,
+            }
+        }
+    }])
+    assert_drive_result(result, 'gdoc_surgical delete-row')
+    print(f"[OK] Row {args.row} deleted from table #{args.table} "
+          f"({n_rows} -> {n_rows - 1} rows). "
+          f"Doc: https://docs.google.com/document/d/{args.id}/edit")
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     p = argparse.ArgumentParser(description='Surgical in-place Google Doc edits')
-    p.add_argument('command', choices=['read', 'replace', 'linkify', 'append', 'insert-row', 'list-tables'])
+    p.add_argument('command', choices=['read', 'replace', 'linkify', 'append', 'insert-row', 'delete-row',
+                                       'set-cell', 'insert-table', 'list-tables'])
     p.add_argument('--id', required=True, help='Google Doc ID')
     p.add_argument('--account', default='work', choices=list(ACCOUNTS.keys()))
     p.add_argument('--find', help='replace/linkify: exact text to find')
@@ -304,9 +453,14 @@ def main():
     p.add_argument('--url', help='linkify: URL to hyperlink --find to')
     p.add_argument('--match-case', action='store_true', help='replace: case-sensitive')
     p.add_argument('--text', help='append: text to append (\\n for newlines, #/## headings, - bullets)')
-    p.add_argument('--table', type=int, default=0, help='insert-row: table index (see list-tables)')
-    p.add_argument('--row', type=int, default=-1, help='insert-row: insert below this 0-based row (-1 = last)')
+    p.add_argument('--table', type=int, default=0, help='insert-row/delete-row: table index (see list-tables)')
+    p.add_argument('--row', type=int, default=-1, help='insert-row: insert below this 0-based row (-1 = last). delete-row: the 0-based row to delete')
     p.add_argument('--cells', help='insert-row: pipe-separated cell values "A|B|C"')
+    p.add_argument('--expect', help='delete-row/set-cell: text that MUST appear in the target before it is changed (safety guard)')
+    p.add_argument('--allow-version-regression', action='store_true',
+                   help='insert-row/set-cell: permit a revision number at or below one already in the doc')
+    p.add_argument('--col', type=int, default=0, help='set-cell: 0-based column')
+    p.add_argument('--rows', action='append', help='insert-table: one pipe-separated row per flag, repeat for each row')
     args = p.parse_args()
 
     docs = docs_service(args.account)
@@ -330,6 +484,22 @@ def main():
         if not args.cells:
             p.error('insert-row requires --cells')
         cmd_insert_row(docs, args)
+    elif args.command == 'set-cell':
+        if getattr(args, 'with') is None:
+            p.error('set-cell requires --with (use "" to blank the cell)')
+        if args.row < 0:
+            p.error('set-cell requires an explicit --row (0-based)')
+        cmd_set_cell(docs, args)
+    elif args.command == 'insert-table':
+        if not args.rows:
+            p.error('insert-table requires at least one --rows "a|b|c"')
+        cmd_insert_table(docs, args)
+    elif args.command == 'delete-row':
+        if args.row < 0:
+            p.error('delete-row requires an explicit --row (0-based); there is no default')
+        if not args.expect:
+            p.error('delete-row requires --expect, text that must appear in the row being deleted')
+        cmd_delete_row(docs, args)
 
 if __name__ == '__main__':
     main()

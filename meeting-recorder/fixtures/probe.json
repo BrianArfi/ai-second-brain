@@ -1,0 +1,9 @@
+{
+  "_comment": "Ground truth for probe.ogg, used by transcribe.py --verify-providers. The sentence is deliberately absurd so no model can produce these words by guessing from a prompt: a provider that drops the audio and hallucinates cannot accidentally pass. Discovered 2026-08-21, when a local router advertised audioInput:true, silently discarded the audio, and returned invented meeting-shaped text for six of seven models.",
+  "file": "probe.ogg",
+  "duration_sec": 3,
+  "sentence": "The violet kangaroo audits seventeen bridges in Lisbon.",
+  "keywords": ["violet", "kangaroo", "seventeen", "bridges", "lisbon"],
+  "min_keywords": 3,
+  "_min_keywords_note": "3 of 5 tolerates ordinary transcription error (seventeen->17, Lisbon->lisbon) while still being impossible to hit by chance."
+}

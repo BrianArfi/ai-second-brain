@@ -26,6 +26,11 @@ try:
 except Exception:  # absent or unimportable -> the inline fallback below takes over
     harness_config = None
 
+# Named harness_secrets, NOT secrets: a module called secrets.py on sys.path
+# shadows the standard library's secrets, which ingest_server.py relies on for
+# token generation.
+import harness_secrets as _secrets
+
 # Cron runs with a minimal PATH that excludes ~/.local/bin, so a bare "ffmpeg"
 # in config resolves fine in an interactive shell and dies under cron with
 # FileNotFoundError. Search these before giving up.
@@ -114,15 +119,31 @@ def parse_json_tail(text):
             return json.loads(text[i:])
     raise ValueError("no JSON found in output")
 
+# Credential lookup is shared with the rest of the harness (.agent/scripts/harness_secrets.py)
+# so a key pasted once is visible to every skill. Two recorder-specific rungs:
+# meeting-recorder/.env first, because it sits next to the thing being configured,
+# and the gemini-image skill's token.env last, which is where this key used to be
+# borrowed from in the owner's workspace only.
+_RECORDER_ENV = [os.path.join(MODULE_DIR, ".env")]
+_LEGACY_ENV = [os.path.join(REPO_ROOT, ".agent", "skills", "gemini-image", "token.env")]
+
+def load_secret(name, default=None):
+    """Find a credential by env-var name, or return `default`.
+
+    Returns rather than exits: a missing key means "this provider is unavailable,
+    try the next one", not "kill the run". The old load_gemini_key called
+    sys.exit(), which is why a machine with no Gemini key could take down a whole
+    watcher pass instead of quietly falling through to another engine.
+    """
+    return _secrets.load_secret(name, default, extra_files=_LEGACY_ENV,
+                                extra_first=_RECORDER_ENV)
+
+def secret_search_path():
+    """Human-readable list of the places load_secret looks, for error messages
+    and for --doctor. A user who is told 'no key found' must also be told where
+    to put one."""
+    return _secrets.search_files(extra_first=_RECORDER_ENV)
+
 def load_gemini_key():
-    """Reuse the Gemini API key from the gemini-image skill (metered, the owner's)."""
-    key = os.environ.get("GEMINI_API_KEY")
-    if key:
-        return key
-    env_path = os.path.join(REPO_ROOT, ".agent", "skills", "gemini-image", "token.env")
-    if os.path.exists(env_path):
-        for line in open(env_path, encoding="utf-8"):
-            line = line.strip()
-            if line.startswith("GEMINI_API_KEY="):
-                return line.split("=", 1)[1].strip()
-    sys.exit("ERROR: no GEMINI_API_KEY (env or .agent/skills/gemini-image/token.env)")
+    """Back-compat wrapper. Prefer load_secret('GEMINI_API_KEY')."""
+    return load_secret("GEMINI_API_KEY")

@@ -12,11 +12,18 @@ import os
 import sys
 from pathlib import Path
 
-DEFAULT_PROJECT_DIR = "."
+def project_dir():
+    """CLAUDE_PROJECT_DIR when it is set and real, otherwise derived from this
+    file's own location (two levels up from .claude/hooks/). The hardcoded WSL
+    default other hooks use silently disables them on the macOS checkout, which
+    is exactly where the offload-mode flag would silently read as off."""
+    env = os.environ.get("CLAUDE_PROJECT_DIR")
+    if env and os.path.isdir(env):
+        return os.path.abspath(env)
+    return str(Path(__file__).resolve().parent.parent.parent)
 
 def main():
-    project_dir = os.environ.get("CLAUDE_PROJECT_DIR") or DEFAULT_PROJECT_DIR
-    flag_path = Path(project_dir) / ".agent" / "glm_mode.flag"
+    flag_path = Path(project_dir()) / ".agent" / "glm_mode.flag"
 
     state = "off"
     if flag_path.is_file():

@@ -8,7 +8,11 @@ import sys
 import argparse
 import base64
 import signal
+import mimetypes
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -94,6 +98,42 @@ def list_emails(query=None, max_results=10):
     except Exception as e:
         print(f"An error occurred: {e}")
 
+def _collect_bodies(part, plain=None, html=None):
+    """Walk a MIME tree of any depth, returning (text/plain parts, text/html parts).
+
+    Enterprise mail nests as multipart/mixed > multipart/related >
+    multipart/alternative > text/*, so a single pass over payload['parts']
+    finds nothing.
+    """
+    if plain is None: plain, html = [], []
+    mime = part.get('mimeType', '')
+    data = part.get('body', {}).get('data')
+    if data:
+        try:
+            decoded = base64.urlsafe_b64decode(data).decode('utf-8', 'replace')
+        except Exception:
+            decoded = ''
+        if mime == 'text/plain':
+            plain.append(decoded)
+        elif mime == 'text/html':
+            html.append(decoded)
+    for child in part.get('parts') or []:
+        _collect_bodies(child, plain, html)
+    return plain, html
+
+def _html_to_text(raw):
+    """Flatten an HTML mail body to readable text, keeping line structure."""
+    import re, html as htmllib
+    out = re.sub(r'(?is)<(script|style|head)[^>]*>.*?</\1>', '', raw)
+    out = re.sub(r'(?i)<br\s*/?>', '\n', out)
+    out = re.sub(r'(?i)</(p|div|tr|li|h[1-6]|table)>', '\n', out)
+    out = re.sub(r'(?i)</t[dh]>', ' | ', out)
+    out = re.sub(r'<[^>]+>', '', out)
+    out = htmllib.unescape(out)
+    out = re.sub(r'[ \t\xa0]+', ' ', out)
+    out = re.sub(r'\n[ \t]*(\n[ \t]*)+', '\n\n', out)
+    return out.strip()
+
 def get_email(msg_id):
     """Get the full content of an email."""
     creds = authenticate()
@@ -105,30 +145,28 @@ def get_email(msg_id):
         payload = message.get('payload', {})
         headers = payload.get('headers', [])
         
-        subject = next((h['value'] for h in headers if h['name'] == 'Subject'), '(No Subject)')
-        sender = next((h['value'] for h in headers if h['name'] == 'From'), '(Unknown Sender)')
-        date = next((h['value'] for h in headers if h['name'] == 'Date'), '(No Date)')
-        
+        hdr = {h['name'].lower(): h['value'] for h in headers}
+        subject = hdr.get('subject', '(No Subject)')
+        sender = hdr.get('from', '(Unknown Sender)')
+        date = hdr.get('date', '(No Date)')
+
         print(f"ID: {msg_id}")
         print(f"From: {sender}")
+        if hdr.get('to'): print(f"To: {hdr['to']}")
+        if hdr.get('cc'): print(f"Cc: {hdr['cc']}")
         print(f"Date: {date}")
         print(f"Subject: {subject}")
         print("-" * 40)
-        
-        # Simple body extraction
-        body = ""
-        if 'parts' in payload:
-            for part in payload['parts']:
-                if part['mimeType'] == 'text/plain':
-                    data = part['body'].get('data')
-                    if data:
-                        body += base64.urlsafe_b64decode(data).decode()
-        else:
-            data = payload['body'].get('data')
-            if data:
-                body = base64.urlsafe_b64decode(data).decode()
-        
-        print(body if body else "(Empty body or HTML-only email)")
+
+        plain, html_parts = _collect_bodies(payload)
+        body = "\n".join(plain).strip()
+        if not body and html_parts:
+            # Outlook and most enterprise senders ship HTML only. Falling through to
+            # "(Empty body or HTML-only email)" here is what hid the whole Mubtech
+            # thread for six days, so strip the tags rather than give up.
+            body = _html_to_text("\n".join(html_parts))
+
+        print(body if body else "(No body content)")
             
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -163,27 +201,97 @@ def get_profile():
     except Exception as e:
         print(f"An error occurred: {e}")
 
-def send_email(to, subject, body, cc=None):
-    """Send a plain-text email. gmail.modify scope is sufficient to send."""
+def send_email(to, subject, body, cc=None, reply_to=None, attachments=None):
+    """Send a plain-text email. gmail.modify scope is sufficient to send.
+
+    reply_to: a Gmail message id to reply INTO. When given, the new message
+    inherits that message's threadId, Subject, and In-Reply-To/References
+    chain, so Gmail AND Outlook keep it inside the existing thread instead of
+    starting a new one. Without it Gmail always starts a fresh thread, even if
+    the subject matches character for character.
+    """
+    # Fail before touching the network if an attachment path is wrong.
+    attachments = attachments or []
+    total_bytes = 0
+    for path in attachments:
+        if not os.path.isfile(path):
+            print(f"[ERROR] attachment not found: {path}")
+            return
+        total_bytes += os.path.getsize(path)
+    # Gmail rejects raw messages over 35 MB; base64 inflates by ~4/3.
+    if total_bytes * 4 / 3 > 35 * 1024 * 1024:
+        print(f"[ERROR] attachments total {total_bytes/1024/1024:.1f} MB, over Gmail's 35 MB message limit.")
+        return
+
     creds = authenticate()
     if not creds: return
 
     service = build('gmail', 'v1', credentials=creds)
 
-    msg = MIMEText(body)
+    thread_id = None
+    if reply_to:
+        try:
+            parent = service.users().messages().get(
+                userId='me', id=reply_to, format='metadata',
+                metadataHeaders=['Subject', 'Message-ID', 'References']).execute()
+        except Exception as e:
+            print(f"[ERROR] --reply-to {reply_to} could not be read: {e}")
+            return
+        thread_id = parent.get('threadId')
+        ph = {h['name'].lower(): h['value'] for h in parent['payload'].get('headers', [])}
+        parent_msgid = ph.get('message-id')
+        if not parent_msgid:
+            print(f"[ERROR] parent message {reply_to} has no Message-ID header; cannot thread.")
+            return
+        # Subject must match the parent's (minus one "Re: ") or Outlook splits the thread.
+        parent_subject = ph.get('subject', '')
+        if subject:
+            print(f"[INFO] --subject ignored in reply mode; using the thread's own subject.")
+        subject = parent_subject if parent_subject.lower().startswith('re:') else f"Re: {parent_subject}"
+
+    if attachments:
+        msg = MIMEMultipart()
+        msg.attach(MIMEText(body))
+        for path in attachments:
+            ctype, encoding = mimetypes.guess_type(path)
+            if ctype is None or encoding is not None:
+                ctype = 'application/octet-stream'
+            maintype, subtype = ctype.split('/', 1)
+            part = MIMEBase(maintype, subtype)
+            with open(path, 'rb') as fh:
+                part.set_payload(fh.read())
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', 'attachment',
+                            filename=os.path.basename(path))
+            msg.attach(part)
+    else:
+        msg = MIMEText(body)
     msg['To'] = to
     if cc:
         msg['Cc'] = cc
     msg['Subject'] = subject
+    if reply_to:
+        msg['In-Reply-To'] = parent_msgid
+        msg['References'] = (ph.get('references', '') + ' ' + parent_msgid).strip()
+
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+    payload = {'raw': raw}
+    if thread_id:
+        payload['threadId'] = thread_id
 
     try:
-        sent = service.users().messages().send(userId='me', body={'raw': raw}).execute()
+        sent = service.users().messages().send(userId='me', body=payload).execute()
         print(f"[OK] Email sent. Message ID: {sent.get('id')}")
         print(f"     To: {to}")
         if cc:
             print(f"     Cc: {cc}")
         print(f"     Subject: {subject}")
+        for path in attachments:
+            print(f"     Attached: {os.path.basename(path)} ({os.path.getsize(path)/1024:.1f} KB)")
+        if thread_id:
+            print(f"     Thread: {sent.get('threadId')} (expected {thread_id})")
+            if sent.get('threadId') != thread_id:
+                print("[WARN] Gmail placed this in a DIFFERENT thread than requested.")
     except Exception as e:
         print(f"An error occurred: {e}")
 
@@ -245,7 +353,13 @@ if __name__ == '__main__':
     send_parser = subparsers.add_parser('send', help='Send a plain-text email')
     send_parser.add_argument('--to', required=True, help='Recipient(s), comma-separated')
     send_parser.add_argument('--cc', default=None, help='Cc recipient(s), comma-separated')
-    send_parser.add_argument('--subject', required=True, help='Subject line')
+    send_parser.add_argument('--subject', default=None,
+                             help='Subject line (required unless --reply-to is used)')
+    send_parser.add_argument('--reply-to', default=None, metavar='MSG_ID',
+                             help='Gmail message id to reply INTO; inherits its thread, '
+                                  'subject and In-Reply-To/References chain')
+    send_parser.add_argument('--attach', action='append', default=[], metavar='PATH',
+                             help='File to attach; repeat the flag for multiple attachments')
     body_group = send_parser.add_mutually_exclusive_group(required=True)
     body_group.add_argument('--body', help='Inline body text')
     body_group.add_argument('--body-file', help='Path to a file containing the body text')
@@ -266,8 +380,11 @@ if __name__ == '__main__':
     elif args.command == 'archive':
         archive_email(args.id)
     elif args.command == 'send':
-        body = open(args.body_file).read() if args.body_file else args.body
-        send_email(args.to, args.subject, body, cc=args.cc)
+        if not args.subject and not args.reply_to:
+            send_parser.error('--subject is required unless --reply-to is given')
+        body = open(args.body_file, encoding='utf-8').read() if args.body_file else args.body
+        send_email(args.to, args.subject, body, cc=args.cc, reply_to=args.reply_to,
+                   attachments=args.attach)
     elif args.command == 'auth-url':
         auth_url()
     elif args.command == 'auth-save':

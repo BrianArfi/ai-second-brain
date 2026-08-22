@@ -1,3 +1,8 @@
+---
+name: slack-channel-manager
+description: Keeps a per-client whitelist of Slack channels so sweeps read the channels that matter and ignore the rest. Use when adding a client, onboarding a channel, or when a sweep is pulling noise.
+---
+
 # Slack Channel Manager Skill
 
 ## Description

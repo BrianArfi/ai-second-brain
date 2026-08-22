@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Creates FINA PoC Action Items in ClickUp from the Google Sheet data.
+Creates ExampleProject PoC Action Items in ClickUp from the Google Sheet data.
 List ID: 901614365044 (List Card, folder: 2026 - HOP AI Agent)
 """
 
@@ -69,8 +69,8 @@ TASKS = [
     ("Pre-Build / Alignment","Confirm KB documents from ready-doc folder are accessible","Ensure knowledge base source documents are available and can be uploaded to RAG pipeline","Muhammad Teammate","P0","To Do","Section 23.2 checklist"),
     ("Pre-Build / Alignment","Deploy Fajri's existing code to production with unit tests","Add unit tests to Fajri's existing codebase + deploy to production","Muhammad Fajry Hamzah","P0","To Do","Section 23.2 checklist"),
     ("Pre-Build / Alignment","Create pilot whitelist (secondary_user_id list)","Coordinate with Ops to define which users are included in the POC whitelist","Fadhlan Husaini","P0","To Do","Section 3 - Step 1"),
-    ("Pre-Build / Alignment","Confirm traffic split percentage from Yellow to FINA","Confirm with Fadlan how Yellow workflow builder controls traffic routing to FINA","Your Name","P0","Done","Rollout Strategy"),
-    ("Infrastructure","Set up service accounts for FINA","Create service accounts with minimal necessary permissions","Muhammad Fajry Hamzah","P0","To Do","Infra setup"),
+    ("Pre-Build / Alignment","Confirm traffic split percentage from Yellow to ExampleProject","Confirm with Fadlan how Yellow workflow builder controls traffic routing to ExampleProject","Your Name","P0","Done","Rollout Strategy"),
+    ("Infrastructure","Set up service accounts for ExampleProject","Create service accounts with minimal necessary permissions","Muhammad Fajry Hamzah","P0","To Do","Infra setup"),
     ("Infrastructure","Set up Postgres database","DB for conversation state + config (skills / tools / agents)","Muhammad Teammate","P0","To Do","Section 3.2"),
     ("Infrastructure","Set up Redis for session storage","Per-conversation session memory - maintain context across turns","Muhammad Teammate","P0","To Do","Section 3.2"),
     ("Infrastructure","Create repository + CI/CD pipeline","Repo setup (GitHub/GitLab) + automated deploy pipeline","Muhammad Teammate","P0","To Do",""),
@@ -90,7 +90,7 @@ TASKS = [
     ("Backend - Orchestrator Core","Implement language lock (RESPONSE_LANGUAGE)","Lock response language (id/en) at conversation start - does not change throughout session","BE","P0","To Do","Section 7 - Prompt spec"),
     ("Backend - Orchestrator Core","Implement structured execution logging (US-07)","Log per session: session_id / secondary_user_id / scenario_classified / tools_invoked / refund_result / etc.","BE","P0","To Do","US-07 + Section 5"),
     ("Backend - Scenario Flows","Implement Smart Handback to Jingga/Yellow (Scenarios 1 / 2 / 7)","Send handback signal to Yellow with: ScenarioID + TxnID + session summary","BE","P0","To Do","US-06; Section 3 - Step 5"),
-    ("Backend - Scenario Flows","Implement bank receipt collection request (Scenarios 4 / 5 / 6)","FINA requests user to upload their bank transfer receipt (bukti transfer)","BE","P0","To Do","Section 3 - Step 6"),
+    ("Backend - Scenario Flows","Implement bank receipt collection request (Scenarios 4 / 5 / 6)","ExampleProject requests user to upload their bank transfer receipt (bukti transfer)","BE","P0","To Do","Section 3 - Step 6"),
     ("Backend - Scenario Flows","Implement OCR integration to process receipt (Refund OCR API)","Process receipt image - extract: Sender Bank / Recipient Bank / Amount / Date / Sender Name / Ref Number","BE","P0","To Do","Section 3 - Step 6; Use Refund Automation OCR not legacy Jingga OCR"),
     ("Backend - Scenario Flows","Implement manual text probing fallback if OCR fails","If OCR fails/returns invalid data but user insists receipt is correct - probe manually via conversation","BE","P0","To Do","Section 3 - Step 6"),
     ("Backend - Scenario Flows","Implement Fund Verification API call (Step 7)","Verify funds are still available and unprocessed before initiating refund","BE","P0","To Do","Section 3 - Step 7; Critical safety check"),
@@ -100,7 +100,7 @@ TASKS = [
     ("Backend - Scenario Flows","Implement Scenario 5 logic - Double Transfer (US-03)","Detect 2 payment records for 1 TxnID → auto-identify the unprocessed one → refund (no user selection)","BE","P0","To Do","US-03"),
     ("Backend - Scenario Flows","Implement Scenario 6 logic - No Transaction Created (US-04)","Locate incoming payment in money-in records without a matching TxnID using OCR data","BE","P0","To Do","US-04"),
     ("Backend - Scenario Flows","Implement UCC flow trigger for Scenario 3 - Wrong Nominal (US-05 - Stretch)","Trigger UCC Integration tool to adjust transaction nominal. Fallback to Jingga handback if unavailable","BE","P1","To Do","US-05; Phase 0 Stretch / High Priority"),
-    ("Backend - Scenario Flows","Implement generic escalation to human agent","Fallback to human if FINA cannot handle (turn limit / low confidence / sensitive case)","BE","P0","To Do","Section 21.2"),
+    ("Backend - Scenario Flows","Implement generic escalation to human agent","Fallback to human if ExampleProject cannot handle (turn limit / low confidence / sensitive case)","BE","P0","To Do","Section 21.2"),
     ("Backend - API Layer","Implement POST /v1/conversations","Create new conversation. Accept: ticket_id / user_id / initial_message. Return: conversation_id","BE","P0","To Do","Section 20.1"),
     ("Backend - API Layer","Implement POST /v1/conversations/{id}/messages","Send user message → return agent response + metadata (intent / domain / confidence / tools called)","BE","P0","To Do","Section 20.1"),
     ("Backend - API Layer","Implement GET /v1/conversations/{id}","Retrieve full conversation history + tool calls + metadata + resolution status","BE","P0","To Do","Section 20.1"),
@@ -132,8 +132,8 @@ TASKS = [
     ("Configuration","Write LLM settings config (llm.yaml)","Define primary (Gemini 3.0) + fallback (Gemini 2.5) + temperature + token settings","BE","P0","To Do","Section 22"),
     ("Configuration","Write guardrails config (guardrails.yaml)","Define: PII masking / max loops / escalation triggers / amount thresholds","BE","P0","To Do","Section 22"),
     ("Configuration","Write feature flags config (features.yaml)","Feature flags to control rollout behavior","BE","P0","To Do","Section 22"),
-    ("Configuration","Set up Yellow workflow builder to call FINA endpoint","Configure HTTP call from Yellow to FINA /v1/conversations endpoint. Coordinate with Mukhib/Fadlan","BE + Ops","P0","To Do","Section 18.3; Critical integration point"),
-    ("Configuration","Set up pilot whitelist in Yellow workflow","Add secondary_user_id check in Yellow workflow to route only whitelisted users to FINA","BE + Ops","P0","To Do","Section 3 - Step 1"),
+    ("Configuration","Set up Yellow workflow builder to call ExampleProject endpoint","Configure HTTP call from Yellow to ExampleProject /v1/conversations endpoint. Coordinate with Mukhib/Fadlan","BE + Ops","P0","To Do","Section 18.3; Critical integration point"),
+    ("Configuration","Set up pilot whitelist in Yellow workflow","Add secondary_user_id check in Yellow workflow to route only whitelisted users to ExampleProject","BE + Ops","P0","To Do","Section 3 - Step 1"),
     ("Analytics / Measurement","Set up deflection rate measurement","Tag each session with FINA_RESOLVED or HANDBACK_TO_AGENT in execution logs - query for deflection %","BE","P0","To Do","Section 5.1"),
     ("Analytics / Measurement","Set up response latency tracking","Compute avg latency per turn from response_times[] array in execution logs","BE","P0","To Do","Section 5.2; Target: avg < 8s per turn"),
     ("Analytics / Measurement","Set up tool call accuracy tracking","Compute success rate from tools_invoked[] vs tool_results[] per session","BE","P0","To Do","Section 5.2; Target: > 95%"),
@@ -141,7 +141,7 @@ TASKS = [
     ("Analytics / Measurement","Set up CSAT measurement via Yellow.ai widget","Confirm CSAT collection setup via Yellow's existing CSAT widget post-resolution","Ops + BE","P0","To Do","Section 5.1; Target: > 7.0/10"),
     ("Analytics / Measurement","Set up Ops daily audit process - 10% log sampling","Ops reviews 10% random sample of full_conversation_log daily for quality + hallucination check","Ops + PM","P0","To Do","Section 5.2; Target: < 2% hallucination rate"),
     ("Analytics / Measurement","Set up scenario classification accuracy tracking","Ops verifies scenario_classified in logs against actual user intent","Ops","P0","To Do","Section 5.2; Target: > 90% accuracy"),
-    ("Testing / QA","Write test cases for US-01: Orchestrator classification (all 7 scenarios)","Test that FINA correctly classifies each scenario from free-text input","QA + BE","P0","To Do","US-01"),
+    ("Testing / QA","Write test cases for US-01: Orchestrator classification (all 7 scenarios)","Test that ExampleProject correctly classifies each scenario from free-text input","QA + BE","P0","To Do","US-01"),
     ("Testing / QA","Write test cases for US-02: Scenario 4 - Wrong Bank Refund (full flow)","Test end-to-end: mismatch detection → receipt → OCR → fund verify → confirm → refund","QA + BE","P0","To Do","US-02"),
     ("Testing / QA","Write test cases for US-03: Scenario 5 - Double Transfer","Test: detect duplicate → OCR → auto-identify unprocessed → fund verify → refund","QA + BE","P0","To Do","US-03"),
     ("Testing / QA","Write test cases for US-04: Scenario 6 - No Transaction Created","Test: no TxnID match → mandatory receipt → OCR → locate in money-in records → refund","QA + BE","P0","To Do","US-04"),
@@ -153,7 +153,7 @@ TASKS = [
     ("Testing / QA","Performance / load testing","Verify response latency < 8s per turn under load conditions","QA + BE","P0","To Do","Section 5.2"),
     ("Testing / QA","Security testing - PII masking verification","Verify NIK / names / phone numbers are masked in all logs and responses before leaving the system","QA + BE","P0","To Do","Section 13 - NFR"),
     ("Testing / QA","Write tool safety testing","Verify that initiate_refund never executes without explicit user confirmation","QA + BE","P0","To Do","Section 21.3; Zero unintended executions required"),
-    ("Testing / QA","Yellow integration end-to-end testing","Test full flow: Yellow workflow → FINA endpoint → response back to Yellow → customer","QA + BE + Ops","P0","To Do",""),
+    ("Testing / QA","Yellow integration end-to-end testing","Test full flow: Yellow workflow → ExampleProject endpoint → response back to Yellow → customer","QA + BE + Ops","P0","To Do",""),
     ("PM / Product","Finalize + publish Definition of Done (DoD) checklist for Phase 0","Lock down Go/No-Go criteria with Engineering + Ops Lead","PM","P0","To Do","Section 6 + 23.1"),
     ("PM / Product","Schedule daily standups for the 2-week POC sprint","Daily progress coordination during the sprint","PM","P0","To Do",""),
     ("PM / Product","Coordinate pilot launch with Ops team + Fadlan","Brief Ops team on what to expect during pilot + how to audit logs","PM + Ops","P0","To Do",""),
@@ -165,7 +165,7 @@ def build_description(description: str, notes: str) -> str:
     parts = [description]
     if notes:
         parts.append(f"\n**PRD Reference:** {notes}")
-    parts.append("\n\n*Source: FINA PoC Action Item Sheet | PRD: Agentic AI Platform for Support Operations*")
+    parts.append("\n\n*Source: ExampleProject PoC Action Item Sheet | PRD: Agentic AI Platform for Support Operations*")
     return "\n".join(parts)
 
 def create_task(session, list_id, name, description, assignees, priority, status):

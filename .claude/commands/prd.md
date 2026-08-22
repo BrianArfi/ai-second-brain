@@ -56,14 +56,20 @@ PRD workflow (Work):
    - Do NOT run `scripts/publish_prd.sh` on a PRD in neither state. Fix the source document first.
    - Do NOT run `register_prd.py` at step 7 for a NOT AUTHORITATIVE PRD. Unsourced drafts stay out of the Master Product List, because listing is what turns them into scope.
 
-   Why this exists: MBA-237 biometric point protection reached a live sprint as a story generated from an unsourced PRD, and its owner disowned it on the record on 20 Jul 2026. The same pipeline also produced false positives in the other direction. A CMS audit-trail story was flagged as invented and then found legitimate, because Work does have a compliance owner. The lesson is the same both ways: an unsourced document must not silently drive scope, and a flag against one must be checked against a real source before anyone acts on it.
+   Why this exists: ABC-123 biometric point protection reached a live sprint as a story generated from an unsourced PRD, and its owner disowned it on the record on 20 Jul 2026. The same pipeline also produced false positives in the other direction. A CMS audit-trail story was flagged as invented and then found legitimate, because Work does have a compliance owner. The lesson is the same both ways: an unsourced document must not silently drive scope, and a flag against one must be checked against a real source before anyone acts on it.
 
 5. Before presenting: run `python3 scripts/readability_gate.py --source <path>` (blocks walls of text, missing blank lines, em-dashes), then spawn the `draft-reviewer` subagent (type "PRD"). Fix issues in the SOURCE, then present.
 6. After the owner approves, publish with the one command that does convert + diagram embed + format pass + share + restrict-last + verify, in the only order that works:
    `bash scripts/publish_prd.sh --file <path> --title "PRD: ..." [--share Teammate@examplevendor.com]`
    To revise an existing doc, pass `--id <DOC_ID>` instead of `--title`. Never hand-run the individual steps: doing so is how docs shipped as walls of text and one was left publicly shared (16-17 Jul 2026).
-7. Register in the Master Product List: `python3 .agent/skills/master-product-list/register_prd.py`
-8. Link the Doc URL to the spreadsheet: `python3 .agent/skills/work-link-sync/link_sync.py`
+7. **New world only:** register in the Master Product List: `python3 .agent/skills/master-product-list/register_prd.py`
+
+   **The MPL covers the new world and nothing else** (confirmed by the owner, 14 Aug 2026). Its components are the E-commerce Solution and B2C Super App build: PIM, E-commerce Core, OMS, Front-end Builder, Seller Portal, TMS, Mixed Payment, Promo Engine, Search, Recommendation, Monetization, Fulfillment Service.
+
+   An **old world** PRD does not go in it and is not missing anything by staying out. Old world is the revenue-today stack delivered by the Marketplace team under Teammate and the Platform team under Teammate: Example Program, ExampleClient, ExampleClient, NIQ, Kantar Verian, SAIB, MCM, the marketplace admin portal, and the Client Portal. Filing one of those under a new world component to make it look tracked is worse than leaving it out, because it lands under the wrong owner and never surfaces again. Its tracking home is the work-tree node plus the ledger record, which every PRD already gets.
+
+   If you cannot tell which world a PRD belongs to, ask the owner rather than registering it.
+8. New world only, and only after step 7: link the Doc URL to the spreadsheet: `python3 .agent/skills/work-link-sync/link_sync.py`
 9. Confirm with the file ID + Drive link (Drive Operation Verification - no ID returned means the operation FAILED).
 
 This is synthesis-heavy work: if the session is on a low-tier model, tell the owner before drafting.

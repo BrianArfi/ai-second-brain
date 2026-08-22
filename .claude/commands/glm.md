@@ -1,3 +1,7 @@
+---
+description: Turn the GLM offload mode on or off, so heavy mechanical work routes to a non-Claude model through agy-bridge.
+---
+
 # /glm
 
 Toggle **offload mode** on/off. When ON, the Router offloads heavy generation / research /
@@ -18,7 +22,7 @@ error out.
    echo on  > .agent/glm_mode.flag    # or: echo off
    cat .agent/glm_mode.flag
    ```
-3. Confirm the new state to the owner. The SessionStart hook (`glm_mode.sh`) surfaces it each session;
+3. Confirm the new state to the owner. The SessionStart hook (`glm_mode.py`) surfaces it each session;
    within the current session, honor the new state immediately.
 
 **Behavior when ON:** route bulk reads → `agy-bridge --task harvest`; content/code/copy generation →

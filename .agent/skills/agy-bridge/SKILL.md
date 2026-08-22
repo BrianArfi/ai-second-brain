@@ -1,3 +1,8 @@
+---
+name: agy-bridge
+description: Optional cost saver that routes bulk mechanical work to a non-Claude model. Use for harvest, critic, and research offload; never for synthesis or strategy. Fully skippable, the harness works without it.
+---
+
 # agy-bridge
 
 ## OPTIONAL - Claude-only mode is fully supported
@@ -23,6 +28,24 @@ cost savings**, and route by **model expertise + time of day**. Two backends:
 
 The main session stays on real Anthropic Claude; only the bridge subprocess/request hits the
 other model. Every task ends in a `claude_fallback` tier so quality never silently drops.
+
+**Backends, and what each one asks of you:**
+
+| Backend | Type | Cost | To connect |
+| :--- | :--- | :--- | :--- |
+| `gemini` | openai-compatible | **free tier** | `GEMINI_API_KEY` |
+| `groq` | openai-compatible | **free tier** | `GROQ_API_KEY` |
+| `agy` | cli | Antigravity subscription | install `agy`, run once to authenticate |
+| `9router` | openai-compatible | local, no key | run the daemon on `127.0.0.1:20128` |
+| `kimi` | anthropic-compatible | paid | `KIMI_CODE_TOKEN` |
+| `zai` | anthropic-compatible | RETIRED 2026-07-27 | see below |
+
+The two free-tier entries are what a brand-new user can actually turn on: an API key, no
+subscription, no CLI. Both sit at the END of every chain, so an existing Antigravity install keeps
+its current routing exactly.
+
+Adding another OpenAI-compatible endpoint is a `models.json` entry, not code: set `type`,
+`base_url`, and either `token_env` or `no_auth`.
 
 ## Tasks & capabilities
 
@@ -96,6 +119,41 @@ rows feed `--analyze` only, never the cost report. `AGY_BRIDGE_FAKE_WIB_HOUR=NN`
 
 ## Setup
 
+**Start here:**
+
+```bash
+python3 .agent/skills/agy-bridge/run.py --setup            # what is connected + the fix for each gap
+python3 .agent/skills/agy-bridge/run.py --setup --write     # also cache this account's agy model ids
+```
+
+`--doctor` answers "what is the state". `--setup` answers "what do I type next", which is the
+question a new install actually has. It asks each keyed endpoint which models the key can really
+see and warns when a model configured in a chain is not among them, so a stale id surfaces as a
+sentence rather than as an opaque HTTP 400.
+
+**Credentials** are read from the environment, then `<workspace>/.env`, then
+`<workspace>/secrets.env`, then this skill's `token.env` (last, so existing installs keep working).
+Shared with the meeting recorder through `.agent/scripts/harness_secrets.py`, so a key pasted once
+works everywhere. One `KEY=value` per line.
+
+**The quickest way from nothing to working** is the same free Gemini key that makes meeting
+transcription work:
+
+```bash
+echo 'GEMINI_API_KEY=...' >> .env      # https://aistudio.google.com/apikey
+```
+
+**`models.json` vs `models.local.json`.** The shipped file is neutral defaults. `models.local.json`
+is gitignored and holds what belongs to ONE install: `subscriptions`, `peak_wib`,
+`known_agy_models`, `time_routing`. It deep-merges over the shipped file, and lists replace rather
+than append, since a chain is an order. This split exists because those fields used to ship as if
+they were configuration, so a new user could not tell which numbers described the software and
+which described somebody else's account, and left routing tuned for a machine that was not theirs.
+
+`known_agy_models` ships empty. `run_agy` treats empty as "no gate", and the first real call
+populates it from `agy models` into the local file, because agy silently routes an unknown id to a
+default and that guard needs to be per-account rather than inherited.
+
 - **agy**: Google/Antigravity OAuth (done 2026-06-24). If `--doctor` shows `authenticated: NO`,
   run `agy` once interactively; re-run `agy models` and sync `known_agy_models` if the list changed.
   agy SILENTLY routes an unknown id to a default → run.py refuses ids not in `known_agy_models`.
@@ -103,6 +161,20 @@ rows feed `--analyze` only, never the cost report. `AGY_BRIDGE_FAKE_WIB_HOUR=NN`
 - **zai**: RETIRED 2026-07-27, no setup needed. To restore: re-subscribe at https://z.ai/subscribe,
   refresh `ZAI_API_TOKEN` in `token.env`, confirm with `--doctor`, then clear `backends.zai.retired`
   and re-add the candidate to the chains you want it in.
+- **9router** (`type: openai-compatible`): a local router on `127.0.0.1:20128`. No token: it holds
+  the upstream subscription itself, which is what `no_auth: true` means. `--doctor` reports whether
+  the daemon is up, because a credential check would call it healthy while every call gets
+  connection-refused. It proxies the SAME Antigravity subscription `agy` uses, so it is wired in as
+  the LAST bulk-cheap candidate, never ahead of the agy entries. What it adds is no subprocess per
+  call, exact token counts where the CLI estimates, and the `bpm/*` models agy cannot reach.
+
+  **Text only.** On 2026-08-21 all seven Gemini models tested through it accepted audio, discarded
+  it, and returned invented text with no error. Never route audio through a proxy without proving
+  it forwards the audio first -- `meeting-recorder/transcribe.py --verify-providers` is that proof,
+  and exists because of this.
+
+Adding any OpenAI-compatible endpoint is now a `models.json` entry, not code: set `type`,
+`base_url`, and either `token_env` or `no_auth`.
 
 ## Usage
 

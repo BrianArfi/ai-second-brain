@@ -34,6 +34,11 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '
 STATE_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'decisions.json')
 PEOPLE_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'people.json')
 
+# Every record carries a work-tree node (CLAUDE.md, "Every Ticket Belongs To A
+# Work-Tree Node").
+sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'scripts'))
+from work_tree import UNFILED, UnknownNode, resolve_or_die  # noqa: E402
+
 WIB = timezone(timedelta(hours=7))
 VALID_STATUS = ('open', 'decided', 'superseded')
 VALID_SOURCE_TYPES = ('fathom', 'slack', 'gdoc', 'manual')
@@ -129,6 +134,11 @@ def split_names(s):
 # ------------------------------------------------------------------- add ----
 
 def cmd_add(args):
+    try:
+        node = resolve_or_die(args.node, allow_unfiled=bool(args.node_why))
+    except UnknownNode as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(2)
     state = load_state()
     iid = next_id(state)
     now = time.time()
@@ -149,6 +159,8 @@ def cmd_add(args):
         'decider_slug': resolve_person_slug(args.decider),
         'stakeholder_slugs': [resolve_person_slug(n) for n in stakeholders],
         'project': args.project or None,
+        'node': node,
+        'node_why': args.node_why,
         'deadline': parse_deadline(args.deadline),
         'sources': sources,
         'superseded_by': None,
@@ -160,6 +172,25 @@ def cmd_add(args):
     state['items'][iid] = item
     save_state(state)
     print(f'added: {iid} - {args.title}')
+
+def cmd_refile(args):
+    """Move a record to another node. The triage pass runs on this."""
+    try:
+        node = resolve_or_die(args.node, allow_unfiled=bool(args.node_why))
+    except UnknownNode as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(2)
+    state = load_state()
+    it = state['items'].get(args.item_id)
+    if not it:
+        print(f'no such decision: {args.item_id}', file=sys.stderr)
+        sys.exit(1)
+    was = it.get('node', UNFILED)
+    it['node'] = node
+    it['node_why'] = args.node_why
+    it['updated_at'] = time.time()
+    save_state(state)
+    print(f'{args.item_id}: {was} -> {node}')
 
 # ---------------------------------------------------------------- decide ----
 
@@ -338,6 +369,15 @@ def main():
     ap.add_argument('--source-label')
     ap.add_argument('--stakeholders')
     ap.add_argument('--notes')
+    ap.add_argument('--node', required=True,
+                    help='work-tree node id; find one with work_tree.py find <text>')
+    ap.add_argument('--node-why', default=None,
+                    help='only with --node unfiled, and only for unattended runs')
+
+    rf = sub.add_parser('refile', help='move a record to a different work-tree node')
+    rf.add_argument('item_id')
+    rf.add_argument('--node', required=True)
+    rf.add_argument('--node-why', default=None)
 
     dp = sub.add_parser('decide')
     dp.add_argument('item_id')
@@ -370,6 +410,7 @@ def main():
     handlers = {
         'add': cmd_add, 'decide': cmd_decide, 'supersede': cmd_supersede,
         'update': cmd_update, 'list': cmd_list, 'report': cmd_report,
+        'refile': cmd_refile,
     }
     handler = handlers.get(args.cmd)
     if not handler:
@@ -377,5 +418,19 @@ def main():
         sys.exit(1)
     handler(args)
 
+READONLY_CMDS = {'report', 'list', 'show'}
+
 if __name__ == '__main__':
-    main()
+    # See .agent/scripts/ledger_lock.py: atomic replace protects the write,
+    # not the read-modify-write cycle around it.
+    _cmd = next((a for a in sys.argv[1:] if not a.startswith('-')), None)
+    if _cmd in READONLY_CMDS:
+        main()
+    else:
+        sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'scripts'))
+        from ledger_lock import hold_ledger_lock
+        hold_ledger_lock('decisions')
+        # Propagate on the way out (derived views + commit + push) so other
+        # sessions read this change immediately. See ledger_sync.py.
+        from ledger_sync import run_and_sync
+        run_and_sync('decisions', main)

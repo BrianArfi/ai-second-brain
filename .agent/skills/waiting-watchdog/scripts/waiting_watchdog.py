@@ -2,7 +2,7 @@
 """
 waiting_watchdog.py - SLA watchdog for things the owner is waiting on from other people.
 
-Design (per plan bangun-aja-semuanya-barengan-wiggly-noodle.md, Komponen 3):
+Design (per plan bangun-aja-semuanya-barengan-wiggly-noodle.md, Component 3):
   sweep (cron, hourly, pure local, zero-network): age-vs-SLA check only.
     since + sla_hours elapsed and status still open -> status=breached, breached_at set.
   sweep --check-slack (SOP-only, Claude-driven, NOT cron'd): for items with a Slack
@@ -43,6 +43,12 @@ STATE_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'waiting_on.json')
 TOKEN_ENV = os.path.join(BASE_DIR, '.agent', 'skills', 'slack-connector', 'token.env')
 HEARTBEAT = os.path.join(BASE_DIR, '.agent', 'scripts', 'heartbeat.py')
 PEOPLE_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'people.json')
+
+# Every record carries a work-tree node (CLAUDE.md, "Every Ticket Belongs To A
+# Work-Tree Node"). This is separate from --initiative, which stays pointed at
+# portfolio.json's own id space and is joined to the tree by work_tree_alias.json.
+sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'scripts'))
+from work_tree import UNFILED, UnknownNode, resolve_or_die  # noqa: E402
 
 DROPPED_RETENTION_DAYS = 14      # prune answered/dropped after this
 API_PAUSE = 0.15
@@ -205,6 +211,11 @@ def valid_initiative_ids():
     return {i.get('id') for t in data.get('teams', []) for i in t.get('initiatives', [])}
 
 def cmd_add(args):
+    try:
+        node = resolve_or_die(args.node, allow_unfiled=bool(args.node_why))
+    except UnknownNode as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(2)
     state = load_state()
     if args.initiative:
         known = valid_initiative_ids()
@@ -231,6 +242,8 @@ def cmd_add(args):
         # Links this item to a journal/state/portfolio.json initiative so
         # portfolio_sync.py can roll it up as a blocker. Unset = not rolled up.
         'initiative_id': args.initiative or None,
+        'node': node,
+        'node_why': args.node_why,
         'since': since,
         'sla_hours': args.sla_hours,
         'escalate_to': args.escalate_to or '',
@@ -377,6 +390,8 @@ def cmd_close(args):
     if not it:
         sys.exit(f'item not found: {args.item_id}')
     it.update(status='answered', closed_at=time.time(), needs_escalation=False)
+    if getattr(args, 'note', None):
+        it['close_note'] = args.note
     save_state(state)
     print(f'closed: {args.item_id}')
 
@@ -386,6 +401,8 @@ def cmd_drop(args):
     if not it:
         sys.exit(f'item not found: {args.item_id}')
     it.update(status='dropped', closed_at=time.time(), needs_escalation=False)
+    if getattr(args, 'note', None):
+        it['close_note'] = args.note
     save_state(state)
     print(f'dropped: {args.item_id}')
 
@@ -410,6 +427,24 @@ def cmd_reopen(args):
     save_state(state)
     print(f'reopened: {args.item_id}')
 
+def cmd_refile(args):
+    """Move a record to another node. The triage pass runs on this."""
+    try:
+        node = resolve_or_die(args.node, allow_unfiled=bool(args.node_why))
+    except UnknownNode as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(2)
+    state = load_state()
+    it = state['items'].get(args.item_id)
+    if not it:
+        print(f'no such waiting-on: {args.item_id}', file=sys.stderr)
+        sys.exit(1)
+    was = it.get('node', UNFILED)
+    it['node'] = node
+    it['node_why'] = args.node_why
+    save_state(state)
+    print(f'{args.item_id}: {was} -> {node}')
+
 # -------------------------------------------------------------------- main --
 
 def main():
@@ -427,6 +462,15 @@ def main():
     ap.add_argument('--initiative',
                     help='portfolio.json initiative id (e.g. mp-exampleprogram-eshop); '
                          'rolls this item up as a blocker on the Portfolio board')
+    ap.add_argument('--node', required=True,
+                    help='work-tree node id; find one with work_tree.py find <text>')
+    ap.add_argument('--node-why', default=None,
+                    help='only with --node unfiled, and only for unattended runs')
+
+    rf = sub.add_parser('refile', help='move a record to a different work-tree node')
+    rf.add_argument('item_id')
+    rf.add_argument('--node', required=True)
+    rf.add_argument('--node-why', default=None)
 
     sp = sub.add_parser('sweep')
     sp.add_argument('--check-slack', action='store_true')
@@ -441,9 +485,11 @@ def main():
 
     cp = sub.add_parser('close')
     cp.add_argument('item_id')
+    cp.add_argument('--note', help='why it closed, and the evidence; kept on the record')
 
     dp = sub.add_parser('drop')
     dp.add_argument('item_id')
+    dp.add_argument('--note', help='why it was dropped; kept on the record')
 
     tp = sub.add_parser('touch')
     tp.add_argument('item_id')
@@ -454,8 +500,22 @@ def main():
     args = p.parse_args()
     {'add': cmd_add, 'sweep': cmd_sweep, 'report': cmd_report,
      'close': cmd_close, 'drop': cmd_drop, 'touch': cmd_touch,
-     'reopen': cmd_reopen, 'link': cmd_link}.get(
+     'reopen': cmd_reopen, 'link': cmd_link, 'refile': cmd_refile}.get(
         args.cmd or 'sweep', cmd_sweep)(args)
 
+READONLY_CMDS = {'report', 'list', 'show'}
+
 if __name__ == '__main__':
-    main()
+    # See .agent/scripts/ledger_lock.py: atomic replace protects the write,
+    # not the read-modify-write cycle around it.
+    _cmd = next((a for a in sys.argv[1:] if not a.startswith('-')), None)
+    if _cmd in READONLY_CMDS:
+        main()
+    else:
+        sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'scripts'))
+        from ledger_lock import hold_ledger_lock
+        hold_ledger_lock('waiting_on')
+        # Propagate on the way out (derived views + commit + push) so other
+        # sessions read this change immediately. See ledger_sync.py.
+        from ledger_sync import run_and_sync
+        run_and_sync('waiting_on', main)

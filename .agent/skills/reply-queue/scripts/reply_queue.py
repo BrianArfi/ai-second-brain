@@ -4,7 +4,7 @@ reply_queue.py - Auto-drafted Reply Queue: extend the Slack mention ledger with
 ready-to-approve draft replies for OPEN items, so the owner can review/edit/approve
 instead of writing every reply from scratch.
 
-Design (Komponen 7, per bangun-aja-semuanya-barengan-wiggly-noodle plan):
+Design (Component 7, per the bangun-aja-semuanya-barengan-wiggly-noodle plan):
   Layer 1 (mention_ledger.py, READ-ONLY here): collects + tracks open/answered.
   Layer 2 (this script): batches open items -> agy-bridge --task harvest (GLM) to
     draft replies in the owner's voice. GLM never sends anything - drafts only.

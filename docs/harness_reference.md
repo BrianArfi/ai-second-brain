@@ -11,14 +11,16 @@
 Main repo (path varies by machine -- run platform detection below to resolve `REPO_ROOT`):
 - **macOS**: `.`
 - **WSL (Ubuntu)**: `.`
-- **Windows native**: no native checkout -- proxy into the WSL path above via `wsl.exe`
+- **Windows native**: no independently-edited checkout -- open sessions rooted at the UNC path `\\wsl.localhost\Ubuntu\home\you\antigravity-projects\product-second-brain` (same files as the WSL path, no proxy needed for reads/edits) and proxy skill *execution* into WSL via `wsl.exe` as below. A separate clone under `C:\Users\...\scratch\product-second-brain` existed historically but is retired (2026-08-03) to avoid two independently-edited copies drifting apart -- do not create a new one.
 
 Skills: `.agent/skills/` -- always check here first when looking for a skill/connector.
 
 **Harness layout**: `.claude/` = Claude Code entry points (commands/agents/hooks); `.agent/` = cross-harness SOP source (Antigravity reads it too). Commands shim to `.agent/` bodies -- do not duplicate content across the two.
 **Slack send guard**: the PreToolUse hook matches `mcp__.*[Ss]lack.*__.*(post|send|reply).*`: if a Slack MCP server is renamed or added, re-verify the matcher in `.claude/settings.json`.
 
-**Worktree awareness**: This repo is sometimes opened via Windows worktree. The worktree may not have all files. WSL is the source of truth.
+**Source of truth**: `origin/main`, not any one machine. WSL is the **automation host** (the repo cron jobs run there and nowhere else); macOS is a **first-class interactive checkout** with full hook/skill/command parity and no cron; Windows native is retired and proxy-only. Work counts once it is committed and pushed. Full rule: `CLAUDE.md` > "Checkouts: `origin/main` is the source of truth".
+
+**Worktree awareness**: This repo is sometimes opened via Windows worktree. The worktree may not have all files, and it is never the place to resolve a disagreement about state: fetch and compare against `origin/main`.
 
 ---
 
@@ -32,11 +34,11 @@ bash .agent/scripts/detect_platform.sh
 
 It prints `PLATFORM` (macos | wsl | windows), `REPO_ROOT` for this machine, and `RUN_PREFIX`/`RUN_SUFFIX` for wrapping skill calls. Adapt every Python skill call accordingly:
 
-| `uname -s` | PLATFORM | How to run Python skills |
-| :---- | :---- | :---- |
-| `Darwin` | **macos** | Run natively from `REPO_ROOT`. NO `wsl.exe`. e.g. `python3 .agent/skills/.../x.py` |
-| `Linux` | **wsl** | Run natively, as written in this file. |
-| `MINGW*` / `MSYS*` / missing | **windows** | Proxy into WSL: `wsl.exe bash -c "cd <WSL_ROOT> && <command>"` |
+| `uname -s` | PLATFORM | Role | How to run Python skills |
+| :---- | :---- | :---- | :---- |
+| `Darwin` | **macos** | First-class interactive checkout, no cron | Run natively from `REPO_ROOT`. NO `wsl.exe`. e.g. `python3 .agent/skills/.../x.py` |
+| `Linux` | **wsl** | Automation host: all repo cron jobs live here | Run natively, as written in this file. |
+| `MINGW*` / `MSYS*` / missing | **windows** | Retired, proxy-only | Proxy into WSL: `wsl.exe bash -c "cd <WSL_ROOT> && <command>"` |
 
 Example -- `gdocs-create` on **Windows native** (the only platform that needs a prefix):
 ```bash
@@ -45,6 +47,8 @@ wsl.exe bash -c "cd . && timeout 180s python3 .agent/skills/gdocs-create/gdocs_c
 On **macOS** and **WSL** the same command runs directly with no prefix.
 
 **Fallback (Windows only, if `wsl.exe` fails)**: use `MSYS_NO_PATHCONV=1 wsl.exe bash -c "..."`. If WSL is not configured on a Windows machine, alert the owner -- Python skills need WSL there because credentials and tokens live in the WSL filesystem.
+
+**WSL auto-start**: a Windows Task Scheduler task ("WSL Autostart", created 2026-08-03) runs `wsl.exe -d Ubuntu -u you -- sleep infinity` at logon so the Ubuntu instance (and its crond, since `/etc/wsl.conf` has `systemd=true`) is always up without the owner manually starting it. `dashboard_keepalive.sh` (hourly cron) reports a `wsl-instance` heartbeat row with `/proc/uptime` so a missed autostart or crashed instance is visible on the Routines tab instead of silently failing. Cron/skills/tokens were deliberately NOT ported to native Windows Task Scheduler -- the WSL-resident system (20+ interdependent cron jobs, credentials, custom ffmpeg build) already works; the gap was availability, not platform. Full rationale: `docs/proposal_wsl_windows_2026-08-03.md`.
 
 **Critical**: `uname -s` is cheap and reliable, so always run detection and never guess. NEVER use `wsl.exe` on macOS (`Darwin`) -- the binary does not exist there and the call will fail.
 
@@ -221,6 +225,10 @@ Use `pdftotext`, not the `Read` tool. Use `Read` only when the user directly ask
 ### Figma
 - **Figma (raw API)** -- [`.agent/skills/figma-connector/scripts/figma_client.py`](../.agent/skills/figma-connector/scripts/figma_client.py): REST fallback; prefer MCP Figma for design context.
 - **Marketplace Figma index** -- [`scripts/marketplace_figma_index_sync.py`](../scripts/marketplace_figma_index_sync.py) -> mirror [`Clients/Work/Marketplace/Marketplace_Figma_Design_Index.md`](../Clients/Work/Marketplace/Marketplace_Figma_Design_Index.md). **Grep the mirror FIRST** for "where's the design for X".
+
+### Issue trackers (Jira today, Linear from the 25 Aug cutover)
+- **Jira** -- [`.agent/skills/jira-connector/scripts/jira_client.py`](../.agent/skills/jira-connector/scripts/jira_client.py): `verify-connections`, `daily-digest`, `sprint-status --portfolio`, `create-issue`. Two instances (`examplevendor.atlassian.net` = MSP/MBA/STOR, `yourcompany.atlassian.net` = MP/MPS); `PORTFOLIO_BOARDS` is the mechanical portfolio boundary, **never mix boards across portfolios in one review**. [`dump_all_issues.py`](../.agent/skills/jira-connector/scripts/dump_all_issues.py) feeds the work tree.
+- **Linear** -- [`.agent/skills/linear-connector/scripts/linear_client.py`](../.agent/skills/linear-connector/scripts/linear_client.py): `verify-connection`, `teams --write`, `projects`, `cycles`, `cycle-status --team|--portfolio`, `issue`, `issues`, `daily-digest`; writes (`create-issue`, `update-issue`, `comment`) **refuse without `--approved`**. Key in `token.env`; **team keys are discovered into `teams.json`, never guessed** -- a key colliding with a Jira project key (MP/MPS/MSP/MBA/STOR) makes an identifier ambiguous and is skipped by the work-tree pass until source-qualified. [`dump_all_issues.py`](../.agent/skills/linear-connector/scripts/dump_all_issues.py) emits the same shape as the Jira dump so both merge into one work-tree pass. Also registered as a project-scope MCP server (`.mcp.json`, OAuth via `/mcp`) for in-session use; scripts and cron use the CLI, which the MCP is invisible to.
 
 ### Work product tracking
 - **Master Product List** -- [`.agent/skills/master-product-list/register_prd.py`](../.agent/skills/master-product-list/register_prd.py): register a PRD into the MPL sheet + local md.

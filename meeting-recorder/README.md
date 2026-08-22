@@ -19,7 +19,7 @@ MOM draft di-skip kalau entri terkait sudah punya `mom_path`.
 
 ```
 recorder.py (per mesin)  →  WAV di recordings_dir  →  watcher.py (host repo)
-                                                        ├─ transcribe.py (whisper.cpp GPU → Gemini)
+                                                        ├─ transcribe.py (rantai provider, lihat --doctor)
                                                         ├─ journal/fathom_registry.json (local-*)
                                                         ├─ MOM draft via agy-bridge (GLM/Gemini)
                                                         └─ heartbeat → dashboard :3737
@@ -102,13 +102,64 @@ meeting-nya sendiri:
 Yang berubah kalau ad-hoc aktif: watcher **melewati calendar match sepenuhnya**.
 Tanpa ini, sebuah huddle jam 21:36 akan menempel ke event kalender yang kebetulan
 overlap, lalu MOM-nya keluar dengan judul, attendee, dan dedupe key milik meeting
-lain (kejadian 29 Jul 2026: huddle Teammate masuk sebagai "Design review STOR-115").
+lain (kejadian 29 Jul 2026: huddle Teammate masuk sebagai "Design review ABC-123").
 
 **Attendees (opsional)**: isi nama dipisah koma di GUI, atau `--attendees "the owner
 Arfi you, Teammate"` di CLI. Nama-nama itu dikirim ke prompt harvest + draft
 supaya `Speaker 1/2` bisa dipetakan ke orang asli, dan ikut tercatat di
 `participants` registry. Mapping hanya dilakukan kalau transkripnya tidak
 ambigu, jadi tidak melanggar aturan "jangan menebak nama".
+
+## Transkripsi: rantai provider (bukan lagi satu engine)
+
+Provider dicoba berurutan sampai ada yang berhasil, didefinisikan di `config.json`
+bagian `transcription.providers`. Menambah provider = menambah entri config, bukan
+menulis kode.
+
+```bash
+python3 meeting-recorder/transcribe.py --doctor
+```
+
+Perintah itu menunjukkan provider mana yang sudah bisa dipakai di mesin ini dan
+langkah persis untuk yang belum. Urutan default: `gemini` (satu-satunya yang
+memberi **label pembicara**, ada free tier) → `groq` (free tier, cepat) →
+`openai` → `whispercpp` (GPU lokal) → `cpu` (paling akhir).
+
+API key dibaca dari environment, lalu `meeting-recorder/.env`, lalu `.env` atau
+`secrets.env` di root workspace. Semua gitignored:
+
+```bash
+echo 'GEMINI_API_KEY=...' >> meeting-recorder/.env
+```
+
+`transcription.cpu_fallback` mengatur apa yang terjadi kalau tidak ada satu pun
+provider lain. Config the owner: `false` (gagal dengan pesan jelas). Config contoh
+untuk pengguna baru: `true`, supaya pipeline tetap jalan tanpa akun dan tanpa GPU,
+dengan peringatan bahwa lamanya kira-kira sepanjang audionya.
+
+## Rekam dari HP (rapat di ruangan, laptop tidak dibawa)
+
+`ingest_server.py` + `webapp/` = web app kecil yang jalan di browser HP. HP merekam,
+mengirim potongan audio tiap 15 detik ke mesin mana pun yang menjawab, lalu server
+menaruh `.m4a` + sidecar `.json` di `recordings_dir` persis seperti `recorder.py`,
+dan langsung memanggil `watcher.py --file`. Pipeline setelahnya tidak berubah.
+
+```bash
+python3 meeting-recorder/ingest_server.py --print-token   # token pairing, sekali saja
+python3 meeting-recorder/ingest_server.py                 # jalan manual (port dari config.json)
+bash .agent/scripts/ensure_ingest.sh                      # cara normal, dipanggil tiap SessionStart
+```
+
+Browser menolak memberi mikrofon ke halaman yang bukan **secure context**, jadi
+`http://<ip-lan>:8787` tidak bisa merekam. Tailscale memberi sertifikat asli untuk
+`<mesin>.<tailnet>.ts.net`, dan itu sekaligus menyelesaikan izin mikrofon, transport
+LAN, dan transport dari seluler. Langkah lengkapnya:
+[`docs/MEETING_RECORDER.md`](../docs/MEETING_RECORDER.md) bagian "Recording from the phone".
+
+Yang perlu diingat: HP merekam **ruangan lewat mikrofon**, bukan audio aplikasi lain
+(Android tidak mengizinkan itu untuk app apa pun). Untuk Google Meet, jalur laptop
+tetap lebih baik. Default `ad_hoc` menyala, jadi judul yang diketik yang dipakai dan
+pencocokan kalender dilewati.
 
 ## Pemakaian harian (CLI)
 
@@ -200,3 +251,54 @@ Self-healing di `auto`:
 
 Catatan compliance: bot SELALU visible di participant list. Untuk Meet di luar
 domain, seseorang harus admit bot dari waiting room.
+
+## Siapa "Speaker 3" itu: `speaker_map.py`
+
+Fathom mengembalikan nama. Recorder lokal tidak: whisper.cpp tidak memberi label
+sama sekali, dan Gemini memberi "Speaker 1", "Speaker 2". CLAUDE.md melarang
+menebak, jadi tiap action item yang diucapkan label anonim hilang dari MOM.
+
+`speaker_map.py` memasang **tangga confidence**, diambil dari
+[silverstein/minutes](https://github.com/silverstein/minutes): tiap pemetaan
+mencatat **bagaimana** ia didapat, dan pipeline hanya mempercayai tingkat yang
+tidak bisa salah.
+
+| Tier | Dasarnya | Dipercaya |
+| :--- | :--- | :--- |
+| `confirmed` | the owner, lewat `confirm` | ya |
+| `enrolled` | sidik suara (belum ada, lihat di bawah) | ya |
+| `self-id` | penutur menyebut namanya sendiri di gilirannya | ya |
+| `addressed` | orang lain menyebut nama, penutur itu menjawab berikutnya | tidak |
+| `sole-remaining` | satu label dan satu peserta tersisa, dan jumlah ruangnya cocok | tidak |
+
+Tingkat yang tidak dipercaya adalah **usulan**. Ia muncul di `pending`, dan
+labelnya tetap "Speaker N" sampai the owner mengonfirmasi. Kandidat nama harus sudah
+ada di roster rapat atau di `journal/state/people.json`, jadi transkrip tidak
+pernah bisa menciptakan orang baru.
+
+```bash
+python3 meeting-recorder/speaker_map.py resolve --all        # cari nama tiap label
+python3 meeting-recorder/speaker_map.py pending              # yang belum ketemu
+python3 meeting-recorder/speaker_map.py confirm <transcript.md> \
+        --speaker "Speaker 5" --name "YourManager Teammate"
+python3 meeting-recorder/speaker_map.py apply <transcript.md>  # tulis ke transkrip
+```
+
+`apply` menulis `YourManager Teammate (Speaker 5):`, bukan `YourManager Teammate:`. Label asli
+tetap ada supaya klaimnya bisa diaudit terhadap keluaran ASR.
+
+Roster peserta diambil dari entri registry, lalu dari rekaman Fathom
+pasangannya, lalu dari baris `| Participants |` di header MOM. Untuk rekaman
+lokal biasanya MOM yang menjawab, karena entri registry-nya ditulis recorder dan
+tidak pernah melihat undangan kalender.
+
+`watcher.py` memanggilnya sebelum MOM di-draft, jadi action item dari suara yang
+sudah dikenali membawa pemiliknya. Label yang masih terbuka disebut eksplisit ke
+prompt MOM: jangan diberi nama, dan jangan dibuang.
+
+**Tier `enrolled` adalah lubang yang didokumentasikan, bukan fitur.** Sidik suara
+butuh model speaker embedding (minutes memakai pyannote-rs) yang belum ada di
+repo ini. Skemanya sudah disiapkan supaya tidak perlu berubah saat itu masuk.
+
+Store: `journal/state/speaker_maps.json`. Ini bukan salah satu dari empat ledger
+ber-lock, jadi tidak mengambil ledger lock.

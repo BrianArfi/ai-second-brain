@@ -3,7 +3,7 @@
 outcomes_loop.py - Post-launch outcomes loop: track shipped features against
 their PRD success-criteria metrics, pulled weekly from Mixpanel and Metabase.
 
-Design (per plan `bangun-aja-semuanya-barengan-wiggly-noodle`, Komponen 4):
+Design (per plan `bangun-aja-semuanya-barengan-wiggly-noodle`, Component 4):
   - Pure mechanical collector, no LLM. Clones the mention_ledger.py conventions:
     BASE_DIR from __file__, atomic .tmp + os.replace state writes, argparse
     subcommands, stdlib only.

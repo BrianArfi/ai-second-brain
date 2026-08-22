@@ -8,7 +8,7 @@ import sys
 import subprocess
 import datetime
 
-REPO_DIR = "."
+REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Service Map
 SERVICES = [

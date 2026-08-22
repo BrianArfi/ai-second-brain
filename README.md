@@ -55,8 +55,7 @@ Not a chat box. A system that carries your context, reaches your tools, and gets
 - 🖐️ **Holds your tools.** Google Docs, Drive, Slack, Calendar, meeting recorders, Jira, analytics, image and video. It acts in the real services, not just talks about them.
 - 📚 **Learns and remembers.** Correct it once and it keeps the lesson across every future session. It does not start from zero each morning.
 - 🤖 **Runs a team, not a chat.** Big jobs fan out to a fleet of cheap fast workers in parallel, then one flagship model synthesizes. Faster and far cheaper.
-- 🔒 **Guardrails that hold.** Nothing is sent, posted, or deleted without your explicit approval. Credentials never leave your machine.
-- 🌳 **Everything has a home.** A work tree describes the shape of your work, and every tracked item names one node in it. "What is happening with this client?" becomes a lookup, not a search.
+- 🔒 **Guardrails that hold.** Nothing is sent, posted, or deleted without your explicit approval. Documents written to Drive stay inside your own domain unless you publish them deliberately. Credentials never leave your machine.
 - ⚡ **Fifteen minutes to first value.** A conversational brain with no API keys or OAuth, then connect real tools when you are ready.
 
 ---
@@ -170,7 +169,7 @@ The repo ships dozens of skills and commands. A representative slice of what you
 | Area | What you can ask it to do |
 | :--- | :--- |
 | **Communication** | Sweep Slack across many channels and draft a reply in your voice; send email as you; post to a WhatsApp channel and forward to groups; reply inside a Google Doc comment thread. Every send is approval-gated. |
-| **Documents** | Turn markdown into a real, formatted Google Doc; make surgical in-place edits (add links, insert table rows, embed diagrams) without clobbering your hand edits; export a branded PDF; draft and quality-gate a PRD. |
+| **Documents** | Turn markdown into a real, formatted Google Doc; make surgical in-place edits (add links, insert table rows, embed diagrams) without clobbering your hand edits; export a branded PDF; draft and quality-gate a PRD; publish an HTML deliverable to a stable, shareable URL. |
 | **Meetings** | Record and transcribe a meeting locally on your own machine; turn any transcript into clean minutes with decisions and action items filed to your tracker. |
 | **Reporting and ops** | A morning briefing and evening recap; a weekly executive report that weighs what mattered; a PRD pipeline; a live visual dashboard of every project. |
 | **Data** | Query Jira sprints and flag anyone overloaded; pull funnels and retention from Mixpanel; run SQL against Metabase; sweep your calendar into a clean view. |
@@ -225,7 +224,7 @@ So this repo splits the job. One strategist directs; a fleet of cheap, fast work
 
 ```
                     ┌────────────────────────────────────┐
-   "write this      │      MAIN SESSION · Opus 4.8        │  plans + synthesizes
+   "write this      │      MAIN SESSION · Opus 5          │  plans + synthesizes
     week's   ──────▶│      the strategist                 │  (smart, pricey)
     report"         └─────────────────┬──────────────────┘
                                       │ spawns a fleet, all at once
@@ -257,11 +256,11 @@ Use the cheapest model that can do the subtask well. Match the tier to the work,
 | Tier | Model | Model ID | Context | Price /1M (in / out) | Use it for |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Bulk** | Claude Haiku 4.5 | `claude-haiku-4-5` | 200K | $1 / $5 | Mechanical work with no judgment: bulk reading, formatting, extraction, classification. The default for harvester and reviewer subagents. |
-| **Scoped** | Claude Sonnet 4.6 | `claude-sonnet-4-6` | 1M | $3 / $15 | Scoped research, code exploration, in-scope synthesis. The best balance of speed and intelligence for focused subtasks. |
-| **Flagship** | Claude Opus 4.8 | `claude-opus-4-8` | 1M | $5 / $25 | The main session for synthesis-heavy work: planning, weighing tradeoffs, writing the final deliverable. |
+| **Scoped** | Claude Sonnet 5 | `claude-sonnet-5` | 1M | $3 / $15 | Scoped research, code exploration, in-scope synthesis. The best balance of speed and intelligence for focused subtasks. |
+| **Flagship** | Claude Opus 5 | `claude-opus-5` | 1M | $5 / $25 | The main session for synthesis-heavy work: planning, weighing tradeoffs, writing the final deliverable. |
 | **Frontier** | Claude Fable 5 | `claude-fable-5` | 1M | $10 / $50 | The most demanding long-horizon, autonomous work, where one run may plan, build, and verify across many steps. When correctness matters more than cost. |
 
-A practical default: run the main session on **Opus 4.8**, delegate bulk work to **Haiku 4.5** subagents, and reach for **Sonnet 4.6** when a subtask needs real research rather than mechanical effort. Move the main session up to **Fable 5** for the hardest end-to-end jobs.
+A practical default: run the main session on **Opus 5**, delegate bulk work to **Haiku 4.5** subagents, and reach for **Sonnet 5** when a subtask needs real research rather than mechanical effort. Move the main session up to **Fable 5** for the hardest end-to-end jobs.
 
 > Model IDs are exact strings. Use them as written, with no date suffix. Prices are list API prices and may change; check the provider's pricing page for current figures.
 
@@ -375,6 +374,8 @@ Most of what is above is fed by automation, not by you remembering to run a scri
 - The meeting recorder's bot watcher.
 - A dashboard keepalive.
 
+The fleet also runs throttled. Cron jobs are scheduled at deterministic offsets rather than all landing on the same minute, and they run at low CPU and IO priority, so a burst of background work cannot starve the editor and the sessions you are actually using.
+
 Each registered job reports a heartbeat, and a silent overnight failure shows up as a failing row on the System tab instead of going unnoticed. See `.agent/skills/harness-health/` for the health-check layer itself.
 
 ---
@@ -409,9 +410,9 @@ Deeper references:
 - **`docs/MEETING_RECORDER.md`** for the built-in meeting recorder: records and transcribes on your own machine (macOS, Windows, Linux) and drafts the minutes. This is the default source of meeting notes; a cloud recorder is optional.
 - **`docs/DASHBOARD.md`** to run the local visual dashboard at `http://localhost:3737`.
 - **`docs/ARCHITECTURE.md`** for how the pieces fit together.
-- **`docs/OKF_ADAPTATION.md`** for why the memory system follows Google Cloud's Open Knowledge Format, and the verification principle it applies to `mom_reconcile.py`.
+- **`docs/okf_adaptation.md`** for why the memory system follows Google Cloud's Open Knowledge Format, and the verification principle it applies to `mom_reconcile.py`.
 - **`docs/UPDATING.md`** to pull the latest template updates into your fork (or just type `/update-harness`).
-- **`docs/INSTALL_ID.md`** untuk panduan instalasi langkah demi langkah dalam Bahasa Indonesia (workshop companion).
+- **`docs/INSTALL_ID.md`** for the step-by-step installation guide in Indonesian (workshop companion).
 
 ---
 
@@ -419,8 +420,7 @@ Deeper references:
 
 ```
 .agent/skills/      Connectors and skills (Drive, Docs, Slack, Calendar, meetings, Jira, and more)
-.agent/scripts/     Shared helpers, including work_tree.py and the machine detection used at session start
-journal/state/      The work tree: the single taxonomy every tracked item points at
+.agent/scripts/     Shared helpers, including the machine detection used at session start
 .agent/workflows/   Reusable multi-step workflow definitions
 .claude/commands/   Saved workflows you can invoke by name or in plain language
 .claude/agents/     Subagent definitions (harvester, reviewer)

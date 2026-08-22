@@ -43,9 +43,11 @@ The caller provides: the draft text, the draft type (PRD / MOM / Slack / weekly 
    - gamification
    - notifications
 
-   **Precedent, why this is blocker-level.** MBA-237 biometric point protection reached a live sprint as a story generated from an unsourced PRD. Its owner disowned it on 20 Jul 2026. Flag the requirement, but do not assert it is invented without checking a real source first. A sibling CMS audit-trail story was flagged the same way and turned out legitimate, because Work has a compliance owner. Report the missing source, do not pronounce the verdict.
+   **Precedent, why this is blocker-level.** ABC-123 biometric point protection reached a live sprint as a story generated from an unsourced PRD. Its owner disowned it on 20 Jul 2026. Flag the requirement, but do not assert it is invented without checking a real source first. A sibling CMS audit-trail story was flagged the same way and turned out legitimate, because Work has a compliance owner. Report the missing source, do not pronounce the verdict.
 
    Report each as: `[blocker] invented-requirement: "<quoted sentence>" - <category>, no cited source.`
+
+8. **AI slop (messages addressed to a person only: Slack, email, doc/Jira comment, chase note)**: the draft should already have passed `.agent/skills/no-ai-slop/SKILL.md` before reaching you. Flag anything that survived, quoting the line: throat-clearing openers, binary contrasts ("it's not X, it's Y"), importance puffery, weasel attribution ("the team agreed", "per discussion"), fake-profound closing lines, summary-recap endings, and bullet lists standing in for one sentence of ask. **Quote-the-line gate applies.** Report as `[minor] ai-slop: "<quoted sentence>" - <pattern name>.` Do not apply this check to PRDs, MOMs, weekly reports, or LinkedIn posts.
 
 ## Output format
 

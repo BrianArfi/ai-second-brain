@@ -11,6 +11,10 @@ of truth and no drift. Only the runtime lives in the deployment dir and stays ou
 `bin/` (binaries), `data/` (SQLite + the signed-in Chrome profile), `config.toml` (holds
 the admin token), `target/`. `meetbot/config.example.toml` is the scrubbed template.
 
+Note: these paths are WSL-host-specific. `~/tools/meetbot` and
+`.` do not exist on macOS; meetbot
+runs on the WSL automation host only.
+
 ## What this is
 
 `meetbot` is a single Rust binary at `~/tools/meetbot` that joins the owner's

@@ -39,7 +39,7 @@
     'waiting-watchdog', 'premeeting-cards', 'maintenance', 'work-hours']);
 
   /* Job-specific "why + what to do" line for a failing routine — shown even before
-     the lazy job-log is expanded, so "ini fail bisa diapain?" has an answer inline. */
+     the lazy job-log is expanded, so "what can I do about this failure?" has an answer inline. */
   const FAIL_HINTS = {
     'outcomes-loop': 'Metabase session expired → refresh METABASE_SESSION_TOKEN di root .env',
     'harness-health': 'See the findings list in the Harness health card below for what tripped it',
@@ -210,7 +210,7 @@
         const badge = isReauth ? Comp.badge('warn', 'reauth')
           : acked ? Comp.badge('muted', 'acked')
           : Comp.badge('serious', 'failing');
-        /* "job vexa failing, gw bisa ngapain?" — heartbeat-only rows get no
+        /* "job vexa is failing, what can I do?" — heartbeat-only rows get no
            [Run now] (no run-map entry exists for them) but DO get [Ack]
            (/api/ack-job takes any job name; the join above mutes the row) and
            the same AI-solve escape hatch as a failing/reauth routine row;
@@ -219,7 +219,7 @@
            confirmed read needs no re-ack and no AI offer.
            Rendered as an always-visible subtext (same placement routinesSection
            uses for its Run now/Ack/AI solve row) — NOT buried inside the
-           collapsed expandBody, so it answers "bisa ngapain" without a click. */
+           collapsed expandBody, so it answers "what can I do" without a click. */
         const actionBtns = acked ? '' : [
           `<button class="prep-link job-ack-btn" data-job="${U.esc(j.job)}">✓ Ack</button>`,
           Comp.aiButton({ kind: 'fix-job', ref: j.job, label: '🤖 AI solve' }),
@@ -261,7 +261,7 @@
         } else if (r.state === 'reauth') {
           /* NOT counted as failing — status=ok, just needs a human token refresh */
           rank = 1; badge = Comp.badge('warn', 'reauth');
-          /* "gw bisa ngapain?" applies to reauth too — AI can't refresh a token
+          /* "what can I do?" applies to reauth too — AI can't refresh a token
              itself but CAN diagnose/point at the fix, same fix-job kind as a
              failing job */
           subtext = `<div class="row-subtext">⚠ needs reauth` +
@@ -277,7 +277,7 @@
           if (lr.summary) bits.push(`<div class="row-subtext">${U.esc(lr.summary)}</div>`);
           const hint = FAIL_HINTS[r.job];
           if (hint) bits.push(`<div class="row-subtext">${hint}</div>`);
-          /* "ini fail bisa diapain?" — always give an action, never a dead end:
+          /* "what can I do about this failure?" — always give an action, never a dead end:
              [Run now] (only for jobs server.py's JOB_RUN_MAP whitelists) + [Ack]
              + AI solve (every unacked failing row — acked ones already have a
              human-confirmed read, no need to offer AI again).
@@ -316,7 +316,7 @@
     });
   }
 
-  /* ── Run now / Ack — the answer to "ini fail bisa diapain?" ── */
+  /* ── Run now / Ack — the answer to "what can I do about this failure?" ── */
   async function runJob(btn) {
     if (btn.disabled) return;
     const job = btn.dataset.job;
@@ -446,8 +446,8 @@
     groups.forEach(g => (g.nodes || []).forEach(n => { _harnessMapNodes[n.id] = n; }));
     const totalNodes = groups.reduce((a, g) => a + (g.nodes || []).length, 0);
     const body = Comp.harnessMap(hmR.value) +
-      `<div class="row-subtext">Indra ngumpulin sinyal → Refleks ngolah mekanis tiap beberapa menit → ` +
-      `Otak (Claude) synthesize dan decide → Memori nyimpen state → Tangan eksekusi (selalu approval-gated)</div>`;
+      `<div class="row-subtext">Senses collect signals → Reflexes handle the mechanical work every few minutes → ` +
+      `Brain (Claude) synthesizes and decides → Memory holds state → Hands execute (always approval-gated)</div>`;
     return Comp.card({
       key: 'harness-map', icon: '🗺', title: 'Harness map', count: `${totalNodes} nodes`, open: true, body,
     });
@@ -569,7 +569,7 @@
      line). Endpoint is landing concurrently with this card — a missing
      route currently drops the TCP connection with no HTTP response at all
      (fetch rejects), so ANY rejected promise here (network refusal, 404,
-     future 5xx) renders the SAME graceful "belum ada data token" EmptyState
+     future 5xx) renders the SAME graceful "no token data yet" EmptyState
      rather than the alarm-red .load-error the other System cards use. */
   const TU_TASK_ICON = { harvest: '🌾', critic: '🔎', research: '🔬', draft: '✍️',
     review: '🔍', synthesize: '🧵', strategize: '♟', lookup: '📌' };
@@ -634,14 +634,14 @@
   function tokenUsageEmpty(hint) {
     return Comp.card({
       key: 'token-usage', icon: '🧮', title: 'Token Usage (Claude)',
-      body: tuControls() + Comp.emptyState({ icon: '🧮', title: 'Belum ada data token', hint }),
+      body: tuControls() + Comp.emptyState({ icon: '🧮', title: 'No token data yet', hint }),
       open: true,
     });
   }
 
   function tokenUsageSection(tuR) {
     if (!tuR || tuR.status !== 'fulfilled') {
-      return tokenUsageEmpty('/api/token-usage belum live — coba lagi setelah endpoint kelar dideploy');
+      return tokenUsageEmpty('/api/token-usage is not live yet — try again once the endpoint is deployed');
     }
     const d = tuR.value || {};
     const totals = d.totals || {};
@@ -732,7 +732,7 @@
   function tokenEfficiencyEmpty(hint) {
     return Comp.card({
       key: 'token-efficiency', icon: '📈', title: 'Token Efficiency',
-      body: Comp.emptyState({ icon: '📈', title: 'Belum ada data efisiensi', hint }),
+      body: Comp.emptyState({ icon: '📈', title: 'No efficiency data yet', hint }),
       open: false,
     });
   }
@@ -754,7 +754,7 @@
 
   function tokenEfficiencySection(teR) {
     if (!teR || teR.status !== 'fulfilled') {
-      return tokenEfficiencyEmpty('/api/token-efficiency belum live — coba lagi setelah endpoint kelar dideploy');
+      return tokenEfficiencyEmpty('/api/token-efficiency is not live yet — try again once the endpoint is deployed');
     }
     const d = teR.value || {};
     const eff = d.efficiency;

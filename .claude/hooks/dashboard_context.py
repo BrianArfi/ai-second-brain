@@ -14,12 +14,22 @@ Contract: never break a session - on any error print '{}' and exit 0.
 """
 import json
 import os
+import pathlib
 import sys
 
 MAX_CHARS = 8000
 # Historic sections start here; everything below this heading is bulk.
 CUT_MARKERS = ["## 📊 Daily Change Summary"]
-FALLBACK_PROJECT = "."
+
+def project_dir():
+    """CLAUDE_PROJECT_DIR when it is set and real, otherwise derived from this
+    file's own location (two levels up from .claude/hooks/). The hardcoded WSL
+    default other hooks use silently disables them on the macOS checkout, which
+    is exactly where a missing Dashboard payload does the most damage."""
+    env = os.environ.get("CLAUDE_PROJECT_DIR")
+    if env and os.path.isdir(env):
+        return os.path.abspath(env)
+    return str(pathlib.Path(__file__).resolve().parent.parent.parent)
 
 def render(path):
     with open(path, encoding="utf-8", errors="replace") as f:
@@ -50,11 +60,8 @@ def render(path):
     })
 
 def main():
-    project = os.environ.get("CLAUDE_PROJECT_DIR") or FALLBACK_PROJECT
+    project = project_dir()
     path = os.path.join(project, "Dashboard.md")
-    if not os.path.isfile(path):
-        project = FALLBACK_PROJECT
-        path = os.path.join(FALLBACK_PROJECT, "Dashboard.md")
     if not os.path.isfile(path):
         print("{}")
         return

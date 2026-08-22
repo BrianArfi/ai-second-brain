@@ -1,3 +1,8 @@
+---
+name: dashboard-updater
+description: Refreshes Dashboard.md from Drive, Calendar, and Slack in one pass. Use when the dashboard has gone stale, rather than editing it by hand.
+---
+
 # Dashboard Update Skill
 
 The **Dashboard Update Skill** is a centralized automation routine designed to synchronize the local Product Dashboard (`Dashboard.md`) with the latest developments across Google Drive, Google Calendar, and Slack.

@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "meetbot tabCapture probe",
+  "version": "1.0",
+  "description": "Measures whether chrome.tabCapture returns real tab audio, unattended.",
+  "permissions": ["tabCapture", "offscreen", "scripting", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "sw.js" },
+  "action": { "default_title": "capture" },
+  "commands": {
+    "start-capture": {
+      "suggested_key": { "default": "Ctrl+Shift+U" },
+      "description": "Start capturing the meeting tab"
+    }
+  }
+}

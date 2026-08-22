@@ -970,8 +970,8 @@ details.row[open] > summary::after { transform: rotate(90deg); }
 .drawer-close:hover { color: var(--text-primary); background: var(--bg-card-hover); }
 
 .drawer-body { padding: var(--sp-5); overflow-y: auto; flex: 1; }
-/* drawer adalah SURFACE BACA (AI result, prep card, PRD) — naikkan tipografi
-   di atas ukuran list-row biar nyaman dibaca (the owner: "font kekecilan") */
+/* the drawer is a READING SURFACE (AI result, prep card, PRD), so lift the typography
+   above the list-row size so it reads comfortably (the owner: "the font is too small") */
 .drawer-body .md { font-size: 15.5px; line-height: 1.75; }
 .drawer-body .md h1 { font-size: 22px; }
 .drawer-body .md h2 { font-size: 18px; }
@@ -1694,7 +1694,7 @@ a.ticket-chip:hover { border-color: var(--border-active); color: var(--text-acce
 .hmap-g2 { stop-color: #6a8bff; }
 .hmap-g3 { stop-color: #c86bff; }
 
-/* ── 📈 trend card (Comp.trendCard) — the "bikin seneng" momentum card.
+/* ── 📈 trend card (Comp.trendCard) — the feel-good momentum card.
    --tc (categorical color) arrives inline from the builder. ── */
 .trend-card {
   --tc: var(--cat-1);
@@ -2000,7 +2000,7 @@ a.ticket-chip:hover { border-color: var(--border-active); color: var(--text-acce
   /* badge-heavy rows wrap instead of clipping at the viewport edge */
   .row, details.row > summary { flex-wrap: wrap; row-gap: 2px; }
   /* .row-right must wrap internally too: an escalation row's button chain
-     (SLA badge + owner + draft + beres + nudge) is wider than a phone
+     (SLA badge + owner + draft + done + nudge) is wider than a phone
      viewport, and as a single flex:none unit it was THE driver pushing
      document scrollWidth past the viewport (558px on a 390px phone) */
   .row-right { flex-wrap: wrap; max-width: 100%; row-gap: 2px; justify-content: flex-end; }
@@ -2208,6 +2208,27 @@ a.ticket-chip:hover { border-color: var(--border-active); color: var(--text-acce
   padding-left: 4px;
 }
 .qf-d-src { margin-top: 8px; }
+
+/* ── deep-linked record card (#find/<ID>): open on arrival, no click needed ── */
+.qf-hero {
+  background: var(--bg-card); border: 1px solid var(--border-active);
+  border-radius: var(--radius-xs); padding: 12px 14px; margin-bottom: 14px;
+}
+.qf-hero-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.qf-hero-icon { font-size: 15px; }
+.qf-hero-id {
+  font: 600 13px/1 ui-monospace, monospace; color: var(--text-primary);
+  letter-spacing: .02em;
+}
+.qf-hero-kind {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--text-muted); margin-top: 6px;
+}
+.qf-hero-title {
+  color: var(--text-primary); font-size: var(--fs-sm); line-height: 1.45;
+  font-weight: 600; margin: 4px 0 10px;
+}
+.qf-hero-perma { margin-top: 10px; font-size: var(--fs-xs); }
 
 /* ── token-usage period / date filter ── */
 .tu-controls {

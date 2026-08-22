@@ -44,7 +44,7 @@ Read any new meeting notes found (these won't be in existing summaries yet).
 
 **Secondary-client Slack** (via `.agent/skills/secondary-slack-connector` if token is valid):
 - Check if token is valid. If expired, flag it and skip - do not silently omit.
-- Key channels to scan: Gogogo, Ops Platform, general product discussions
+- Key channels to scan: ExampleProduct, Ops Platform, general product discussions
 
 ### 1e. Calendar - check the past week AND coming week
 
@@ -64,9 +64,9 @@ python .agent/skills/google-calendar-connector/gcal_manager.py sweep --profile w
 Synthesize everything from Phase 1 into a review. Structure:
 
 ### Secondary - Last Week
-- **Gogogo**: What shipped, what's in progress, blockers
+- **ExampleProduct**: What shipped, what's in progress, blockers
 - **Operations Platform**: Status of Yellow.ai, refund automation, CS items
-- **Safaraya / Travel**: Any movement?
+- **ExampleProduct / Travel**: Any movement?
 - **Key decisions made** (from Slack or meetings)
 - **Overdue items** still unresolved
 

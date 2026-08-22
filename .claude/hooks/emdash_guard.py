@@ -15,7 +15,16 @@ import sys
 from pathlib import Path
 
 SKIP_DIRS = ("/_archive/", "/.agent/", "/node_modules/", "/scratch/", "/_temp/")
-DEFAULT_PROJECT_DIR = "."
+
+def project_dir():
+    """CLAUDE_PROJECT_DIR when it is set and real, otherwise derived from this
+    file's own location (two levels up from .claude/hooks/). The hardcoded WSL
+    default other hooks use silently disables them on the macOS checkout, which
+    is exactly where an em-dash would silently slip past this guard."""
+    env = os.environ.get("CLAUDE_PROJECT_DIR")
+    if env and os.path.isdir(env):
+        return os.path.abspath(env)
+    return str(Path(__file__).resolve().parent.parent.parent)
 
 def main():
     try:
@@ -37,7 +46,7 @@ def main():
         if not path.endswith((".md", ".txt")):
             sys.exit(0)
 
-        project = os.environ.get("CLAUDE_PROJECT_DIR") or DEFAULT_PROJECT_DIR
+        project = project_dir()
         norm = os.path.abspath(path)
         project_abs = os.path.abspath(project)
         if not norm.startswith(project_abs):

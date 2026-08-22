@@ -417,6 +417,60 @@ table.cmp tr.chosen td:first-child{box-shadow:inset 3px 0 0 var(--gold);font-wei
 
   <hr class="rule">
 
+  <h3 class="h3">Revision history</h3>
+  <div class="tablewrap" tabindex="0" role="region" aria-label="Revision history, scrollable">
+    <table class="cmp">
+      <thead><tr><th>Date</th><th>Change</th><th>Source</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>21 July 2026</td>
+          <td>First issue, from the requirements workshop of 20 July 2026.</td>
+          <td>Requirements workshop</td>
+        </tr>
+        <tr>
+          <td><strong>3 August 2026</strong></td>
+          <td><strong>Data architecture settled.</strong> Member tier is resolved
+             live from Example Program's Accenture API at the moment a code is validated.
+             Work stores no member tier, no PII, and no Example Program member data of
+             any kind, at any point. There is no caching path and no data sync.
+             This replaces the earlier proposal to sync or cache member data, so
+             gating item 1, the Work security and compliance approval to persist
+             tier against an anonymous member ID, is <strong>moot and closed</strong>,
+             and <span class="fn">TR-05</span> is retired.<br>
+             <strong>Phase 2 gains a basic per-campaign promo code stacking
+             toggle</strong>, off by default, campaigns opt in. This is distinct
+             from, and far smaller than, the stacking-groups and A/B testing
+             framework, which stays deferred to a separate 2027 document,
+             PRD_Promo_Engine_V2_Stacking_AB.md.<br>
+             Phasing restated: Phase 1 generic store-wide codes, approved for the
+             next sprint against Saudi National Day; Phase 2 segmented codes,
+             category and product scoping, tier-differentiated discount, and the
+             stacking toggle; Phase 3 vouchers and influencer codes with
+             attribution.</td>
+          <td>Marketplace Sprint Backlog Review, 3 August 2026</td>
+        </tr>
+        <tr>
+          <td><strong>3 August 2026</strong></td>
+          <td>Three consequences of the same decision, recorded after a second
+             pass over the discussion. The <strong>Example Program member ID is named
+             as the anchor attribute</strong> the two systems refer to a member
+             by, constant from profile creation, with email and phone ruled out
+             for that role because both change over time. <strong>The case
+             against a nightly batch is stated on its own terms</strong>,
+             independently of privacy: Work knows only the members who have
+             signed in, so a batch either answers for a minority of the base or
+             requires the full member list. <strong>The cost at campaign creation
+             is stated openly</strong>: the creation screen cannot size an
+             audience, and restoring that would be a separate data-sharing
+             conversation rather than a Phase 2 dependency.</td>
+          <td>Marketplace Sprint Backlog Review, 3 August 2026</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <hr class="rule">
+
   <h2 class="ph2">The ask</h2>
   <div class="prose">
     <p>Example Program asked Work, in the requirements workshop of 20 July 2026, for the
@@ -676,24 +730,61 @@ table.cmp tr.chosen td:first-child{box-shadow:inset 3px 0 0 var(--gold);font-wei
       <rect class="dg-boxR" x="520" y="50" width="280" height="44" stroke-dasharray="5 4"/>
       <text class="dg-tt" x="280" y="68" text-anchor="middle">condition ladder + writes</text>
       <text class="dg-ts" x="280" y="84" text-anchor="middle">known, fast</text>
-      <text class="dg-tt" x="660" y="68" text-anchor="middle" fill="var(--red)">third-party tier lookup</text>
-      <text class="dg-ts" x="660" y="84" text-anchor="middle">unknown share, gating item 1</text>
+      <text class="dg-tt" x="660" y="68" text-anchor="middle" fill="var(--red)">live Accenture tier lookup</text>
+      <text class="dg-ts" x="660" y="84" text-anchor="middle">unknown share, Phase 2 latency risk</text>
       <text class="dg-ts" x="40" y="112" text-anchor="start">0ms</text>
       <text class="dg-ts" x="800" y="112" text-anchor="end">500ms ceiling</text>
       <text class="dg-elab" x="420" y="126" text-anchor="middle">RF-02: validation under 500ms, p99</text>
     </svg>
   </div>
-  <p class="dcap">Third-party hop inside the budget, gating item 1. Phase 1 never
-     makes this call.</p>
+  <p class="dcap">Third-party hop inside the budget. This hop is now the settled
+     design, not an option: tier is always resolved live. Phase 1 never makes
+     this call at all.</p>
 
   <div class="callout note">
     <div class="ct">a second constraint, unrelated to settlement</div>
     <p>Work stores no customer information and treats every user as anonymous.
-       Tier-differentiated discounts require resolving a member's tier from the
-       Example Program e-shop API at validation time, inside a sub-500ms budget, per
-       <span class="fn">RF-02</span>. Phase 1 does not use tier. Phase 2 does, and
-       that is where this constraint bites.</p>
+       Tier-differentiated discounts resolve a member's tier <strong>live from
+       Example Program's Accenture API at the moment a code is validated</strong>,
+       inside a sub-500ms budget, per <span class="fn">RF-02</span>. Work stores
+       no member tier, no PII, and no Example Program member data of any kind, at any
+       point. There is no cache and no data sync. Phase 1 does not use tier.
+       Phase 2 does, and the only thing that bites there is latency, not data
+       residency.</p>
   </div>
+
+  <h3 class="h3">Why a nightly batch was not the cheaper answer</h3>
+  <p class="prose">The obvious way to avoid a call inside the checkout path is to
+     pull the membership base overnight and read it locally. That option was
+     examined on 3 August 2026 and it fails for a reason that has nothing to do
+     with privacy, which is worth stating because the privacy argument tends to
+     crowd it out.</p>
+  <p class="prose">Work only learns that a member exists when that member signs
+     in to the store. If the programme holds a million members and only a
+     fraction have ever signed in, Work knows that fraction and nothing about
+     the rest. A batch built on what Work already holds would therefore answer
+     for a minority of the base while appearing to answer for all of it. A batch
+     built on the whole programme would require Example Program to hand over its full
+     member list, which is a larger data-sharing decision than the one this
+     initiative needs. The live lookup sidesteps the choice: the question is
+     asked about exactly one member, at the moment that member is at checkout.</p>
+
+  <h3 class="h3">What the decision costs at campaign creation</h3>
+  <p class="prose">Promo codes are a creation feature as much as a redemption
+     one, and the two halves are not affected equally. Redemption gets better,
+     because the tier read is always current and an upgrade applies to the very
+     next basket. Creation gives something up, and it should be visible here
+     rather than discovered during Phase 2.</p>
+  <p class="prose">Because Work holds no copy of the membership base, the
+     campaign creation screen cannot size an audience. Building a Gold tier
+     offer, marketing will not see how many Gold members exist, what share of
+     the base they represent, or how far a given set of restrictions would
+     reach. Only Example Program holds the data that answers those questions. The
+     accepted approach is the simpler one: define the code and its restrictions
+     without member data in view, and let eligibility resolve per member at
+     redemption. Audience sizing, if Example Program wants it, is a separate
+     conversation about what data Example Program is willing to share, and it is not a
+     dependency of Phase 2.</p>
 </section>
 
 <!-- ---------------------------------------------------------------- 03 -->
@@ -923,11 +1014,14 @@ table.cmp tr.chosen td:first-child{box-shadow:inset 3px 0 0 var(--gold);font-wei
       <thead><tr><th>Item</th><th>Owner</th><th>Needed by</th></tr></thead>
       <tbody>
         <tr>
-          <td>Gating item 1, security and compliance approval to persist member
-             tier against an anonymous member ID. Blocks <span class="fn">TR-05</span>.</td>
-          <td>Teammate Singh, Work</td>
-          <td>Phase 2. Refusal falls back to a live tier lookup, the latency risk
-             in the diagram above.</td>
+          <td><strong>Gating item 1 is closed, 3 August 2026.</strong> Work no
+             longer persists member tier, so the security and compliance approval
+             that this item asked for is moot and needs no owner. Tier is resolved
+             live from Example Program's Accenture API at validation time.
+             <span class="fn">TR-05</span> is retired.</td>
+          <td>Closed, no owner needed</td>
+          <td>Nothing. The remaining Phase 2 exposure is latency on the live call,
+             the risk in the diagram above, not data storage.</td>
         </tr>
         <tr>
           <td>Which tiers exist and the default discount per tier.</td>
@@ -1020,7 +1114,7 @@ table.cmp tr.chosen td:first-child{box-shadow:inset 3px 0 0 var(--gold);font-wei
     </div>
 
     <div class="epic">
-      <div class="k">PRD 7.1, 9.3, 9.5 &middot; phase 1, tier is phase 2</div>
+      <div class="k">PRD 7.1, 9.3, 9.5 &middot; phase 1, tier and stacking toggle are phase 2</div>
       <h4>Condition enforcement</h4>
       <p class="story">As a consumer, I want a clear reason when my code is
          rejected, so I know whether to try again or give up.</p>
@@ -1033,9 +1127,14 @@ table.cmp tr.chosen td:first-child{box-shadow:inset 3px 0 0 var(--gold);font-wei
       </div>
       <dl>
         <dt>owner</dt><dd>Work build, blocked on decisions 1, 2, and 5</dd>
-        <dt>trade-off</dt><dd>Tier live-lookup versus cached: live respects data
-           minimisation but adds a third-party hop inside the 500ms budget;
-           cached is faster but needs security sign-off, gating item 1.</dd>
+        <dt>trade-off</dt><dd>Settled 3 August 2026: tier is resolved live from
+           Example Program's Accenture API, never cached. Work accepts the third-party
+           hop inside the 500ms budget in exchange for storing no member tier and
+           no PII at all. Caching is not a fallback and is not on the table.
+           The lookup is keyed on the Example Program member ID, which is the anchor
+           attribute both systems refer to a member by. It is constant from the
+           day the profile is created, whereas email and phone number change
+           across a membership lifetime and cannot carry that role.</dd>
       </dl>
     </div>
 
@@ -1178,7 +1277,8 @@ table.cmp tr.chosen td:first-child{box-shadow:inset 3px 0 0 var(--gold);font-wei
         <tr>
           <td>Condition enforcement</td>
           <td>CE-01 to CE-05, TN-01, TN-02, RW-01, RW-02, CS-01 to CS-08</td>
-          <td>TR-01 to TR-05, CS-09, category and product scope</td>
+          <td>TR-01 to TR-04, CS-09, category and product scope, per-campaign
+             stacking toggle. TR-05 retired, nothing is cached.</td>
           <td>VC-01, VC-02, member binding rung</td>
         </tr>
         <tr>
@@ -1196,7 +1296,8 @@ table.cmp tr.chosen td:first-child{box-shadow:inset 3px 0 0 var(--gold);font-wei
         <tr>
           <td>Admin console</td>
           <td>Section 8.1 to 8.4, baseline fields</td>
-          <td>Tier rule table</td>
+          <td>Tier rule table, plus the per-campaign stacking toggle on the
+             campaign form, off by default</td>
           <td>Member binding, attribution tag</td>
         </tr>
       </tbody>
@@ -1208,7 +1309,7 @@ table.cmp tr.chosen td:first-child{box-shadow:inset 3px 0 0 var(--gold);font-wei
     <div class="slimcard"><b>Storefront checkout</b>Shows the code field and the discount as its own line.</div>
     <div class="slimcard"><b>Promo Service</b>Runs the condition ladder, holds a soft reservation for 15 minutes.</div>
     <div class="slimcard"><b>Condition ladder</b>PRD 7.1, order decides the rejection reason.</div>
-    <div class="slimcard"><b>Example Program e-shop API</b>Returns tier inside the 500ms budget, Phase 2+.</div>
+    <div class="slimcard"><b>Example Program Accenture API</b>Returns tier live inside the 500ms budget, Phase 2+. Nothing is stored on the Work side.</div>
     <div class="slimcard"><b>OMS</b>Records code, discount, and campaign ID on the order.</div>
     <div class="slimcard"><b>Redemption Ledger</b>Writes Provisional, then Confirmed at day 30.</div>
     <div class="slimcard"><b>Miles Ledger</b>Owns the 30-day credit window, Example Program-owned.</div>
@@ -1217,9 +1318,12 @@ table.cmp tr.chosen td:first-child{box-shadow:inset 3px 0 0 var(--gold);font-wei
 
   <div class="callout note">
     <div class="ct">what Phase 1 does not need</div>
-    <p>Phase 1 does not need the tier table or member binding. The Example Program e-shop
-       API, member binding, and bulk voucher generation all arrive in Phase 2 and
-       Phase 3. The Phase 1 machine is smaller than the full diagram shown next.</p>
+    <p>Phase 1 does not need tier resolution or member binding. The live call to
+       Example Program's Accenture API arrives in Phase 2, alongside category and product
+       scoping and the per-campaign stacking toggle; member binding and bulk voucher
+       generation arrive in Phase 3. No phase introduces a Work-side store of
+       member tier or PII. The Phase 1 machine is smaller than the full diagram
+       shown next.</p>
   </div>
 </section>
 
@@ -1285,6 +1389,19 @@ table.cmp tr.chosen td:first-child{box-shadow:inset 3px 0 0 var(--gold);font-wei
   <p class="prose">Capability accumulates. Each phase keeps everything the phase before it
      shipped and adds the next layer. Phase 1 must land before Saudi National Day. Step
      through to see what each phase unlocks and what it still cannot do.</p>
+
+  <div class="callout note">
+    <div class="ct">stacking, and what is not in Phase 2</div>
+    <p>Phase 2 now carries a <strong>basic per-campaign promo code stacking
+       toggle</strong>, added 3 August 2026. It is a single switch on a campaign,
+       off by default, and a campaign has to opt in. That is the whole of it.</p>
+    <p>It is deliberately not the full stacking capability. Stacking groups,
+       precedence and priority rules between competing codes, and the A/B testing
+       framework are a much larger piece of work and stay deferred to a separate
+       2027 document, <span class="fn">PRD_Promo_Engine_V2_Stacking_AB.md</span>.
+       The two should not be quoted, scoped, or estimated as if they were the
+       same thing.</p>
+  </div>
 
   <div class="pr wide" id="pr" tabindex="0" aria-label="Phase roadmap. Left and right arrow keys move between phases.">
     <div class="pr-rail">
@@ -1488,7 +1605,7 @@ var FLOW = {
       nodes:["promo"], edges:[],
       chips:[{k:"requirement",v:"CS-01"},{k:"status",v:"open"}], dur:6500 },
     { title:"Tier is resolved live", cam:[320,-30,460,260],
-      cap:"Promo Service calls the Example Program e-shop API for the member's tier, a third party network hop inside the sub-500ms validation budget. Phase 1 does not use tier, which is why gating item 1 matters for Phase 2 rather than now.",
+      cap:"Promo Service calls Example Program's Accenture API for the member's tier, a third party network hop inside the sub-500ms validation budget. The tier is used for the decision and then discarded: Work never stores it. Phase 1 does not use tier at all, so this hop is a Phase 2 concern.",
       nodes:["promo","loyalty"], edges:["promo>loyalty"],
       chips:[{k:"phase",v:"2+"},{k:"requirement",v:"TR-02"}], dur:6000 },
     { title:"The discount comes back", cam:[160,60,480,200],
@@ -1500,7 +1617,7 @@ var FLOW = {
       nodes:["checkout","oms"], edges:["checkout>oms"],
       chips:[{k:"paid",v:"SAR 300"},{k:"requirement",v:"CS-04"}], dur:6000 },
     { title:"The redemption is provisional, not done", cam:[520,90,460,280],
-      cap:"The Redemption Ledger writes the redemption as Provisional. It persists the tier, the customer state, and the miles conversion rate as they were at this moment, so reporting stays stable if the member later changes tier or places more orders.",
+      cap:"The Redemption Ledger writes the redemption as Provisional. It persists the discount band that the campaign rule applied, the customer state, and the miles conversion rate as they were at this moment, so reporting stays stable if the member later places more orders. The member's tier itself is never written down; only the band the campaign resolved to is.",
       nodes:["oms","redemption"], edges:["oms>redemption"],
       chips:[{k:"state",v:"Provisional"},{k:"requirement",v:"ML-01"}], dur:6000 },
     { title:"Thirty days of waiting", cam:[560,80,470,290],
@@ -1571,12 +1688,12 @@ var FAILURES = [
   },
   {
     id:"f3-tier", title:"Tier lookup is slow", breaks:"loyalty",
-    system:"The third party call eats the sub-500ms validation budget. If tier is cached instead, only the tier value against an anonymous member ID is stored, no name, email, or phone, and that needs security and compliance approval.",
+    system:"The third party call eats the sub-500ms validation budget. Caching is not the answer: the architecture settled on 3 August 2026 is a live lookup on every validation, with no tier, no PII, and no Example Program member data stored on the Work side. The mitigation is therefore an engineering one, a hard timeout and a response-time SLA on the Accenture API, not a data-storage one.",
     customer:"Checkout feels slow, or the code fails to validate.",
-    recovery:"Cache the tier, subject to gating item 1. Phase 1 avoids this entirely by not using tier.",
+    recovery:"Timeout, retry policy, and an agreed response-time SLA on the Accenture API, plus a defined behaviour when it does not answer. Phase 1 avoids this entirely by not using tier.",
     steps:[
       { title:"Tier lookup begins",
-        cap:"Promo Service calls the Example Program e-shop API for the member's tier, inside the sub-500ms validation budget.",
+        cap:"Promo Service calls Example Program's Accenture API for the member's tier, inside the sub-500ms validation budget.",
         nodes:["promo","loyalty"], edges:["promo>loyalty"], dur:5200 },
       { title:"The API is slow",
         cap:"The third party call does not return in time and eats the validation budget.",
@@ -1584,9 +1701,9 @@ var FAILURES = [
       { title:"Checkout stalls or fails",
         cap:"The member either waits noticeably longer or the code fails to validate. Phase 1 never makes this call, so it never carries this risk.",
         nodes:["checkout"], edges:[], dur:5600 },
-      { title:"Caching needs sign-off",
-        cap:"A cached tier value against an anonymous member ID would remove the live call, but that needs security and compliance approval, gating item 1.",
-        nodes:[], edges:[], healed:["loyalty"], chips:[{k:"requirement",v:"TR-05"}], dur:5400 }
+      { title:"The fix is an SLA, not a cache",
+        cap:"Caching the tier would remove the live call, but it is explicitly out of the architecture: Work stores no member tier and no PII. The fix is a timeout, a retry policy, and an agreed response-time SLA with Example Program and Accenture.",
+        nodes:[], edges:[], healed:["loyalty"], chips:[{k:"requirement",v:"TR-02"}], dur:5400 }
     ]
   },
   {
@@ -2375,9 +2492,9 @@ if(Flow && document.querySelector("#pg-flow.on")) Flow.boot();
   "TN-01": "Every campaign belongs to one storefront only and won't work on any other.",
   "TN-02": "Example Program staff see only their own campaigns; Work's team can see every tenant's.",
   "TR-01": "One campaign can offer a different discount amount depending on the shopper's loyalty tier.",
-  "TR-02": "The shopper's loyalty tier is looked up live from Example Program's system when they redeem.",
+  "TR-02": "The shopper's loyalty tier is looked up live from Example Program's Accenture API at the moment the code is validated, used for the decision, and never stored by Work.",
   "TR-03": "If a shopper's tier has no discount set, the code is refused for them.",
-  "TR-05": "Cached tier data stores only the tier value, no personal details, pending security approval.",
+  "TR-05": "Retired 3 August 2026. Work caches no tier data, so there is nothing to approve.",
   "VC-01": "Operators can lock a code to one member, one by one or in bulk via CSV.",
   "VC-02": "A member-locked code doesn't work for anyone else and won't count against the usage cap.",
   "VC-04": "Operators can create and activate a one-off custom code in under two minutes, no IT needed.",
@@ -2499,17 +2616,18 @@ if(Flow && document.querySelector("#pg-flow.on")) Flow.boot();
               "New versus existing customer targeting and reporting",
               "Provisional settlement that only confirms after the 30-day window"],
         unlock:"Saudi National Day. A single public code to every member, plus an acquisition offer for members who have never used the store.",
-        miss:["A different discount per loyalty tier","Category or product restriction","Member-bound vouchers","Influencer attribution"],
+        miss:["A different discount per loyalty tier","Category or product restriction","Promo code stacking, even the basic toggle","Member-bound vouchers","Influencer attribution"],
         needs:"Decisions 1, 2, 3 and 5 closed." },
-      { name:"Phase 2", tag:"Category, product, and tier",
-        theme:"Precision. Restrict a code to eligible products, and reward loyalty tiers differently.",
+      { name:"Phase 2", tag:"Category, product, tier, and a basic stacking toggle",
+        theme:"Precision. Restrict a code to eligible products, reward loyalty tiers differently, and let a campaign opt in to stacking.",
         adds:["Category and product scoping",
-              "A different discount per tier, for example Gold 30, Silver 20, Green 10",
-              "Reporting split by tier and by category",
-              "Tier combined with new or existing customer status"],
-        unlock:"Back to School on eligible products, and tiered seasonal offers such as Gold members on their first purchase.",
-        miss:["Bulk voucher generation","Member-bound codes","Influencer attribution"],
-        needs:"Security sign-off to cache member tier, gating item 1." },
+              "A different discount per tier, for example Gold 30, Silver 20, Green 10, resolved live from Example Program's Accenture API and never stored",
+              "Reporting split by discount band and by category",
+              "Tier combined with new or existing customer status",
+              "A per-campaign promo code stacking toggle, off by default, campaigns opt in one at a time"],
+        unlock:"Back to School on eligible products, tiered seasonal offers such as Gold members on their first purchase, and a single campaign that is allowed to sit on top of another one.",
+        miss:["Stacking groups and precedence rules","A/B testing framework","Bulk voucher generation","Member-bound codes","Influencer attribution"],
+        needs:"No security sign-off. Gating item 1 is closed because nothing is stored. What Phase 2 needs is a response-time SLA on the live Accenture tier call, plus Example Program's tier and category lists." },
       { name:"Phase 3", tag:"Vouchers and influencer attribution",
         theme:"Scale and personalisation. This is the full engine.",
         adds:["Bulk voucher generation from a member list",

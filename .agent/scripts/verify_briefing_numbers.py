@@ -24,7 +24,7 @@ import json
 import re
 import sys
 
-# Ticket keys like MP-11685, ECOM-12, S-01
+# Ticket keys like ABC-123, ABC-123, S-01
 TICKET_KEY_RE = re.compile(r'\b([A-Z][A-Z0-9]{0,9}-\d{1,6})\b')
 ISO_DATE_RE = re.compile(r'\b(\d{4}-\d{2}-\d{2})\b')
 # "14 Jul" / "14 July" style dates

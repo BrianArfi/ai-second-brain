@@ -85,58 +85,6 @@ For each recurring task, define the exact steps. The AI follows these in order.
 
 ---
 
-## Every Tracked Item Belongs To A Work-Tree Node
-
-**Nothing tracked exists without a home.** Every item in every tracker you
-run here -- commitments, decisions, things you are waiting on, chases, todo
-lines -- names exactly one node id from `journal/state/work_tree.json`. An
-item with no node is not tracked, it is a loose note, and loose notes are how
-a workspace reaches a few hundred items that can only be understood by
-reading them one at a time.
-
-`work_tree.json` is the **single taxonomy**. If you also run a portfolio, a
-programme list, or any other grouping, it keeps its own ids and is joined to
-the tree by an explicit mapping table rather than competing with it. Never
-introduce a third id space.
-
-| Moment | What must be true |
-| :--- | :--- |
-| Any tracker `add` | `--node <id>` is present and resolves to a real node. No node, no record. |
-| Any `journal/todo.md` line added | Carries the tag `[node:<id>]` |
-| Any node id used | Exists in `work_tree.json`. Ids are permanent: never renamed, never deleted, retired only by `status: archived`. |
-| Work with no node yet | Create the node first (`work_tree.py add-node`), then file under it. |
-
-### When the right node is not obvious, ask. Do not guess, do not park it.
-
-This is the part that carries the rule. An item filed under a
-plausible-but-wrong node is worse than one that was never filed, because it
-reports as tracked and never surfaces again.
-
-- **Confident** -- the source names the client, project or initiative: file
-  it, say which node in one line, move on. No question.
-- **Not confident** -- file nothing yet. Batch every unclear item from the
-  turn into ONE question at the end, each with two or three candidate nodes
-  plus "new node". Never one question per item, never a question mid-flow.
-- **`unfiled` is a triage queue, not an escape hatch.** Allowed only when the
-  user cannot be asked (a cron run, a sweep, a subagent), requires a reason,
-  and every unfiled item is surfaced until it is filed.
-
-### Commands
-
-```bash
-python3 .agent/scripts/work_tree.py find "<text>"      # which node is this?
-python3 .agent/scripts/work_tree.py show <id>          # one node in full
-python3 .agent/scripts/work_tree.py add-node --id x --label "..." --kind item --parent y
-python3 .agent/scripts/work_tree.py coverage           # how much is filed, what is not
-python3 .agent/scripts/work_tree.py validate           # id and mapping drift
-```
-
-Linkage lives **on the record**, not on the tree. Anything that renders the
-tree derives its links from the records; hand-curating a list of references
-on the tree is how records drift out of it unnoticed.
-
----
-
 ## Document Rules
 
 ### Language by context

@@ -22,7 +22,7 @@ This protocol defines the mandatory communication steps when a Slack thread lead
 
 | Project Category | Lead Engineer | Slack Mention |
 | :--- | :--- | :--- |
-| `gogogo`, `esim`, `travel`, `safaraya` | Teammate Afnandika | `@Teammate Afnandika` |
+| `ExampleProduct`, `esim`, `travel`, `ExampleProduct` | Teammate Afnandika | `@Teammate Afnandika` |
 | `ops platform`, `bangkokok`, `yellow`, `AI` | Teammate | `@Teammate` |
 
 ## Example Reply

@@ -538,9 +538,9 @@ reproduced).
 
 ```json
 // request
-{ "email": "owner.local@yourcompany.com", "name": "the operator (local)" }
+{ "email": "teammate@yourcompany.com", "name": "the operator (local)" }
 // 200
-{ "id": 1, "email": "owner.local@yourcompany.com", "name": "the operator (local)" }
+{ "id": 1, "email": "teammate@yourcompany.com", "name": "the operator (local)" }
 ```
 
 `POST /admin/users/{uid}/tokens?scopes=bot,tx,browser` — body `{}`.

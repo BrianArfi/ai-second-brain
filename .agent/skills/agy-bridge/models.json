@@ -3,8 +3,8 @@
   "_agy_note": "agy ids = EXACT `agy models` display strings; agy SILENTLY routes an unknown id to a default, so run.py refuses any id not in known_agy_models. agy token usage is NOT exposed by the CLI -> agy token counts are ESTIMATED (chars/4, flagged). agy auth is flaky per-call (auth-blip -> run.py retries once).",
   "_zai_note": "zai = z.ai GLM Coding Plan (subscription, Anthropic-compatible). Token in ZAI_API_TOKEN or token.env. Real server -> exact usage in response, and it ERRORS on a bad model id (no silent fallback).",
   "_agy_models_seen": "2026-06-24: Gemini 3.5 Flash (Low/Med/High), Gemini 3.1 Pro (Low/High), GPT-OSS 120B (Medium), Claude Sonnet 4.6 (Thinking), Claude Opus 4.6 (Thinking).",
-  "time_routing": "on",
-  "_time_routing_note": "off | advisory | on. Now 'on' because the zai/GLM peak window is VERIFIED from the z.ai dashboard (not a guess). It acts ONLY on verified windows: agy's peak_wib is EMPTY (unverified) so agy is never demoted until `--analyze` provides measured data. Soft-demote: an in-peak backend sinks to the back of its chain but is still tried before the Claude fallback.",
+  "time_routing": "off",
+  "_time_routing_note": "off by default: time routing may only be turned on once peak_wib is filled from measured data (`--analyze`). 'advisory' logs the reorder it would do without applying it.",
   "backends": {
     "agy": {
       "type": "cli",
@@ -36,18 +36,36 @@
       },
       "retired": true,
       "_retired_note": "Subscription ended; retired from all chains 2026-07-27. Kept for cost-history replay and easy restore."
+    },
+    "9router": {
+      "type": "openai-compatible",
+      "base_url": "http://127.0.0.1:20128/v1",
+      "no_auth": true,
+      "flat_rate": true,
+      "max_tokens": 8192,
+      "credential_hint": "9router runs on 127.0.0.1:20128 and holds the upstream subscription itself; no token is set here.",
+      "_note": "Local LLM router proxying the SAME Antigravity subscription the `agy` CLI uses, plus providers agy cannot reach (bpm/*). Wired in as a FALLBACK after the agy entries, never ahead of them: it adds a daemon to the critical path, and if it is not running every call through it fails. What it buys is no subprocess per call and exact token counts, where the CLI path estimates them. TEXT ONLY -- 9router accepts audio, discards it, and returns invented text (verified across 7 models on 2026-08-21), so audio must never be routed here."
+    },
+    "gemini": {
+      "type": "openai-compatible",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "token_env": "GEMINI_API_KEY",
+      "token_file": "token.env",
+      "max_tokens": 8192,
+      "credential_hint": "Free tier: create a key at https://aistudio.google.com/apikey, then `echo 'GEMINI_API_KEY=...' >> .env` in the workspace root",
+      "_note": "Google's own OpenAI-compatible endpoint, reached with a plain API key instead of the Antigravity CLI's OAuth. This is the backend a brand-new user can actually turn on: same free key that makes meeting transcription work, no subscription, no CLI. Kept behind the agy entries so an existing Antigravity install is unaffected."
+    },
+    "groq": {
+      "type": "openai-compatible",
+      "base_url": "https://api.groq.com/openai/v1",
+      "token_env": "GROQ_API_KEY",
+      "token_file": "token.env",
+      "max_tokens": 8192,
+      "credential_hint": "Free tier: create a key at https://console.groq.com/keys, then `echo 'GROQ_API_KEY=...' >> .env` in the workspace root",
+      "_note": "Free tier, very fast. Model ids move faster here than at other vendors, so confirm with `run.py --setup`, which lists what the key can actually see rather than trusting the id below."
     }
   },
-  "known_agy_models": [
-    "Gemini 3.5 Flash (Low)",
-    "Gemini 3.5 Flash (Medium)",
-    "Gemini 3.5 Flash (High)",
-    "Gemini 3.1 Pro (Low)",
-    "Gemini 3.1 Pro (High)",
-    "GPT-OSS 120B (Medium)",
-    "Claude Sonnet 4.6 (Thinking)",
-    "Claude Opus 4.6 (Thinking)"
-  ],
+  "known_agy_models": [],
   "model_prices": {
     "_unit": "USD per 1,000,000 tokens, [input, output]. List/published rates as of 2026-06-24. Subscription backends are NOT free; this is their per-Mtok equivalent.",
     "_sources": "Claude: metacto/tldl 2026. Gemini: ai.google.dev/pricing. GPT-OSS: pricepertoken. GLM: estimated ~2.6x cheaper than Gemini Pro (confirm at z.ai pricing).",
@@ -73,6 +91,22 @@
         9.0
       ],
       "GPT-OSS 120B (Medium)": [
+        0.04,
+        0.1
+      ],
+      "ag/gemini-3-flash": [
+        1.5,
+        9.0
+      ],
+      "gemini-2.5-flash": [
+        1.5,
+        9.0
+      ],
+      "llama-3.3-70b-versatile": [
+        0.59,
+        0.79
+      ],
+      "openai/gpt-oss-120b": [
         0.04,
         0.1
       ]
@@ -103,7 +137,11 @@
       "glm-5.2",
       "glm",
       "kimi-latest",
-      "kimi"
+      "kimi",
+      "ag/gemini-3-flash",
+      "gemini-2.5-flash",
+      "llama-3.3-70b-versatile",
+      "openai/gpt-oss-120b"
     ],
     "claude_tiers": {
       "haiku": [
@@ -125,32 +163,37 @@
     }
   },
   "subscriptions": {
-    "_note": "Flat monthly outlay (USD). Context only: shown on the dashboard, NEVER folded into per-call cost as $0. the owner to confirm exact tiers.",
-    "zai_glm_coding": 10,
-    "kimi_code": 0,
-    "_kimi_code_note": "Kimi membership tier that includes Kimi Code (Moderato ~$19 / Allegretto ~$39 / Allegro ~$99). Set to the tier the owner actually subscribes to.",
-    "antigravity_agy": 0
+    "_note": "Flat monthly outlay in USD for each subscription backend, shown on the dashboard as context and NEVER folded into per-call cost. Zeros here mean 'not subscribed'. Put your real figures in models.local.json, which is gitignored."
   },
   "peak_wib": {
-    "_note": "Demote windows in WIB (UTC+7), [startHour, endHour) 24h. zai = VERIFIED from z.ai dashboard: 14:00-18:00 UTC+8 = 13:00-17:00 WIB (3x quota burn in peak vs 1x off-peak now). agy = EMPTY/unverified, so agy is NEVER demoted until `--analyze` gives measured data; this keeps 'on' acting ONLY on the verified GLM window.",
-    "agy": [],
-    "zai": [
-      [
-        13,
-        17
-      ]
-    ]
+    "_note": "Quota demote windows per backend, [startHour, endHour) in local time, 24h. EMPTY by default and deliberately so: a demote window copied from someone else's vendor dashboard reorders your chains for a quota you do not have. Fill this in models.local.json only after `--analyze` shows measured peaks in YOUR telemetry."
   },
   "capabilities": {
     "_note": "capability -> ordered backend+model candidates, grounded in model strengths/context. Tasks reference one of these. Cost is NOT the only axis here (context window + lineage matter); the cost dashboard reveals where a choice does/doesn't save vs its claude_fallback so chains can be retuned from data.",
     "_bulk_cheap_note": "OWNER DECISION 2026-07-04: Gemini Flash stays lead for harvest even though the cost log shows GLM is cheaper per-call. Reason: the Gemini (agy) subscription is rarely used otherwise, so subscription utilization outweighs the per-call savings. Do NOT 'optimize' this back to GLM-first based on agy_usage_log alone.",
     "bulk-cheap": [
       "Gemini 3.5 Flash (High)",
-      "Gemini 3.1 Pro (Low)"
+      "Gemini 3.1 Pro (Low)",
+      {
+        "backend": "9router",
+        "model": "ag/gemini-3-flash"
+      },
+      {
+        "backend": "gemini",
+        "model": "gemini-2.5-flash"
+      },
+      {
+        "backend": "groq",
+        "model": "llama-3.3-70b-versatile"
+      }
     ],
     "reasoning": [
       "Gemini 3.1 Pro (High)",
-      "GPT-OSS 120B (Medium)"
+      "GPT-OSS 120B (Medium)",
+      {
+        "backend": "gemini",
+        "model": "gemini-2.5-flash"
+      }
     ],
     "cross-lineage": [
       "GPT-OSS 120B (Medium)",
@@ -158,6 +201,10 @@
       {
         "backend": "kimi",
         "model": "kimi-latest"
+      },
+      {
+        "backend": "groq",
+        "model": "openai/gpt-oss-120b"
       }
     ],
     "long-context": [
@@ -166,7 +213,11 @@
     ],
     "draft": [
       "Gemini 3.5 Flash (High)",
-      "Gemini 3.1 Pro (High)"
+      "Gemini 3.1 Pro (High)",
+      {
+        "backend": "gemini",
+        "model": "gemini-2.5-flash"
+      }
     ],
     "_draft_flash_note": "OWNER DECISION 2026-07-22: Gemini 3.5 Flash promoted to HEAD of the draft chain (was glm-5.2-first), same rationale as bulk-cheap -> utilize the idle Gemini/agy subscription. glm-5.2 stays fallback #2. reasoning/critic intentionally NOT changed: GLM keeps the lead there for reasoning depth + cross-lineage diversity.",
     "image": "NOT handled by the bridge -> use the gemini-image skill. Default image model is gemini-3-pro-image ('Nano Banana', pro 3.1 tier; set 2026-07-22); imagen-4.0 only when true aspect-ratio control is needed.",
@@ -193,5 +244,6 @@
       "claude_fallback": "sonnet",
       "intent": "Generate content drafts (social posts, SEO fixes, copy) on the cheap strong writer GLM 5.2; specialist agents call this for generation. Falls back to Claude sonnet for voice/quality."
     }
-  }
+  },
+  "_known_agy_models_note": "Populated from `agy models` by `run.py --setup --write`, per account. run.py refuses any id not in this list because agy silently routes an unknown id to a default; an empty list here means 'ask the CLI', not 'allow anything'."
 }

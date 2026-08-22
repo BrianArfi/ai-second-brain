@@ -27,6 +27,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import wave
 
 from common import detect_platform, load_config, slugify
@@ -127,12 +128,24 @@ def record_windows(base, title, start, mic_only, system_only):
     stop = threading.Event()
     print("Recording... Ctrl-C to stop.")
     signal.signal(signal.SIGINT, lambda *a: stop.set())
+    # Second way to ask for a clean stop: a <base>.stop file appearing next to the marker.
+    #
+    # SIGINT is fine from a terminal, but a GUI that spawned this cannot send one on Windows,
+    # where a detached child has no console to receive Ctrl-C. Killing the process instead would
+    # skip the `finally` below, leaving the .recording marker in place -- and watcher.py ignores
+    # any recording whose marker still exists, so the audio would sit on disk forever looking
+    # like it never happened. The sentinel gives every caller a clean stop on every platform.
+    stop_file = base + ".stop"
     try:
         while not stop.is_set():
             stop.wait(1)
+            if os.path.exists(stop_file):
+                stop.set()
             elapsed = (datetime.datetime.now(datetime.timezone.utc) - start).seconds
             print(f"\r  {elapsed // 60:02d}:{elapsed % 60:02d}", end="", flush=True)
     finally:
+        if os.path.exists(stop_file):
+            os.remove(stop_file)
         return cap.stop()
 
 # ---------- optional screen recording (video sidecar) ----------
@@ -168,11 +181,50 @@ class ScreenRecorder:
 
 # ---------- macos / linux (ffmpeg) ----------
 
+def ensure_macos_capture_device():
+    """Make sure the system-audio capture device exists, and say whether it does.
+
+    macOS exposes no system-audio input of its own, so a plain avfoundation capture records the
+    microphone and nothing else -- your half of the meeting. `macos/asb-systemaudio` builds a Core
+    Audio process tap (macOS 14.2+, no driver, no admin) wrapped in an aggregate device alongside
+    the mic, which is the device `config.json` points at.
+
+    Called before every macOS capture rather than once at setup: an aggregate device does not
+    survive every OS update, and discovering that at the top of a meeting is too late. `create` is
+    idempotent, so the usual case costs one fast subprocess.
+
+    Returns True when the device is there. A False return is NOT fatal on purpose -- the caller
+    falls back to the microphone, because half a meeting on disk beats none.
+    """
+    helper = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "macos", "asb-systemaudio")
+    if not os.path.isfile(helper):
+        return False
+    try:
+        r = subprocess.run([helper, "create"], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if r.returncode != 0:
+        # The helper's own message names the cause (permission, OS too old), and it is the only
+        # thing here that knows which -- so pass it through rather than inventing a summary.
+        sys.stderr.write(r.stderr or "could not create the system-audio capture device\n")
+        return False
+    return True
+
 def record_ffmpeg(base, plat, machine, mic_only, system_only):
     ffmpeg = machine.get("ffmpeg", "ffmpeg")
     out = base + ".wav"
     if plat == "macos":
         dev = machine.get("avfoundation_audio_device", ":0")
+        # --mic-only asked for the microphone, so do not quietly hand back a device that also
+        # carries the room's audio.
+        if not mic_only and not ensure_macos_capture_device():
+            fallback = machine.get("avfoundation_mic_fallback", ":0")
+            if dev != fallback:
+                sys.stderr.write(
+                    "WARNING: system audio is unavailable, recording the microphone only. "
+                    "This captures your voice but not the other people in the call.\n")
+                dev = fallback
         cmd = [ffmpeg, "-hide_banner", "-f", "avfoundation", "-i", dev,
                "-ac", "1", "-ar", "48000", out]
     else:  # linux
@@ -194,11 +246,23 @@ def record_ffmpeg(base, plat, machine, mic_only, system_only):
 
     print("Recording... Ctrl-C or 'q' to stop.")
     proc = subprocess.Popen(cmd)
+    # Same two stop paths as the Windows capture: Ctrl-C, or a <base>.stop sentinel appearing.
+    # Poll rather than plain wait() so a GUI caller that cannot deliver SIGINT still gets ffmpeg
+    # shut down through its own SIGINT, which is what makes it flush a playable file.
+    stop_file = base + ".stop"
     try:
+        while proc.poll() is None:
+            if os.path.exists(stop_file):
+                proc.send_signal(signal.SIGINT)
+                break
+            time.sleep(1)
         proc.wait()
     except KeyboardInterrupt:
         proc.send_signal(signal.SIGINT)
         proc.wait()
+    finally:
+        if os.path.exists(stop_file):
+            os.remove(stop_file)
     if not os.path.exists(out):
         sys.exit("ERROR: ffmpeg produced no output")
     return [out]

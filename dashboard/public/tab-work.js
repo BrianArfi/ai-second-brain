@@ -174,7 +174,7 @@ window.Tabs = window.Tabs || {};
         <option>Other</option>
       </select>
       <select id="work-new-initiative" aria-label="initiative">${initOptions}</select>
-      <input type="text" id="work-new-jira" placeholder="Jira key (e.g. MP-123, optional)" />
+      <input type="text" id="work-new-jira" placeholder="Jira key (e.g. ABC-123, optional)" />
       <input type="text" id="work-new-parent" list="work-new-parent-list" placeholder="Parent ticket id (optional)" />
       <datalist id="work-new-parent-list">${parentOptions}</datalist>
       <input type="text" id="work-new-note" placeholder="Note (optional)…" />
@@ -188,7 +188,7 @@ window.Tabs = window.Tabs || {};
     if (!title) { Comp.toast('Title required', false); return; }
     const jiraKey = val('#work-new-jira').trim().toUpperCase();
     if (jiraKey && !JIRA_KEY_RE.test(jiraKey)) {
-      Comp.toast(`Invalid Jira key "${jiraKey}" — expected e.g. MP-123`, false);
+      Comp.toast(`Invalid Jira key "${jiraKey}" — expected e.g. ABC-123`, false);
       return;
     }
     const initiativeId = val('#work-new-initiative');
@@ -299,7 +299,7 @@ window.Tabs = window.Tabs || {};
      page jump) — same icon/title/badges/meta shape as Comp.listRow's inner
      markup, button-wrapped so the whole row is clickable. The full-page
      #work/init/<id> route is still reachable via the slide-over's own
-     "⛶ Buka halaman penuh" link (see drillBodyHtml/openInitiativeSlideOver
+     "⛶ Open full page" link (see drillBodyHtml/openInitiativeSlideOver
      below) for deep links (Today tiles etc). Full name (no truncation):
      2-line clamp on .row-title is CSS's job. */
   function initiativeLinkRow(it) {
@@ -520,12 +520,34 @@ window.Tabs = window.Tabs || {};
         <span class="wt-kind">${U.esc(n.kind)}</span>
         ${n.owner ? '<span class="wt-badge-b">Needs the owner</span>' : ''}
         ${n.moved ? '<span class="wt-moved">↑ moved this week</span>' : ''}
+        ${n.updated_wib ? `<span class="wt-moved">✎ ${U.esc(n.updated_wib.slice(0, 10))}</span>` : ''}
         ${wtRefChips(n.refs)}
       </div>
       ${n.summary ? `<p class="wt-sum">${U.esc(n.summary)}</p>` : ''}
       ${wtSourceChips(n.sources)}
       ${body}
     </div>`;
+  }
+
+  /* Freshness of the tree as a whole. work_tree.json has exactly one writer
+     (evening-update step 5c, narrow) and one full regenerator (/weekly-report),
+     so it CAN silently freeze: it sat at 30 Jul for five days while SAIB shipped
+     a BRD revision, and the tab read as live the whole time. `refreshed_wib` is
+     the nightly narrow pass; `generated_wib` is the last full rebuild. Show the
+     newer of the two, and warn once it stops being today's. */
+  function wtFreshness(tree) {
+    const stamp = (tree && (tree.refreshed_wib || tree.generated_wib)) || null;
+    if (!stamp) return { text: 'no refresh stamp', days: 99, stale: true };
+    const t = Date.parse(stamp);
+    if (Number.isNaN(t)) return { text: `as of ${stamp}`, days: 99, stale: true };
+    /* compare WIB calendar days, not elapsed hours: a 21:30 write and a 09:00
+       read are the same working day and must not read as "1d old" */
+    const wibDay = ms => Math.floor((ms + 7 * 3600000) / 86400000);
+    const days = wibDay(Date.now()) - wibDay(t);
+    const when = stamp.slice(0, 10);
+    if (days <= 0) return { text: 'refreshed today', days: 0, stale: false };
+    if (days === 1) return { text: `as of yesterday, ${when}`, days, stale: false };
+    return { text: `as of ${when}, ${days}d old`, days, stale: true };
   }
 
   function workTreeCard() {
@@ -558,10 +580,11 @@ window.Tabs = window.Tabs || {};
         ${wtDetail(nodes, parent)}
       </div>`;
 
+    const fresh = wtFreshness(state.workTree);
     return Comp.card({
       key: 'work-tree', icon: '🌳', title: 'Work Tree',
-      count: `${totals.threads} threads · ${totals.attn} need attention`,
-      status: totals.attn ? 'warn' : 'good',
+      count: `${totals.threads} threads · ${totals.attn} need attention · ${fresh.text}`,
+      status: fresh.stale ? 'warn' : (totals.attn ? 'warn' : 'good'),
       body, open: true,
     });
   }
@@ -668,14 +691,14 @@ window.Tabs = window.Tabs || {};
 
   /* ── Commitments ── */
 
-  /* row action bar: close ("Beres") / drop ("bukan commitment") both go
+  /* row action bar: close ("Done") / drop ("not a commitment") both go
      through /api/commitment-close via commitment_ledger.py (single writer);
-     AI kerjain is just Comp.aiButton (wiring lives in components.js) */
+     The AI button is just Comp.aiButton (wiring lives in components.js) */
   function commitmentActionBar(it) {
     return `<div class="action-bar" data-commitment-id="${U.esc(it.id)}">
-      <button class="prep-link" data-action="commitment-close" data-id="${U.esc(it.id)}">✓ Beres</button>
-      <button class="prep-link" data-action="commitment-drop" data-id="${U.esc(it.id)}">✕ Bukan commitment</button>
-      ${Comp.aiButton({ kind: 'commitment', ref: it.id, label: '🤖 AI kerjain' })}
+      <button class="prep-link" data-action="commitment-close" data-id="${U.esc(it.id)}">✓ Done</button>
+      <button class="prep-link" data-action="commitment-drop" data-id="${U.esc(it.id)}">✕ Not a commitment</button>
+      ${Comp.aiButton({ kind: 'commitment', ref: it.id, label: '🤖 AI, work on it' })}
     </div>`;
   }
 
@@ -719,7 +742,7 @@ window.Tabs = window.Tabs || {};
   const isOverdueCommitment = (it, today) =>
     !!(it.due && today && U.fmtDue(it.due, today).state === 'overdue');
 
-  /* "belum di-close" fix: keep collapsed 'Overdue' front-and-center ahead of
+  /* "never closed" fix: keep collapsed 'Overdue' front-and-center ahead of
      the rest of Open, so a stale-but-open item can't hide inside a flat list */
   function commitmentGroupsHtml(openItems, today) {
     const overdue = openItems.filter(it => isOverdueCommitment(it, today));
@@ -740,7 +763,7 @@ window.Tabs = window.Tabs || {};
   function verifyRunLine() {
     const runs = (state.aiRuns && state.aiRuns.runs) || [];
     const run = runs.find(r => r.kind === 'verify-commitments');
-    if (!run) return 'belum pernah diverifikasi';
+    if (!run) return 'never verified';
     const ts = run.finished_wib || run.started_wib;
     const ageH = ts ? (Date.now() - Date.parse(ts)) / 3600000 : null;
     const ageTxt = (ageH !== null && Number.isFinite(ageH)) ? U.fmtAge(ageH) : '?';
@@ -755,7 +778,7 @@ window.Tabs = window.Tabs || {};
     const items = com.items || [];
     const open = items.filter(it => it.status === 'open');
     const closed = items.filter(it => it.status !== 'open');
-    const headerControls = `<p>${Comp.aiButton({ kind: 'verify-commitments', ref: 'all', label: '🔍 AI verifikasi semua' })}</p>
+    const headerControls = `<p>${Comp.aiButton({ kind: 'verify-commitments', ref: 'all', label: '🔍 AI verify all' })}</p>
       <p class="row-subtext">${verifyRunLine()}</p>`;
     const nested = Comp.card({
       key: 'commitments-recent', icon: '✓', title: 'Recently closed', count: `${closed.length}`,
@@ -806,14 +829,14 @@ window.Tabs = window.Tabs || {};
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id, action: 'reopen', note: 'undo from dashboard' }),
           });
-          Comp.toast(`Dibuka lagi: ${id}`, true);
+          Comp.toast(`Reopened: ${id}`, true);
           await reloadCommitmentsSection();
         },
       };
-      Comp.toast(action === 'close' ? `Beres: ${id}` : `Di-drop: ${id}`, true, undo);
+      Comp.toast(action === 'close' ? `Done: ${id}` : `Dropped: ${id}`, true, undo);
       await reloadCommitmentsSection();
     } catch (err) {
-      Comp.toast(`Gagal ${action === 'close' ? 'nutup' : 'drop'} ${id}: ${err.message}`, false);
+      Comp.toast(`Could not ${action === 'close' ? 'close' : 'drop'} ${id}: ${err.message}`, false);
     }
   }
 
@@ -860,7 +883,7 @@ window.Tabs = window.Tabs || {};
      Portfolio slide-over (Drawer.openWide) so the two views can never
      drift. Only the surrounding chrome differs per caller: the full page
      wraps it in a back button + breadcrumb; the slide-over wraps it in a
-     "⛶ Buka halaman penuh" link (see openInitiativeSlideOver below). */
+     "⛶ Open full page" link (see openInitiativeSlideOver below). */
   function drillBodyHtml(d) {
     const init = d.initiative || {};
     const counts = d.counts || {};
@@ -901,7 +924,7 @@ window.Tabs = window.Tabs || {};
        notes in app.js) — wraps normally, unlike .row-meta which forces
        nowrap+ellipsis for flex-row secondary text. */
     const footer = unlinkedHint > 0
-      ? `<p class="row-note">${unlinkedHint} tiket project ini belum di-link ke initiative (set initiative_id via edit)</p>`
+      ? `<p class="row-note">${unlinkedHint} tickets in this project are not linked to an initiative yet (set initiative_id via edit)</p>`
       : '';
 
     return `${headline}${blockersCard}${tasksCard}${footer}`;
@@ -966,7 +989,7 @@ window.Tabs = window.Tabs || {};
   /* Portfolio initiative rows open THIS instead of navigating away —
      background Portfolio stays visible (progressive disclosure, not a page
      jump). Same drillBodyHtml() as the full page, so the two views can
-     never drift. A "⛶ Buka halaman penuh" link up top still reaches the
+     never drift. An "⛶ Open full page" link up top still reaches the
      full #work/init/<id> route for deep links (Today tiles etc). `seq`
      guards against a slower earlier fetch overwriting a newer click. */
   let slideOverSeq = 0;
@@ -974,7 +997,7 @@ window.Tabs = window.Tabs || {};
     const seq = ++slideOverSeq;
     const skeleton = `<div class="skeleton"><div class="skeleton-line"></div><div class="skeleton-line w-80"></div><div class="skeleton-line w-60"></div></div>`;
     Drawer.openWide(name || id, skeleton);
-    const fullPageLink = `<p><a class="prep-link" data-drawer-nav href="#work/init/${encodeURIComponent(id)}">⛶ Buka halaman penuh</a></p>`;
+    const fullPageLink = `<p><a class="prep-link" data-drawer-nav href="#work/init/${encodeURIComponent(id)}">⛶ Open full page</a></p>`;
     try {
       const d = await U.fetchJSON(`/api/initiative/${encodeURIComponent(id)}`);
       if (seq !== slideOverSeq) return;   // superseded by a newer click
@@ -986,7 +1009,7 @@ window.Tabs = window.Tabs || {};
     }
   }
 
-  /* "⛶ Buka halaman penuh" is a real <a href="#work/init/…"> — let it
+  /* "⛶ Open full page" is a real <a href="#work/init/…"> — let it
      navigate natively, just close the slide-over as a courtesy so the full
      page isn't left rendering underneath an open drawer showing the same
      content twice. */

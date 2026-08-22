@@ -162,7 +162,7 @@ def calendar_status(card, date_str):
     Two signals Slack search structurally cannot see:
       - event status == 'cancelled', the organiser killed it.
       - an attendee whose responseStatus is 'declined'. On 28 Jul Teammate
-        Chennupati declined the 18:15 MPS-1550 scoping by email while the card
+        Chennupati declined the 18:15 ABC-123 scoping by email while the card
         still read 'unknown', and he was the person the session depended on.
 
     Returns (status, evidence) or (None, []) when the calendar says nothing,
@@ -207,7 +207,7 @@ def live_status(card, window_h=18):
     This is now the FALLBACK. `calendar_status()` runs first and is authoritative:
     since 28 Jul 2026 it reads the event's own status plus attendee responseStatus,
     which covers organiser cancellations and declines (Teammate declining the 18:15
-    MPS-1550 scoping was invisible to this function and obvious to that one).
+    ABC-123 scoping was invisible to this function and obvious to that one).
 
     REMAINING LIMITATION, do not mistake 'unknown' for 'on'. Reached only when the
     calendar is silent. It catches a cancellation only when the message names the

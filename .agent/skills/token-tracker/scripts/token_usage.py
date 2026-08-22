@@ -567,8 +567,8 @@ def cmd_report(args):
     print(f"## Token usage - last {agg['window_days']}d "
           f"(swept {state.get('last_sweep', '?')}, {state.get('sweep_seconds', '?')}s)")
     print()
-    print(f"Claude = estimasi setara-API (the owner pakai subscription); "
-          f"biaya offload riil ada di agy.")
+    print(f"Claude = API-equivalent estimate (the owner is on a subscription); "
+          f"the real offload cost is in agy.")
     print()
     print(f"**Totals:** {tot['sessions']} sessions | in {tot['input_tokens']:,} | "
           f"out {tot['output_tokens']:,} | cache-read {tot['cache_read_tokens']:,} | "

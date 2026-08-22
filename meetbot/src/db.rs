@@ -740,7 +740,7 @@ mod tests {
         NewSegment {
             start_time: start,
             end_time: start + 1.0,
-            speaker: Some("Fred Marchesi".to_string()),
+            speaker: Some("YourManager Marchesi".to_string()),
             text: text.to_string(),
             language: Some("en".to_string()),
         }

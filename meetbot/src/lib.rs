@@ -32,6 +32,7 @@ pub mod api;
 pub mod audio;
 pub mod db;
 pub mod meet;
+pub mod pulse;
 pub mod session;
 pub mod state;
 pub mod teams;

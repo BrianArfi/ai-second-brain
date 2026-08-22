@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Adds a 'ClickUp Link' column to the FINA PoC Action Item Google Sheet.
+Adds a 'ClickUp Link' column to the ExampleProject PoC Action Item Google Sheet.
 Strategy: export as XLSX → add column → re-upload converting back to Google Sheets.
 """
 
@@ -95,7 +95,7 @@ def add_clickup_column(xlsx_bytes, clickup_tasks):
     # The target sheet — try by name first, fallback to first sheet
     target_sheet = None
     for ws in wb.worksheets:
-        if "Action Item" in ws.title or "FINA" in ws.title or "PoC" in ws.title:
+        if "Action Item" in ws.title or "ExampleProject" in ws.title or "PoC" in ws.title:
             target_sheet = ws
             break
     if target_sheet is None:

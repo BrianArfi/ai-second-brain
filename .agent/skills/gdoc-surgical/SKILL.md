@@ -25,6 +25,7 @@ token is valid for the Docs API too - no extra scopes or re-auth needed).
 | Turn a "(Source: X)" citation / doc name into a clickable link | **this skill: `linkify`** |
 | Add a section / changelog entry at the end | **this skill: `append`** |
 | Add a row to an existing table | **this skill: `insert-row`** |
+| Remove a row from an existing table | **this skill: `delete-row`** |
 
 ## Commands
 
@@ -50,6 +51,12 @@ python3 .agent/skills/gdoc-surgical/gdoc_surgical.py append --id DOC_ID \
 python3 .agent/skills/gdoc-surgical/gdoc_surgical.py list-tables --id DOC_ID
 python3 .agent/skills/gdoc-surgical/gdoc_surgical.py insert-row --id DOC_ID \
   --table 0 --cells "2026-07-12|Updated ship date|the owner"
+
+# 2d. Delete a row. --row and --expect are both mandatory: --expect must appear
+# in the row, or nothing is deleted (exit 2). Row indexes shift under any other
+# edit, so this is what stops a stale index deleting the wrong row.
+python3 .agent/skills/gdoc-surgical/gdoc_surgical.py delete-row --id DOC_ID \
+  --table 13 --row 5 --expect "Discount > Work's earnings"
 ```
 
 ## Rules of engagement

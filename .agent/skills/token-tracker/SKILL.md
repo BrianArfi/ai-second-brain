@@ -1,3 +1,8 @@
+---
+name: token-tracker
+description: Records how many tokens and how much money each task type costs, split by interactive, daily-update, mom, prd, weekly-report, subagent, and workflow-agent. Use to see where the budget goes.
+---
+
 # token-tracker — Harness Token Consumption per Task Type
 
 Tracks how many tokens (and how much API-equivalent money) the Claude Code
@@ -63,6 +68,8 @@ the runner side instead (run meta `tokens_in/tokens_out/cost_usd`, surfaced by
 appear.
 
 ## Cron (the owner installs; on-window rule 12:30–22:00 WIB)
+
+Cron runs on the WSL automation host only. Do not install on macOS.
 
 ```
 50 12,18 * * * flock -n /tmp/token_tracker.lock python3 ./.agent/skills/token-tracker/scripts/token_usage.py sweep >> ./.agent/skills/token-tracker/token_tracker_cron.log 2>&1

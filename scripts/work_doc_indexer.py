@@ -9,7 +9,7 @@ import google_auth_httplib2
 
 # Add work-drive-connector to path for auth
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# Note: The path below assumes the script is in ./scripts/
+# Note: the path below assumes the script is one level under the repo root, in scripts/
 DRIVE_CONNECTOR_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, '..', '.agent', 'skills', 'work-drive-connector'))
 if DRIVE_CONNECTOR_DIR not in sys.path:
     sys.path.append(DRIVE_CONNECTOR_DIR)
@@ -29,7 +29,7 @@ except ImportError:
     TimeoutException = Exception
 
 # Configuration
-WORK_ROOT = './Clients/Work'
+WORK_ROOT = os.path.join(os.path.dirname(SCRIPT_DIR), 'Clients', 'Work')
 SUPPORTED_EXTENSIONS = ('.md', '.pdf', '.pptx', '.docx', '.xlsx', '.html')
 IGNORE_DIRS = ('.git', 'node_modules', '_temp', 'data', 'incidents')
 

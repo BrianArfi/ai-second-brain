@@ -39,6 +39,10 @@ HEARTBEAT = os.path.join(REPO_ROOT, ".agent", "scripts", "heartbeat.py")
 ACTIVITY_LOG = os.path.join(REPO_ROOT, ".agent", "scripts", "activity_log.py")
 GCAL = os.path.join(REPO_ROOT, ".agent", "skills", "google-calendar-connector", "gcal_manager.py")
 
+# Historical state entries hold absolute WSL paths from the automation host.
+# See _rebase below.
+LEGACY_PREFIX = "./"
+
 AUDIO_EXTS = (".wav", ".m4a", ".mp3", ".ogg", ".flac")
 WIB = datetime.timezone(datetime.timedelta(hours=7))
 
@@ -289,10 +293,18 @@ def link_related(rec_id, related):
         json.dump(registry, f, indent=2, ensure_ascii=False)
     os.replace(tmp, REGISTRY_PATH)
 
+def _rebase(p):
+    """Legacy state entries hold absolute WSL paths. Rebase onto this
+    checkout when the original does not exist, so historical lookups keep
+    working on macOS. No-op on the WSL host, where the path resolves."""
+    if p and p.startswith(LEGACY_PREFIX) and not os.path.exists(p):
+        return os.path.join(REPO_ROOT, p[len(LEGACY_PREFIX):])
+    return p
+
 def existing_mom(related):
     """Path of an already-drafted MOM among related recordings, if any."""
     for rid, e in related:
-        p = e.get("mom_path")
+        p = _rebase(e.get("mom_path"))
         if p and os.path.exists(os.path.join(REPO_ROOT, p)):
             return rid, p
     return None, None
@@ -332,8 +344,33 @@ def _strip_narration(text):
         idx = idx + 1 if idx != -1 else -1
     return text[idx:].strip() if idx > 0 else text
 
+def resolve_speakers(transcript_md, attendees):
+    """Put names on the "Speaker N" labels, using the confidence ladder in
+    speaker_map.py. Returns (resolved {label: name}, still_open [label]).
+
+    Never fatal: a resolver failure must not cost the MOM, so the transcript is
+    left exactly as the ASR produced it and every label reports as open."""
+    try:
+        sys.path.insert(0, MODULE_DIR)
+        import speaker_map
+        result = speaker_map.resolve(transcript_md, attendees or [])
+        if not result["labels"]:
+            return {}, []
+        speaker_map.merge_into_store(transcript_md, result)
+        resolved = speaker_map.trusted_map(transcript_md)
+        if resolved:
+            speaker_map.cmd_apply(
+                argparse.Namespace(transcript=transcript_md, dry_run=False))
+        entry = speaker_map.load_store()["maps"][speaker_map.store_key(transcript_md)]
+        still_open = speaker_map.unresolved(entry)
+        print(f"[watcher] speakers: {len(resolved)} named, {len(still_open)} still open")
+        return resolved, still_open
+    except Exception as e:                                   # noqa: BLE001
+        print(f"[watcher] speaker resolution skipped: {e}", file=sys.stderr)
+        return {}, []
+
 def draft_mom(transcript_md, title, start_wib, matched, scratch, cfg=None,
-              attendees=None):
+              attendees=None, unresolved_speakers=None):
     cfg = cfg or {}
     roster = ", ".join(attendees) if attendees else ""
     with open(transcript_md, encoding="utf-8") as f:
@@ -352,6 +389,11 @@ def draft_mom(transcript_md, title, start_wib, matched, scratch, cfg=None,
                    "speaker labels onto these names ONLY where the transcript "
                    "makes the mapping unambiguous; otherwise keep the raw label.\n"
                    if roster else "")
+                + (f"These labels are still unidentified and were checked already: "
+                   f"{', '.join(unresolved_speakers)}. Keep them as labels. Do NOT "
+                   "assign them a name, and do NOT drop the action items they "
+                   "speak: attribute those to the raw label.\n"
+                   if unresolved_speakers else "")
                 + "\n=== TRANSCRIPT ===\n" + transcript,
                 scratch)
     if facts is None:
@@ -419,11 +461,16 @@ def process(audio_path, cfg, state):
         status = f"transcribed (duplicate of {dup_rid}, MOM draft skipped)"
         print(f"[watcher] {status} -> {dup_mom}")
     elif cfg.get("auto_draft", True):
+        # Name the "Speaker N" labels BEFORE the MOM is drafted, so an action
+        # item spoken by a resolved voice carries its owner instead of being
+        # dropped. Only tiers that cannot be wrong are written back; everything
+        # else stays a proposal in `speaker_map.py pending`.
+        resolved, still_open = resolve_speakers(transcript_md, attendees)
         scratch = os.path.join(MODULE_DIR, "scratch")
         os.makedirs(scratch, exist_ok=True)
         try:
             mom = draft_mom(transcript_md, title, start_wib, matched, scratch, cfg,
-                            attendees=attendees)
+                            attendees=attendees, unresolved_speakers=still_open)
         except RuntimeError as e:
             print(f"[watcher] draft failed: {e}", file=sys.stderr)
             mom = None

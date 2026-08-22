@@ -1,3 +1,8 @@
+---
+name: slack-tracker
+description: Maps Slack channels to clients and runs the stateful Mention Ledger sweep, so no mention, thread reply, or DM goes unanswered. Use for the Slack half of any inbox sweep.
+---
+
 # Slack Tracker Skill
 
 This skill manages the mapping of Slack channels to specific clients and teams AND runs the stateful **Mention Ledger** sweep — the system that guarantees no mention of the owner, thread reply, or DM slips through unanswered.

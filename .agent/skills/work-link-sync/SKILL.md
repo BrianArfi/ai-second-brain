@@ -1,12 +1,17 @@
+---
+name: work-link-sync
+description: Links new Drive files into the Master Product List spreadsheet and the Master Documentation. Use after publishing a PRD or BRD so the index does not drift.
+---
+
 # work-link-sync
 
 Auto-link new Work Drive files to the Master Product List spreadsheet and Master Documentation.
 
 ## When to use
 
-Setiap kali file baru dibuat atau di-update di Work Drive — PRD baru, doc baru, referensi baru — jalankan skill ini supaya:
-1. **Spreadsheet** (Master Product List) ter-update dengan hyperlink ke file baru
-2. **Master Doc** untuk komponen tersebut ter-update di bagian Related Documents
+Every time a file is created or updated in Work Drive (a new PRD, a new doc, a new reference), run this skill so that:
+1. The **spreadsheet** (Master Product List) gets a hyperlink to the new file
+2. The **master doc** for that component gets the file in its Related Documents section
 
 ## Usage
 

@@ -44,6 +44,20 @@ without the user explicitly approving each one.
    outbound message by default; just flag it as waiting-on and let the
    user decide whether it's worth a nudge.
 
+7. **Split what still needs the user, one sub-session per thing.** This is a
+   standing pre-approval: branch directly, do not offer first. Once the list
+   and the drafts exist, follow the **Branching Into Sub-Sessions** protocol
+   in `CLAUDE.md` for the items that genuinely need the user's own reply or
+   decision. Anything you already finished stays here and does not branch,
+   and neither does a set of items that all turn on the same single call.
+   One item is not a branch.
+
+   Each `brief` must carry the item's real context: who is asking, what they
+   asked, the link back, the draft you already wrote, and what you think the
+   answer is. A sub-session starts with no memory of this run. Branching
+   creates sessions, it never sends, so the approval gate in step 5 still
+   applies inside each sub-session.
+
 Keep the list grounded in what's actually written down or visible through a
 connected tool. If a "promise" is vague or ambiguous, say so rather than
 guessing what was meant.

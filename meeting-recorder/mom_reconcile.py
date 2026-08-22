@@ -76,6 +76,10 @@ OUT_PATH = os.path.join(REPO_ROOT, "journal", "state", "mom_coverage.json")
 HEARTBEAT = os.path.join(REPO_ROOT, ".agent", "scripts", "heartbeat.py")
 GCAL_SCRIPT = os.path.join(REPO_ROOT, ".agent", "skills", "google-calendar-connector", "gcal_manager.py")
 
+# Historical state entries hold absolute WSL paths from the automation host.
+# See _rebase below.
+LEGACY_PREFIX = "./"
+
 WIB = datetime.timezone(datetime.timedelta(hours=7))
 JOB = "mom-reconcile"
 
@@ -398,9 +402,18 @@ def is_personal_recording(entry):
     tokens = set(re.split(r"[^a-z0-9]+", title))
     return bool(tokens & PERSONAL_TITLE_TOKENS)
 
+def _rebase(p):
+    """Legacy state entries hold absolute WSL paths. Rebase onto this
+    checkout when the original does not exist, so historical lookups keep
+    working on macOS. No-op on the WSL host, where the path resolves."""
+    if p and p.startswith(LEGACY_PREFIX) and not os.path.exists(p):
+        return os.path.join(REPO_ROOT, p[len(LEGACY_PREFIX):])
+    return p
+
 def mom_on_disk(mom_path):
     if not mom_path:
         return None
+    mom_path = _rebase(mom_path)
     p = mom_path if os.path.isabs(mom_path) else os.path.join(REPO_ROOT, mom_path)
     return p if os.path.isfile(p) else None
 

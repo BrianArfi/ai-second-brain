@@ -2,7 +2,11 @@
   "model": "opus",
   "alwaysThinkingEnabled": true,
   "permissions": {
-    "allow": [],
+    "allow": [
+      "Bash(bash .agent/scripts/detect_platform.sh:*)",
+      "Bash(python3 .agent/scripts/daily_update_runner.py --mode morning)",
+      "Bash(python3 .agent/scripts/daily_update_runner.py --mode evening)"
+    ],
     "defaultMode": "bypassPermissions",
     "additionalDirectories": [
       "~/You/You",
@@ -11,6 +15,16 @@
   },
   "hooks": {
     "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.agent/scripts/assert_canonical_checkout.sh\"",
+            "timeout": 10,
+            "statusMessage": "Checking checkout is canonical..."
+          }
+        ]
+      },
       {
         "hooks": [
           {
@@ -75,6 +89,16 @@
         "hooks": [
           {
             "type": "command",
+            "command": "cd \"${CLAUDE_PROJECT_DIR:-.}\" && bash .agent/scripts/ensure_ingest.sh >/dev/null 2>&1 &",
+            "timeout": 10,
+            "statusMessage": "Ensuring phone ingest (localhost:8787)..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
             "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/upstream_check.py\"",
             "timeout": 15,
             "statusMessage": "Checking for harness updates..."
@@ -89,6 +113,37 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/slack_send_guard.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/ledger_freshness.py\"",
+            "timeout": 45,
+            "statusMessage": "Checking ledgers are current..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/send_slop_guard.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/launchd_guard.py\"",
             "timeout": 10
           }
         ]
@@ -112,6 +167,68 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/emdash_guard.py\"",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/artifact_publish_guard.py\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/link_guard.py\"",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/ledger_watch.py\"",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*[Aa]tlassian__.*(transition|edit|addComment|create|update).*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/ledger_watch.py\"",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*[Ll]inear__.*(create|update|comment|transition|assign|archive).*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/ledger_watch.py\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/ledger_guard.py\"",
+            "timeout": 120,
+            "statusMessage": "Syncing ledgers..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/worktree_commit.py\"",
+            "timeout": 120,
+            "statusMessage": "Committing the working tree..."
           }
         ]
       }

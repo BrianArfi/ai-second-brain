@@ -29,6 +29,7 @@ REPO_ROOT = os.path.join(SKILL_DIR, '..', '..', '..')
 
 sys.path.insert(0, os.path.join(REPO_ROOT, '.agent', 'scripts'))
 from file_utils import assert_drive_result  # Drive Operation Verification (CLAUDE.md)
+from file_utils import apply_visibility, add_visibility_arg, resolve_visibility  # sharing (CLAUDE.md LANDMINE)
 
 ACCOUNTS = {
     'work':    os.path.join(REPO_ROOT, '.agent/skills/work-drive-connector'),
@@ -276,26 +277,12 @@ def create_doc(args):
     ).execute()
     assert_drive_result(file, 'gdocs_create create-doc')
 
-    # Default permission: anyone can comment. Fallback: domain can comment.
-    # Set WORK_DOMAIN (env) to YOUR Google Workspace domain for the fallback.
+    # Sharing defaults to the work domain, never to anyone-with-link. This used
+    # to TRY anyone-with-link first and only fall back to the domain if that
+    # call failed, which meant the safe outcome depended on an API error.
+    # Set WORK_DOMAIN (env) to YOUR Google Workspace domain.
     work_domain = os.environ.get('WORK_DOMAIN', 'yourcompany.com')
-    try:
-        service.permissions().create(
-            fileId=file['id'],
-            body={'type': 'anyone', 'role': 'commenter'},
-            fields='id'
-        ).execute()
-        print(f"[INFO] Permission set: anyone can comment")
-    except Exception as e:
-        try:
-            service.permissions().create(
-                fileId=file['id'],
-                body={'type': 'domain', 'role': 'commenter', 'domain': work_domain},
-                fields='id'
-            ).execute()
-            print(f"[INFO] Permission set: {work_domain} domain can comment")
-        except Exception as e2:
-            print(f"[WARN] Could not set sharing permissions: {e2}")
+    apply_visibility(service, file['id'], resolve_visibility(args), domain=work_domain)
 
     print(f"[OK] Created Google Doc: {file['name']}")
     print(f"     ID: {file['id']}")
@@ -347,6 +334,7 @@ def main():
     p_doc.add_argument('--account', default='work', choices=list(ACCOUNTS.keys()), help='Drive account to use')
     p_doc.add_argument('--parent-id', help='Drive folder ID (defaults to My Drive root)')
     p_doc.add_argument('--html', action='store_true', help='Input is already HTML (skip MD conversion)')
+    add_visibility_arg(p_doc)
 
     # upload
     p_up = sub.add_parser('upload', help='Upload any file to Google Drive')

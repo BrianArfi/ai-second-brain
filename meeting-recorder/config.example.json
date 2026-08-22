@@ -8,7 +8,38 @@
   "draft_backend": "agy",
   "_draft_note": "MOM draft model, routed through the agy-bridge draft chain. Leave draft_model empty to use the default chain, or name a specific model your agy-bridge is configured for.",
   "calendar_match": true,
-  "require_gpu": true,
+  "require_gpu": false,
+  "transcription": {
+    "_comment": "Providers are tried in order; the first that works wins. A provider needs no code, only an entry here. API keys are read from the environment first, then from meeting-recorder/.env, then .env or secrets.env in the workspace root. Run `python3 meeting-recorder/transcribe.py --doctor` to see what this machine can already use and how to fix the rest.",
+    "cpu_fallback": true,
+    "autodetect_local": true,
+    "_autodetect_local_note": "Probe 127.0.0.1 for a local LLM router (9router) that proxies a Gemini subscription, for users whose access has no API key to configure. Anything found must still pass the audio probe before it may touch a real meeting: a router that accepts audio, discards it, and returns invented meeting text is a real failure mode seen on 2026-08-21. Verify with `transcribe.py --verify-providers`.",
+    "_cpu_fallback_note": "true = if nothing else is available, transcribe locally on the CPU so the pipeline still works with no account and no GPU. It is roughly as slow as the audio is long, and it warns before starting. Set false to fail loudly instead.",
+    "providers": [
+      {
+        "kind": "gemini",
+        "model": "gemini-2.5-flash",
+        "api_key_env": "GEMINI_API_KEY",
+        "_note": "Free tier at https://aistudio.google.com/apikey. The only provider here that returns speaker labels, which is why it goes first."
+      },
+      {
+        "kind": "groq",
+        "model": "whisper-large-v3",
+        "api_key_env": "GROQ_API_KEY",
+        "_note": "Free tier at https://console.groq.com/keys. Very fast and accurate, but no speaker labels."
+      },
+      {
+        "kind": "openai",
+        "model": "whisper-1",
+        "api_key_env": "OPENAI_API_KEY",
+        "_note": "Paid. Any OpenAI-compatible /audio/transcriptions endpoint works here: add \"base_url\" to point at a self-hosted whisper server or another vendor."
+      },
+      {
+        "kind": "whispercpp",
+        "_note": "Local GPU. Needs whispercpp_bin and whispercpp_model set for this machine, below."
+      }
+    ]
+  },
   "machines": {
     "wsl": {
       "recordings_dir": "/mnt/<drive>/MeetingRecordings",

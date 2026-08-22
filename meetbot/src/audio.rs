@@ -871,7 +871,7 @@ impl Drop for IngestServer {
 ///   [`SAMPLE_RATE`]. `offset_sec` is seconds since capture start.
 /// * **text** — JSON. `{"type":"hello","sampleRate":16000}` announces the
 ///   context rate (anything other than 16 kHz is resampled here);
-///   `{"type":"speaker","name":"Fred","speaking":true,"t":12.4}` updates the
+///   `{"type":"speaker","name":"YourManager","speaking":true,"t":12.4}` updates the
 ///   active speaker attached to subsequent frames; `{"type":"bye"}` ends the
 ///   stream.
 ///
@@ -1293,7 +1293,7 @@ mod tests {
         out.extend(seg.push(AudioFrame {
             pcm: tone(16_000, 0.4),
             offset_sec: 0.0,
-            speaker: Some("Fred".into()),
+            speaker: Some("YourManager".into()),
         }));
         out.extend(seg.push(AudioFrame {
             pcm: tone(16_000, 0.4),
@@ -1301,7 +1301,7 @@ mod tests {
             speaker: Some("the operator".into()),
         }));
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].speaker.as_deref(), Some("Fred"));
+        assert_eq!(out[0].speaker.as_deref(), Some("YourManager"));
         let tail = seg.flush().expect("second speaker flushes");
         assert_eq!(tail.speaker.as_deref(), Some("the operator"));
     }
@@ -1437,10 +1437,10 @@ mod tests {
         assert!(!st.handle_control(r#"{"type":"hello","sampleRate":48000}"#));
         assert_eq!(st.source_rate, 48_000);
 
-        assert!(!st.handle_control(r#"{"type":"speaker","name":"Fred","speaking":true,"t":1.0}"#));
-        assert_eq!(st.speaker.as_deref(), Some("Fred"));
+        assert!(!st.handle_control(r#"{"type":"speaker","name":"YourManager","speaking":true,"t":1.0}"#));
+        assert_eq!(st.speaker.as_deref(), Some("YourManager"));
 
-        assert!(!st.handle_control(r#"{"type":"speaker","name":"Fred","speaking":false,"t":2.0}"#));
+        assert!(!st.handle_control(r#"{"type":"speaker","name":"YourManager","speaking":false,"t":2.0}"#));
         assert_eq!(st.speaker, None);
 
         assert!(st.handle_control(r#"{"type":"bye"}"#));
@@ -1576,7 +1576,7 @@ mod tests {
         .await
         .unwrap();
         ws.send(Message::Text(
-            r#"{"type":"speaker","name":"Fred","speaking":true,"t":0.0}"#.into(),
+            r#"{"type":"speaker","name":"YourManager","speaking":true,"t":0.0}"#.into(),
         ))
         .await
         .unwrap();
@@ -1594,7 +1594,7 @@ mod tests {
             .expect("frame present");
         assert_eq!(frame.offset_sec, 3.25);
         assert_eq!(frame.pcm.len(), 320);
-        assert_eq!(frame.speaker.as_deref(), Some("Fred"));
+        assert_eq!(frame.speaker.as_deref(), Some("YourManager"));
 
         ws.send(Message::Text(r#"{"type":"bye"}"#.into()))
             .await

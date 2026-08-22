@@ -50,6 +50,12 @@ AGY_BRIDGE = os.path.join(BASE_DIR, '.agent', 'skills', 'agy-bridge', 'run.py')
 FATHOM_CLIENT = os.path.join(BASE_DIR, '.agent', 'skills', 'fathom-connector', 'scripts', 'fathom_client.py')
 FATHOM_REGISTRY = os.path.join(BASE_DIR, 'journal', 'fathom_registry.json')
 HEARTBEAT = os.path.join(BASE_DIR, '.agent', 'scripts', 'heartbeat.py')
+
+# Every record carries a work-tree node (CLAUDE.md, "Every Ticket Belongs To A
+# Work-Tree Node"). resolve_or_die refuses an unknown id and prints the closest
+# matches, so a typo can never quietly file a record under nothing.
+sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'scripts'))
+from work_tree import UNFILED, UnknownNode, resolve_or_die  # noqa: E402
 PEOPLE_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'people.json')
 
 # Local meeting artifacts (verified against meeting-recorder/watcher.py constants
@@ -622,7 +628,7 @@ def resolve_names(state, user_ids, token):
 def create_item(state, text, to='', channel=None, channel_name=None, thread_ts=None,
                  permalink='', due=None, project=None, source_type='manual',
                  source_ref='', confidence='medium', priority=None, notes=None,
-                 dedupe=True):
+                 dedupe=True, node=None, node_why=None):
     """Create a commitment, or fold it into the existing one it duplicates.
 
     Every ingestion path (fathom / slack / local MOM / manual / extract) funnels
@@ -647,6 +653,11 @@ def create_item(state, text, to='', channel=None, channel_name=None, thread_ts=N
             if _richness(incoming) > _richness(existing):
                 existing['text'] = (text or '')[:600]
             merge_items(existing, incoming)
+            # A real node always beats 'unfiled': a manual add naming its node
+            # should file the record the sweep ingested blind.
+            if node and existing.get('node', UNFILED) == UNFILED:
+                existing['node'] = node
+                existing['node_why'] = node_why
             return existing
 
     iid = next_id(state)
@@ -658,6 +669,10 @@ def create_item(state, text, to='', channel=None, channel_name=None, thread_ts=N
         'channel': channel, 'channel_name': channel_name,
         'thread_ts': thread_ts, 'permalink': permalink or '',
         'due': due, 'project': project,
+        # Work-tree node. Unattended ingestion paths file as 'unfiled' with the
+        # reason recorded, and surface in the morning update until triaged.
+        'node': node or UNFILED,
+        'node_why': node_why or (None if node else f'auto-ingest:{source_type}'),
         'source': {'type': source_type, 'ref': source_ref or ''},
         'status': 'open', 'confidence': confidence,
         'first_seen': time.time(), 'closed_at': None, 'closed_by': None,
@@ -1085,14 +1100,37 @@ def cmd_extract(args):
 # ---------------------------------------------------------------------- CLI --
 
 def cmd_add(args):
+    try:
+        node = resolve_or_die(args.node, allow_unfiled=bool(args.node_why))
+    except UnknownNode as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(2)
     state = load_state()
     it = create_item(
         state, text=args.text, to=args.to or '', due=args.due, project=args.project,
         source_type='manual', source_ref=args.source or '', confidence='high',
-        priority=args.priority,
+        priority=args.priority, node=node, node_why=args.node_why,
     )
     save_state(state)
-    print(f"added: {it['id']}")
+    print(f"added: {it['id']}  node={it.get('node')}")
+
+def cmd_refile(args):
+    """Move a record to another node. The triage pass runs on this."""
+    try:
+        node = resolve_or_die(args.node, allow_unfiled=bool(args.node_why))
+    except UnknownNode as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(2)
+    state = load_state()
+    it = state['items'].get(args.item_id)
+    if not it:
+        print(f"no such commitment: {args.item_id}", file=sys.stderr)
+        sys.exit(1)
+    was = it.get('node', UNFILED)
+    it['node'] = node
+    it['node_why'] = args.node_why
+    save_state(state)
+    print(f"{args.item_id}: {was} -> {node}")
 
 def cmd_dedupe(args):
     """Collapse duplicate OPEN commitments that predate the ingest-time guard.
@@ -1310,6 +1348,15 @@ def main():
     ap.add_argument('--project', default=None)
     ap.add_argument('--source', default=None)
     ap.add_argument('--priority', action='store_true', default=None)
+    ap.add_argument('--node', required=True,
+                    help='work-tree node id; find one with work_tree.py find <text>')
+    ap.add_argument('--node-why', default=None,
+                    help='only with --node unfiled, and only for unattended runs')
+
+    rf = sub.add_parser('refile', help='move a record to a different work-tree node')
+    rf.add_argument('item_id')
+    rf.add_argument('--node', required=True)
+    rf.add_argument('--node-why', default=None)
 
     cp = sub.add_parser('close')
     cp.add_argument('item_id')
@@ -1343,8 +1390,26 @@ def main():
     {'sweep': cmd_sweep, 'extract': cmd_extract, 'add': cmd_add,
      'close': cmd_close, 'drop': cmd_drop, 'reopen': cmd_reopen,
      'report': cmd_report, 'link': cmd_link, 'unlink': cmd_unlink,
-     'dedupe': cmd_dedupe,
+     'dedupe': cmd_dedupe, 'refile': cmd_refile,
      }.get(args.cmd or 'sweep', cmd_sweep)(args)
 
+READONLY_CMDS = {'report'}
+
 if __name__ == '__main__':
-    main()
+    # Serialise mutating runs. load_state/save_state is a read-modify-write
+    # cycle and os.replace only makes the write atomic, not the cycle. Two
+    # overlapping runs otherwise silently drop whichever record was written
+    # first. See .agent/scripts/ledger_lock.py for the incident this comes from.
+    _cmd = next((a for a in sys.argv[1:] if not a.startswith('-')), None)
+    if _cmd in READONLY_CMDS:
+        main()
+    else:
+        sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'scripts'))
+        from ledger_lock import hold_ledger_lock
+        hold_ledger_lock('commitments')
+        # Propagate on the way out: re-render the indexes and the follow-up
+        # tracker, then commit + push, so the next session to read this repo
+        # sees the change now rather than after the next daily run.
+        # See .agent/scripts/ledger_sync.py.
+        from ledger_sync import run_and_sync
+        run_and_sync('commitments', main)

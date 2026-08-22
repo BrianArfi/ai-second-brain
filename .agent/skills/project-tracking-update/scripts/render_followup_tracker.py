@@ -28,6 +28,18 @@ from datetime import timezone, timedelta, datetime
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
 OUT_PATH = os.path.join(BASE_DIR, 'journal', 'master_followup_tracker.md')
 
+# Every COM-/WAIT-/DEC- id in the rendered view becomes a click through to that
+# record's card on the local dashboard. The ledger `report` output stays plain
+# text (it is read in a terminal); the linking happens here, on the way into the
+# markdown file. Import is best-effort so a missing helper degrades to the old
+# plain-text tracker instead of failing the render.
+sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'scripts'))
+try:
+    from ledger_link import linkify
+except ImportError:
+    def linkify(text, code=True):
+        return text
+
 COMMITMENTS_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'commitments.json')
 WAITING_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'waiting_on.json')
 
@@ -99,7 +111,7 @@ def render():
             errors.append(err)
             sections[key] = f'_(could not render: {err})_'
         else:
-            sections[key] = out
+            sections[key] = linkify(out)
 
     parts = [
         '# 🎯 Master Follow-up & To-Do Tracker',
@@ -109,6 +121,11 @@ def render():
         f'`journal/state/waiting_on.json`, `journal/state/decisions.json`. To change what appears here, '
         f'edit the ledgers (`commitment_ledger.py`, `waiting_watchdog.py`, `decision_log.py`), then regenerate: '
         f'`python3 .agent/skills/project-tracking-update/scripts/render_followup_tracker.py`',
+        '>',
+        f'> **Every id below is clickable.** `COM-`/`WAIT-`/`DEC-` links open that '
+        f'record on the local dashboard ({os.environ.get("PSB_DASHBOARD_BASE", "http://localhost:3737")}) '
+        f'with its owner, SLA, source, timeline and notes. If a link does nothing, the dashboard is down: '
+        f'`bash .agent/scripts/ensure_dashboard.sh`',
         '',
         f'**Last generated**: {now}',
         '',

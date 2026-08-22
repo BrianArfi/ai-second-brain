@@ -1,3 +1,8 @@
+---
+name: mcp-switcher
+description: Swaps between mutually exclusive MCP servers to stay under the tool-count limit. Use when a tool you need belongs to a server that is currently disabled.
+---
+
 # MCP Switcher Skill
 
 This skill allows Antigravity to dynamically swap between mutually exclusive MCP servers to stay under the 100-tool limit.

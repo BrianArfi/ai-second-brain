@@ -2,7 +2,7 @@ import json
 import sys
 import os
 
-CONFIG_PATH = os.environ.get("ANTIGRAVITY_MCP_CONFIG", "~/.config/agent/mcp_config.json")
+CONFIG_PATH = os.environ.get("ANTIGRAVITY_MCP_CONFIG", os.path.expanduser("~/.gemini/antigravity/mcp_config.json"))
 
 def switch(enable_name, disable_name):
     if not os.path.exists(CONFIG_PATH):

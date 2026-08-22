@@ -6,19 +6,36 @@ Sweep the tools this workspace is connected to and turn anything that needs
 attention into a note in `inbox/`, one note per item. Never act on anything
 found; only capture it and ask before doing more.
 
-1. **Check what's connected.** Run `claude mcp list`. If nothing relevant
-   (Gmail, Slack) is connected, stop here and say so: point the user to
-   `/connect-tools` and don't try to guess or invent inbox items from
-   nothing.
+0. **Slack: run the mention ledger FIRST. It is the sweep, not a supplement.**
 
-2. **Sweep each connected source:**
-   - **Gmail**: recent unread or flagged emails, anything that looks like
-     it's waiting on a reply from the user.
-   - **Slack**: recent DMs and mentions across channels the user has
-     access to, anything directed at them that hasn't been answered.
+   ```
+   python3 .agent/skills/slack-tracker/scripts/mention_ledger.py sweep
+   python3 .agent/skills/slack-tracker/scripts/mention_ledger.py report
+   ```
 
-   Keep the window reasonable (recent unread/unresolved items, not the
-   entire history of the account).
+   This is mandatory and it replaces any hand-rolled Slack search. Same rule
+   the morning/evening updates already follow (`.agent/workflows/morning-update.md`
+   step 0). The ledger holds state across runs and closes items only when the owner
+   has *mechanically* answered them, so it surfaces the 5-day-old DM that a
+   recency window would drop.
+
+   **Do not substitute `slack_client.py --action search` for this.** On 5 Aug 2026
+   a sweep did exactly that, querying `<@<SLACK_ID>> after:<date>`, and returned
+   7 items while the ledger had 76. A mention search is structurally blind to
+   **1:1 DMs**, because nobody @-mentions you in a DM, and it under-reports thread
+   replies. Every missed item that day was a DM or a thread reply.
+
+   Read the ledger's `[open]` items in full. `report` truncates each preview, so
+   pull the full message for anything you intend to act on.
+
+1. **Check what else is connected.** Run `claude mcp list` for Gmail. If Gmail is
+   not connected, say so and point the user to `/connect-tools`; don't guess or
+   invent inbox items from nothing.
+
+2. **Sweep Gmail** (Slack is already covered by step 0): recent unread or flagged
+   emails, anything that looks like it's waiting on a reply from the user. Keep
+   the window reasonable (recent unread/unresolved items, not the entire history
+   of the account).
 
 3. **For each item found, write one note in `inbox/`** with:
    - a short, descriptive filename (kebab-case, dated if useful, e.g.
@@ -44,7 +61,8 @@ found; only capture it and ask before doing more.
 
 7. **Split what needs the user, one sub-session per thing.** A sweep is the
    case branching exists for: several unrelated people are waiting, and
-   answering them in one chat means answering all of them at once. Once the
+   answering them in one chat means answering all of them at once. This is a
+   standing pre-approval, so branch directly and do not offer first. Once the
    notes are written, follow the **Branching Into Sub-Sessions** protocol in
    `CLAUDE.md` for the items that genuinely need the user's own reply or
    decision. Items that only needed capturing stay as notes and do not

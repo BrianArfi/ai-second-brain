@@ -1,7 +1,7 @@
 ---
 name: meeting-harvester
 description: Read-only harvest agent for the gather phase of /mom and /weekly-report when the source is a Fathom recording. Resolves the recording via journal/fathom_registry.json, pulls transcript + summary via the Fathom MCP, and returns raw facts (attendees, decisions, action items, key quotes with timestamps) WITHOUT synthesis. Focused, cheap, read-only.
-tools: ["Read", "Grep", "Glob", "Bash", "mcp__claude_ai_Fathom__*"]
+tools: ["Read", "Grep", "Glob", "Bash", "mcp__claude_ai_Fathom__*", "mcp__fathom__*"]
 model: haiku
 effort: low
 ---

@@ -334,6 +334,67 @@ const AUDIO_CLOCK_TIMEOUT: Duration = Duration::from_secs(15);
 /// Gap between the two `currentTime` probes.
 const AUDIO_CLOCK_POLL: Duration = Duration::from_millis(250);
 
+/// How long `report_tab_capture` waits for the `getDisplayMedia` promise to
+/// settle before reporting whatever state it is in. Purely diagnostic — nothing
+/// blocks on the outcome.
+const TAB_CAPTURE_SETTLE: Duration = Duration::from_secs(10);
+
+/// How often `watch_call` logs a line of tap stats. In `POLL_INTERVAL` ticks,
+/// so 30 x 2s = one line a minute. Cheap, and it is the only in-call witness
+/// that the bot is hearing anything at all.
+const STATS_LOG_EVERY_TICKS: u32 = 30;
+
+/// How often the deafness probe evaluates in-page stats, in `POLL_INTERVAL`
+/// ticks. 5 x 2s = every 10s, which still gives the 180s grace 18 samples while
+/// costing a fifth of the CDP traffic the per-tick version did.
+const DEAF_PROBE_EVERY_TICKS: u32 = 5;
+
+/// Peak amplitude at or below this counts as silence. Must match
+/// `SILENCE_FLOOR` in `assets/capture.js`.
+pub const SILENCE_FLOOR: f64 = 0.0005;
+
+/// How long the bot tolerates being in a room WITH other people while every
+/// captured sample is silent.
+///
+/// This is the 5 Aug 2026 failure: admitted, tap running, clock advancing, and
+/// `attachStreams()` matching nothing, so the bot recorded 37 minutes of pure
+/// silence and reported `completed`. Sitting there is strictly worse than
+/// leaving, because a single Google profile means the parked bot also blocks
+/// every meeting dispatched behind it. Bail out loudly instead.
+///
+/// Generous on purpose: only counted once `seen_others` is set, so the early
+/// join into an empty room never trips it.
+///
+/// Re-tuned from 180s once tab capture landed. 180s was sized for a bug that
+/// made EVERY call deaf, where firing fast was pure upside. It is the wrong
+/// number for a working tap: a room where people are present but nobody speaks
+/// for three minutes is an ordinary meeting — someone screen-sharing in
+/// silence, a room waiting on a late chair — and killing it would turn a lost
+/// three minutes into a lost meeting. Ten minutes of continuous silence with
+/// others in the room is still unambiguously broken, and the deaf case is now
+/// diagnosable in seconds from `tab_state` in the stats line rather than
+/// needing the watchdog to surface it.
+/// How long the pulse reader may produce no new frame before the call is
+/// failed.
+///
+/// Distinct from [`DEAF_IN_CALL_GRACE`], which is about SILENCE: a stall is a
+/// frame counter that has stopped advancing at all, which means the audio
+/// server stopped answering rather than the room going quiet. It needs no grace
+/// for an empty room, so it is much shorter: `pa_simple_read` returns every
+/// 200 ms in health, so 30 s of nothing is already far past any jitter.
+const PULSE_STALL_GRACE: Duration = Duration::from_secs(30);
+
+const DEAF_IN_CALL_GRACE: Duration = Duration::from_secs(600);
+
+/// Reads whichever tap is installed. `capture.js` and `capture_ws.js` expose
+/// different hooks and only one is ever injected, so probe for both rather than
+/// threading the transport choice down into `watch_call`.
+const TAP_STATS_EXPR: &str = "(function(){\
+    if (window.__meetbotCaptureStats) return window.__meetbotCaptureStats();\
+    if (window.__meetbotWsCapture) return window.__meetbotWsCapture.stats();\
+    return {};\
+})()";
+
 /// Budget for `Browser::connect` in attach mode.
 ///
 /// `Browser::connect` builds its own reqwest client with **no** timeout to fetch
@@ -456,6 +517,14 @@ pub struct BrowserOptions {
     /// login. Treat this path as read-only.
     pub profile_template: Option<PathBuf>,
     pub window_size: (u32, u32), // (1280, 720)
+    /// PulseAudio sink Chrome must play into, exported as `PULSE_SINK`.
+    ///
+    /// `None` leaves Chrome on the server's default sink. With the Pulse
+    /// transport that default is the WRONG answer on WSLg: it is `RDPSink`, the
+    /// bridge to Windows audio, and feeding a bot's meetings through it overran
+    /// its queue and took the whole audio server down on 6 Aug 2026. Set this
+    /// to a dedicated null sink (see [`crate::pulse::ensure_null_sink`]).
+    pub pulse_sink: Option<String>,
 }
 
 impl Default for BrowserOptions {
@@ -474,6 +543,7 @@ impl Default for BrowserOptions {
             user_data_dir: None,
             profile_template: None,
             window_size: (1280, 720),
+            pulse_sink: None,
         }
     }
 }
@@ -635,6 +705,215 @@ mod js {
     /// The WebSocket-transport tap (`state::CaptureTransport::WebSocket`). Same
     /// selector tokens as [`CAPTURE`], plus `__MEETBOT_INGEST_URL__`.
     pub const CAPTURE_WS: &str = crate::audio::CAPTURE_WS_JS;
+
+    /// What the DOM offers for speaker attribution, for `doctor`.
+    pub const SPEAKER_MARKUP: &str = r#"(() => {
+  'use strict';
+  var SPEAKING = __MEETBOT_SPEAKING_SELECTORS__;
+  var TILES = __MEETBOT_SPEAKER_TILE_SELECTORS__;
+  var NAMES = __MEETBOT_SPEAKER_NAME_SELECTORS__;
+
+  function count(sels) {
+    var out = {};
+    for (var i = 0; i < sels.length; i++) {
+      try { out[sels[i]] = document.querySelectorAll(sels[i]).length; }
+      catch (e) { out[sels[i]] = -1; }
+    }
+    return out;
+  }
+
+  // Every data-* / jsname attribute on the page, most common first. A drifted
+  // attribute name shows up here as "the one that looks like a participant key
+  // but is not the one we are asking for".
+  var attrs = {};
+  var all = document.querySelectorAll('*');
+  for (var i = 0; i < all.length; i++) {
+    var a = all[i].attributes;
+    for (var j = 0; j < a.length; j++) {
+      var n = a[j].name;
+      if (n.indexOf('data-') === 0 || n === 'jsname') {
+        attrs[n] = (attrs[n] || 0) + 1;
+      }
+    }
+  }
+  var top = Object.keys(attrs).map(function (k) { return [k, attrs[k]]; });
+  top.sort(function (x, y) { return y[1] - x[1]; });
+
+  // aria-labels that mention speech state at all, which is where Meet has put
+  // the speaking signal in the past.
+  var aria = [];
+  var labelled = document.querySelectorAll('[aria-label]');
+  for (var k = 0; k < labelled.length && aria.length < 25; k++) {
+    var l = labelled[k].getAttribute('aria-label') || '';
+    if (/speak|talk|mute|presenting|voice/i.test(l)) { aria.push(l.slice(0, 60)); }
+  }
+
+  // Where does a NAME actually live now?
+  //
+  // Counting selectors says what stopped matching; it cannot say what to use
+  // instead. So walk up from anything whose text looks like a participant name
+  // and record the ancestor chain's tags, classes and attributes. That is the
+  // evidence a replacement selector gets written from.
+  function chain(el) {
+    var out = [];
+    var node = el;
+    for (var d = 0; d < 4 && node && node.tagName; d++) {
+      var attrs = [];
+      for (var i = 0; i < node.attributes.length; i++) {
+        var a = node.attributes[i];
+        var v = a.value.length > 30 ? a.value.slice(0, 30) + '...' : a.value;
+        attrs.push(a.name + '=' + v);
+      }
+      out.push(node.tagName.toLowerCase() + ' {' + attrs.join(' ') + '}');
+      node = node.parentElement;
+    }
+    return out;
+  }
+
+  var nameSamples = [];
+  var cands = document.querySelectorAll('.notranslate, [data-participant-name], [data-self-name]');
+  for (var c = 0; c < cands.length && nameSamples.length < 6; c++) {
+    var txt = (cands[c].textContent || '').trim();
+    if (txt && txt.length < 60) {
+      nameSamples.push({ text: txt, chain: chain(cands[c]) });
+    }
+  }
+
+  // Does the replacement name source actually resolve? This is the check that
+  // the aria-label hook is real rather than plausible.
+  var moreOptions = [];
+  var mo = document.querySelectorAll('[aria-label*="More options for" i]');
+  for (var m = 0; m < mo.length && moreOptions.length < 10; m++) {
+    var lbl = mo[m].getAttribute('aria-label') || '';
+    moreOptions.push(lbl.replace(/^more options for\s+/i, ''));
+  }
+
+  return {
+    moreOptionsNames: moreOptions,
+    speaking: count(SPEAKING),
+    tiles: count(TILES),
+    names: count(NAMES.filter(function (n) { return n !== ':self'; })),
+    topAttrs: top.slice(0, 12),
+    ariaSamples: aria,
+    nameSamples: nameSamples
+  };
+})()"#;
+
+    /// Active-speaker name only, for the PulseAudio transport.
+    ///
+    /// Takes the same three selector tokens as [`CAPTURE`], so it is filled
+    /// from the one selector table like everything else here. Returns
+    /// `{speaker: string|null}`; `null` whenever Meet has reshuffled the
+    /// speaking indicator, which degrades a transcript line to "Unknown"
+    /// rather than failing the call.
+    pub const SPEAKER: &str = r#"(() => {
+  'use strict';
+  var SPEAKING_SELECTORS = __MEETBOT_SPEAKING_SELECTORS__;
+  var SPEAKER_NAME_SELECTORS = __MEETBOT_SPEAKER_NAME_SELECTORS__;
+  var SPEAKER_TILE_SELECTORS = __MEETBOT_SPEAKER_TILE_SELECTORS__;
+
+  function clean(text) {
+    if (!text) { return null; }
+    var t = String(text).replace(/\s+/g, ' ').trim();
+    if (!t || t.length > 80) { return null; }
+    return t;
+  }
+
+  // Meet's per-participant "More options for <Name>" button.
+  //
+  // As of 6 Aug 2026 this is the only reliable place a participant's name still
+  // lives. `data-participant-id` and `data-participant-name` both return 0 hits
+  // in a live call: measured with `meetbot doctor`, which dumps the in-call DOM.
+  // That is why the ExampleVendor meeting produced 124 utterances all labelled
+  // "Unknown" -- the speaking indicator may well have fired, but nameFor() had
+  // nothing left to read, so every lookup returned null.
+  var MORE_OPTIONS = /^more options for\s+/i;
+
+  function fromMoreOptions(root) {
+    var btns;
+    try { btns = root.querySelectorAll('[aria-label*="More options for" i]'); }
+    catch (e) { return null; }
+    for (var i = 0; i < btns.length; i++) {
+      var label = btns[i].getAttribute('aria-label') || '';
+      if (MORE_OPTIONS.test(label)) {
+        var name = clean(label.replace(MORE_OPTIONS, ''));
+        if (name) { return name; }
+      }
+    }
+    return null;
+  }
+
+  function nameFor(node) {
+    var roots = [node];
+    for (var s = 0; s < SPEAKER_TILE_SELECTORS.length; s++) {
+      try {
+        var tile = node.closest(SPEAKER_TILE_SELECTORS[s]);
+        if (tile) { roots.push(tile); }
+      } catch (e) { /* selector unsupported by this Chrome */ }
+    }
+    if (node.parentElement) { roots.push(node.parentElement); }
+
+    // Walk UP rather than trusting a tile selector.
+    //
+    // The old code could only look inside whatever `SPEAKER_TILE_SELECTORS`
+    // matched, so when Google dropped that attribute the name became
+    // unreachable even though it was still on the page a few levels up. Climbing
+    // the ancestors costs nothing and does not depend on any attribute name
+    // surviving the next Meet release.
+    var up = node;
+    for (var d = 0; d < 6 && up; d++) {
+      var viaMore = fromMoreOptions(up);
+      if (viaMore) { return viaMore; }
+      up = up.parentElement;
+    }
+    for (var r = 0; r < roots.length; r++) {
+      var root = roots[r];
+      for (var i = 0; i < SPEAKER_NAME_SELECTORS.length; i++) {
+        var sel = SPEAKER_NAME_SELECTORS[i];
+        if (sel === ':self') {
+          var own = clean(root.getAttribute && (root.getAttribute('data-participant-name') || root.getAttribute('aria-label')));
+          if (own) { return own; }
+          continue;
+        }
+        try {
+          var found = root.querySelector(sel);
+          if (found) {
+            var got = clean(found.getAttribute('aria-label') || found.textContent);
+            if (got) { return got; }
+          }
+        } catch (e) { /* selector unsupported */ }
+      }
+    }
+    return null;
+  }
+
+  // Counts, not just the answer.
+  //
+  // The ExampleVendor call on 6 Aug produced 124 utterances all labelled
+  // "Unknown", and a bare null cannot say whether the speaking indicator
+  // matched nothing (Google reshuffled the markup) or matched fine and the
+  // name lookup failed. Those need opposite fixes, so report both: `hits` is
+  // per SPEAKING_SELECTORS entry, `tiles` is how many participant tiles exist
+  // at all, which separates "wrong selector" from "nobody is speaking".
+  var hits = [];
+  var speaker = null;
+  for (var i = 0; i < SPEAKING_SELECTORS.length; i++) {
+    var nodes;
+    try { nodes = document.querySelectorAll(SPEAKING_SELECTORS[i]); } catch (e) { hits.push(-1); continue; }
+    hits.push(nodes.length);
+    if (speaker === null) {
+      for (var j = 0; j < nodes.length; j++) {
+        var name = nameFor(nodes[j]);
+        if (name) { speaker = name; break; }
+      }
+    }
+  }
+  var tiles = 0;
+  for (var t = 0; t < SPEAKER_TILE_SELECTORS.length; t++) {
+    try { tiles += document.querySelectorAll(SPEAKER_TILE_SELECTORS[t]).length; } catch (e) {}
+  }
+  return { speaker: speaker, hits: hits, tiles: tiles };
+})()"#;
 
     /// Shared prelude: the text normaliser every text-matching probe uses. Folds
     /// whitespace and curly apostrophes so the plain-ASCII phrases in the
@@ -1015,12 +1294,65 @@ struct WsStatsReply {
 
 /// The subset of either tap's stats hook that [`MeetSession::await_audio_clock`]
 /// needs. Both scripts expose `ctxTime`/`ctxState`.
+///
+/// `attached` is the one that matters when a call comes back empty. The clock
+/// advances whenever the graph is running, with or without a participant stream
+/// wired into the mixer, so `ctxTime` alone cannot tell "capturing the room"
+/// apart from "capturing silence". On 5 Aug 2026 a bot sat in a live standup for
+/// 37 minutes, logged `capture is live`, and produced zero utterances because
+/// `attachStreams()` never found a single media element. The count was already
+/// in the page; nothing read it. Never drop it from this struct again.
 #[derive(Debug, Deserialize)]
 struct ClockReply {
     #[serde(default, rename = "ctxTime")]
     ctx_time: Option<f64>,
     #[serde(default, alias = "contextState", rename = "ctxState")]
     ctx_state: Option<String>,
+    /// Remote participant streams wired into the mixer. `capture.js` reports
+    /// `attached`; `capture_ws.js` reports `attachedElements`.
+    #[serde(default, alias = "attachedElements", rename = "attached")]
+    attached: Option<u64>,
+    /// Frames the ScriptProcessor has actually pulled.
+    #[serde(default, rename = "seq")]
+    seq: Option<u64>,
+    #[serde(default, rename = "sentSamples")]
+    sent_samples: Option<u64>,
+    /// Cumulative tracks ever wired in. Distinguishes "never found anything"
+    /// from "found things that carry no audio" once `attached` starts churning.
+    #[serde(default, rename = "attachedEver")]
+    attached_ever: Option<u64>,
+    /// Media elements found on the last deep walk, by where they live. If
+    /// shadow and frame stay 0 while `peak` stays 0.0, Meet is not delivering
+    /// remote audio through media elements and the DOM is the wrong target.
+    #[serde(default, rename = "elemsTop")]
+    elems_top: Option<u64>,
+    #[serde(default, rename = "elemsShadow")]
+    elems_shadow: Option<u64>,
+    #[serde(default, rename = "elemsFrame")]
+    elems_frame: Option<u64>,
+    /// Loudest sample since the previous stats read.
+    ///
+    /// The one field here that separates "recording the meeting" from
+    /// "recording silence". `attached`, `seq`, `sent_samples` and `ctx_time` all
+    /// advance identically in both cases, which is exactly how the 5 Aug 2026
+    /// outage stayed invisible: every throughput counter looked perfect while
+    /// the mixer carried nothing. Peak is 0.0 on silence and non-zero on speech.
+    #[serde(default, rename = "peak")]
+    peak: Option<f64>,
+    /// Share of 256 ms blocks above the silence floor since the previous read.
+    #[serde(default, rename = "loudRatio")]
+    loud_ratio: Option<f64>,
+    /// Which source is feeding the mixer: `"tab"` once getDisplayMedia has
+    /// handed over the tab's own output, `"dom"` while the old media-element
+    /// tap is still the only thing wired in.
+    #[serde(default, rename = "mode")]
+    mode: Option<String>,
+    /// Outcome of the tab-capture attempt: `pending`, `ok`, `unsupported`,
+    /// `no-audio`, or `err:<DOMException name>`. This is what to read first
+    /// when peak is still 0.0 after the fix — it separates "Chrome refused the
+    /// capture" from "the capture worked and the tab really is silent".
+    #[serde(default, rename = "tabState")]
+    tab_state: Option<String>,
 }
 
 /// One frame as `assets/capture.js` serialises it.
@@ -1206,13 +1538,38 @@ impl MeetSession {
             });
             builder = builder.arg(("user-agent", ua.as_str()));
 
+            // Headless is selected by OUR OWN flag, never by
+            // `new_headless_mode()`.
+            //
+            // chromiumoxide's headless arms emit `--headless=new` together with
+            // a bare `--mute-audio` (config.rs:426), and `--mute-audio` silences
+            // Chrome's audio OUTPUT. That is fatal for the PulseAudio loopback
+            // capture, which records the sink Chrome plays into: muted Chrome
+            // writes silence to the sink and every meeting is deaf again, for a
+            // reason nothing in this file would explain.
+            //
+            // The flag is presence-based, so it cannot be neutralised by giving
+            // it a value. Measured 6 Aug 2026 against a page playing a 440 Hz
+            // tone at gain 0.5, reading `RDPSink.monitor`:
+            //   no flag             -> peak 0.5000
+            //   --mute-audio=false  -> peak 0.0000
+            //   --mute-audio        -> peak 0.0000
+            // `--mute-audio=false` mutes exactly as hard as `--mute-audio`, and
+            // LAUNCH_FLAGS carried that "false" for months believing it did the
+            // opposite.
+            //
+            // Staying in headed mode and passing `--headless=new` ourselves is
+            // the only way to get the new renderer without the mute. The legacy
+            // `--headless` has no WebAudio at all, so the value matters.
+            // Chrome must play into OUR sink. Passed as process env rather than
+            // a flag because Chrome has no sink-selection flag; libpulse reads
+            // PULSE_SINK.
+            if let Some(sink) = opts.pulse_sink.as_deref() {
+                builder = builder.env("PULSE_SINK", sink);
+            }
+
             let builder = if opts.headless {
-                // `new_headless_mode()` emits `--headless=new`. The legacy
-                // `--headless` renderer has no WebAudio at all, so the tap only
-                // works under the new one. (chromiumoxide keeps its
-                // `HeadlessMode` enum in a private module, so this convenience
-                // method is the only way to select it.)
-                builder.new_headless_mode()
+                builder.with_head().arg(("headless", "new"))
             } else {
                 builder.with_head()
             };
@@ -1855,8 +2212,13 @@ impl MeetSession {
             .await
             .map_err(|e| anyhow!("could not subscribe to Runtime.bindingCalled: {e}"))?;
 
+        // `eval_with_gesture`, not `eval`. capture.js calls getDisplayMedia to
+        // grab the tab's own audio, and Chrome rejects that with
+        // NotAllowedError unless the calling frame has transient user
+        // activation. A plain Runtime.evaluate has none, so the tab path would
+        // silently fall back to the DOM tap that broke on 5 Aug 2026.
         let reply: StatusReply = self
-            .eval(capture_script(self.platform().await))
+            .eval_with_gesture(capture_script(self.platform().await))
             .await
             .context("failed to inject assets/capture.js")?;
 
@@ -1932,7 +2294,53 @@ impl MeetSession {
         self.await_audio_clock("window.__meetbotCaptureStats()")
             .await
             .context("the CDP audio tap never started pumping samples")?;
+        self.report_tab_capture().await;
         Ok(())
+    }
+
+    /// Logs, once, which source the tap ended up on.
+    ///
+    /// The clock gate resolves in well under a second, while `getDisplayMedia`
+    /// takes a moment to settle, so `mode` is still `dom`/`pending` at that
+    /// point and the gate cannot answer the only question that matters. Without
+    /// this, the first honest signal is the `tap stats` line a full minute into
+    /// the call — and on 5 Aug the cost of a slow signal was two days.
+    ///
+    /// Never fatal. A bot on the DOM fallback might still record a usable
+    /// meeting, and killing a live call over a log line is strictly worse than
+    /// recording it and saying so loudly.
+    async fn report_tab_capture(&self) {
+        let deadline = Instant::now() + TAB_CAPTURE_SETTLE;
+        loop {
+            let stats = self.eval::<ClockReply>(TAP_STATS_EXPR.to_string()).await;
+            let settled = match &stats {
+                Ok(s) => s.tab_state.as_deref().unwrap_or("pending") != "pending",
+                Err(_) => false,
+            };
+            if settled || Instant::now() >= deadline {
+                let (mode, tab_state) = match &stats {
+                    Ok(s) => (
+                        s.mode.as_deref().unwrap_or("unknown"),
+                        s.tab_state.as_deref().unwrap_or("unknown"),
+                    ),
+                    Err(_) => ("unknown", "unreadable"),
+                };
+                if mode == "tab" {
+                    tracing::info!(mode, tab_state, "capturing the tab's own audio output");
+                } else {
+                    tracing::warn!(
+                        mode,
+                        tab_state,
+                        "tab capture did not take; falling back to the media-element tap. \
+                         Meet stopped exposing remote audio through media elements on \
+                         5 Aug 2026, so expect silence. Check that \
+                         --auto-accept-this-tab-capture is on the command line."
+                    );
+                }
+                return;
+            }
+            tokio::time::sleep(AUDIO_CLOCK_POLL).await;
+        }
     }
 
     /// WebSocket-transport variant of [`MeetSession::start_capture`], selected by
@@ -1986,9 +2394,16 @@ impl MeetSession {
 
             match (stats.ctx_time, first) {
                 (Some(now), Some(before)) if now > before => {
+                    // `attached` is deliberately NOT a gate here. The bot joins
+                    // several minutes early to be the account's first presence,
+                    // so an empty room with zero streams is the normal state at
+                    // this point. The alarm for "running but deaf" lives in
+                    // `watch_call`, which knows whether anyone else has shown up.
                     tracing::info!(
                         ctx_time = now,
                         state = stats.ctx_state.as_deref().unwrap_or("unknown"),
+                        attached = stats.attached.unwrap_or(0),
+                        seq = stats.seq.unwrap_or(0),
                         "audio clock is advancing; capture is live"
                     );
                     return Ok(());
@@ -2013,11 +2428,22 @@ impl MeetSession {
 
     /// Watches for meeting end / removal / stop. `stop` resolving means the
     /// session got `SessionCommand::Stop`. Returns when the call is over.
+    ///
+    /// `audio` is the out-of-browser capture, when one is running. With
+    /// `CaptureTransport::Pulse` there is no tap in the page to read, so the
+    /// deafness check comes from the recorder's own counters instead. `None`
+    /// keeps the historic behaviour of reading `__meetbotCaptureStats()` off
+    /// the page. Either way the check is the same one -- peak amplitude while
+    /// other people are present -- because that is the only measurement that
+    /// separates recording the meeting from recording nothing.
     pub async fn watch_call(
         &self,
         lonely_grace: Duration,
         empty_room_grace: Duration,
         stop: oneshot::Receiver<()>,
+        audio: Option<std::sync::Arc<crate::pulse::PulseStats>>,
+        speaker: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
+        pulse_source: Option<String>,
     ) -> CallExit {
         let mut stop = stop;
         let mut alone_since: Option<Instant> = None;
@@ -2025,10 +2451,23 @@ impl MeetSession {
         // so it starts alone in an empty room. That is NOT the "everyone left"
         // case the short `lonely_grace` is for — until at least one other person
         // has appeared, tolerate the empty room for the much longer
-        // `empty_room_grace`. Once someone shows, flip to the short grace so a
+        // `empty_room_grace`. Once someone shows, secondary to the short grace so a
         // genuinely-ended meeting is left promptly.
         let mut seen_others = false;
         let mut consecutive_probe_errors = 0u32;
+        // Pulse reader liveness. `last_frames` is the previous tick's count and
+        // `stalled_since` when it stopped moving. See PULSE_STALL_GRACE.
+        // Last speaker-selector diagnostic, surfaced in `tap stats`, plus whether
+        // ANY name resolved during the call. `spk_hits=0/0/0` for a whole
+        // meeting means the speaking indicator has drifted and every line will
+        // come out "Unknown".
+        let mut speaker_diag = String::from("n/a");
+        let mut speaker_seen = false;
+        let mut last_frames: Option<u64> = None;
+        let mut stalled_since: Option<Instant> = None;
+        // Audio-liveness watchdog state. See `DEAF_IN_CALL_GRACE`.
+        let mut ticks = 0u32;
+        let mut deaf_since: Option<Instant> = None;
 
         // Wall-clock backstop. Every other exit from this loop depends on the
         // DOM still being readable the way `selectors` expects; this one does
@@ -2118,6 +2557,186 @@ impl MeetSession {
                     }
                 }
                 _ => alone_since = None,
+            }
+
+            // Audio-liveness watchdog. Everything above this point can be true
+            // of a bot that is capturing nothing: it is in the call, the UI is
+            // intact, people are present. Only the tap's own counters say
+            // whether any of that audio is reaching us.
+            ticks = ticks.wrapping_add(1);
+            let due = ticks % STATS_LOG_EVERY_TICKS == 0;
+            // Throttle the deafness probe.
+            //
+            // This originally evaluated on EVERY tick once others were present,
+            // which at POLL_INTERVAL = 2s roughly doubled the CDP round-trips of
+            // a live call. That matters more than it looks: `99a311a` fixed the
+            // 22-29 Jul navigation timeouts by cutting CDP event volume through
+            // the single chromiumoxide handler, nav timeouts then sat at ZERO
+            // for 33 sessions across 30 Jul - 4 Aug, and came back 3-in-14 on
+            // 5 Aug on the builds that added this probe. Not proven to be the
+            // cause, but this probe is the new load and it does not need
+            // 2-second resolution to enforce a 180-second grace.
+            let probe_deaf = seen_others && ticks % DEAF_PROBE_EVERY_TICKS == 0;
+
+            // Refresh the speaker label for the out-of-browser recorder. Meet
+            // stays the only place a participant's NAME exists, so with the
+            // Pulse transport the audio comes from the sink and the label comes
+            // from the DOM. Best effort: a miss degrades one utterance to
+            // "Unknown" and is never fatal.
+            if let Some(slot) = speaker.as_ref() {
+                let (name, diag) = self.current_speaker().await;
+                speaker_diag = diag;
+                if name.is_some() {
+                    speaker_seen = true;
+                }
+                if let Ok(mut g) = slot.lock() {
+                    *g = name;
+                }
+            }
+
+            // Pulse transport: the witness lives in the recorder, not the page.
+            if let Some(pulse) = audio.as_ref() {
+                use std::sync::atomic::Ordering;
+                let (peak, loud_ratio) = pulse.take_peak();
+                let peak = peak as f64;
+                if due {
+                    tracing::info!(
+                        mode = "pulse",
+                        source = pulse_source.as_deref().unwrap_or("?"),
+                        frames = pulse.frames.load(Ordering::Relaxed),
+                        peak,
+                        loud_ratio,
+                        participants = probe.participants.unwrap_or(0),
+                        spk_hits = %speaker_diag,
+                        spk_resolved = speaker_seen,
+                        "tap stats"
+                    );
+                }
+                if pulse.stopped.load(Ordering::Relaxed) {
+                    tracing::error!("the pulse capture thread died mid-call");
+                    return CallExit::BrowserError(
+                        "pulse capture thread stopped while the call was live".to_string(),
+                    );
+                }
+
+                // A STALLED reader is not a stopped one.
+                //
+                // On 6 Aug 2026 the Pulse daemon wedged mid-call and
+                // `pa_simple_read` simply never returned. The thread was alive,
+                // nothing was flagged, and two consecutive stats lines a minute
+                // apart both read `frames=285`. The session then finished
+                // `completed`. Watching only for a dead thread reproduces the
+                // exact blind spot the original outage was made of: a counter
+                // that has stopped moving must be as loud as one that never
+                // started.
+                let frames = pulse.frames.load(Ordering::Relaxed);
+                match last_frames {
+                    Some(prev) if prev == frames => {
+                        let since = *stalled_since.get_or_insert_with(Instant::now);
+                        if since.elapsed() >= PULSE_STALL_GRACE {
+                            tracing::error!(
+                                stalled_sec = since.elapsed().as_secs(),
+                                frames,
+                                "the pulse reader has not produced a frame; the audio server \
+                                 is most likely wedged. Check /mnt/wslg/pulseaudio.log for \
+                                 `q overrun` on the sink Chrome plays into."
+                            );
+                            return CallExit::BrowserError(
+                                "pulse capture stalled mid-call".to_string(),
+                            );
+                        }
+                    }
+                    _ => {
+                        stalled_since = None;
+                        last_frames = Some(frames);
+                    }
+                }
+                if seen_others && peak <= SILENCE_FLOOR {
+                    let since = *deaf_since.get_or_insert_with(Instant::now);
+                    if since.elapsed() >= DEAF_IN_CALL_GRACE {
+                        tracing::error!(
+                            deaf_sec = since.elapsed().as_secs(),
+                            participants = probe.participants.unwrap_or(0),
+                            "in the call with other people and every sample off the \
+                             PulseAudio monitor is silent. First thing to check is that \
+                             Chrome is not muted: --mute-audio silences its OUTPUT and the \
+                             flag is presence-based, so `--mute-audio=false` mutes just as \
+                             hard. Then check that Chrome is playing into the sink whose \
+                             monitor is configured as `pulse_source`."
+                        );
+                        return CallExit::BrowserError(
+                            "pulse capture recorded only silence while others were present"
+                                .to_string(),
+                        );
+                    }
+                } else if peak > SILENCE_FLOOR {
+                    deaf_since = None;
+                }
+                continue;
+            }
+
+            if due || probe_deaf {
+                if let Ok(stats) = self.eval::<ClockReply>(TAP_STATS_EXPR.to_string()).await {
+                    let peak = stats.peak.unwrap_or(0.0);
+                    if due {
+                        tracing::info!(
+                            mode = stats.mode.as_deref().unwrap_or("unknown"),
+                            tab_state = stats.tab_state.as_deref().unwrap_or("unknown"),
+                            attached = stats.attached.unwrap_or(0),
+                            attached_ever = stats.attached_ever.unwrap_or(0),
+                            el_top = stats.elems_top.unwrap_or(0),
+                            el_shadow = stats.elems_shadow.unwrap_or(0),
+                            el_frame = stats.elems_frame.unwrap_or(0),
+                            seq = stats.seq.unwrap_or(0),
+                            sent_samples = stats.sent_samples.unwrap_or(0),
+                            peak,
+                            loud_ratio = stats.loud_ratio.unwrap_or(0.0),
+                            ctx_time = stats.ctx_time.unwrap_or(0.0),
+                            ctx_state = stats.ctx_state.as_deref().unwrap_or("unknown"),
+                            participants = probe.participants.unwrap_or(0),
+                            "tap stats"
+                        );
+                    }
+
+                    // Deafness is measured as SILENCE, not as an unattached
+                    // stream. `attached` counts media elements carrying an audio
+                    // track and Meet reports 3 of those with the bot alone in an
+                    // empty room, so it is nearly always non-zero and cannot
+                    // carry this check. Peak amplitude can.
+                    //
+                    // Gated on other people being present. A quiet room with
+                    // nobody in it is not a fault, and the bot deliberately
+                    // joins early into exactly that.
+                    if seen_others && peak <= SILENCE_FLOOR {
+                        let since = *deaf_since.get_or_insert_with(Instant::now);
+                        if since.elapsed() >= DEAF_IN_CALL_GRACE {
+                            tracing::error!(
+                                deaf_sec = since.elapsed().as_secs(),
+                                participants = probe.participants.unwrap_or(0),
+                                mode = stats.mode.as_deref().unwrap_or("unknown"),
+                                tab_state = stats.tab_state.as_deref().unwrap_or("unknown"),
+                                attached = stats.attached.unwrap_or(0),
+                                sent_samples = stats.sent_samples.unwrap_or(0),
+                                "in the call with other people, audio flowing, and every sample \
+                                 silent; this meeting is recording nothing. Ending it so the \
+                                 profile is freed for the next meeting. Read `tab_state` first: \
+                                 anything other than `ok` means Chrome never handed over the \
+                                 tab's audio (check that --auto-accept-this-tab-capture is on \
+                                 the command line and that the injection carried a user \
+                                 gesture), and `mode=dom` means the bot fell back to the \
+                                 media-element tap that Meet stopped feeding on 5 Aug 2026. \
+                                 `tab_state=ok` with silence is a different fault: the capture \
+                                 works and the tab itself is producing nothing."
+                            );
+                            return CallExit::BrowserError(
+                                "audio tap captured only silence while others were present"
+                                    .to_string(),
+                            );
+                        }
+                    } else if peak > SILENCE_FLOOR {
+                        deaf_since = None;
+                    }
+                }
             }
         }
     }
@@ -2242,6 +2861,78 @@ impl MeetSession {
         result
             .into_value::<T>()
             .map_err(|e| anyhow!("unexpected shape from the page: {e}"))
+    }
+
+    /// [`MeetSession::eval`] with transient user activation on the frame.
+    ///
+    /// Only the capture injection needs this, and it needs it absolutely:
+    /// `getDisplayMedia` is gated on user activation and returns
+    /// `NotAllowedError` without it. Everything else on the page is a DOM read
+    /// or a click and must keep using plain `eval`, because a spurious gesture
+    /// can dismiss Meet's own transient UI.
+    async fn eval_with_gesture<T: DeserializeOwned>(&self, expr: String) -> Result<T> {
+        let params = chromiumoxide::cdp::js_protocol::runtime::EvaluateParams::builder()
+            .expression(expr)
+            .user_gesture(true)
+            .await_promise(true)
+            .return_by_value(true)
+            .build()
+            .map_err(|e| anyhow!("could not build the evaluate params: {e}"))?;
+        let result = self
+            .page
+            .evaluate(params)
+            .await
+            .map_err(|e| anyhow!("page evaluate failed: {e}"))?;
+        result
+            .into_value::<T>()
+            .map_err(|e| anyhow!("unexpected shape from the page: {e}"))
+    }
+
+    /// Active speaker's display name, or `None`.
+    ///
+    /// Only the PulseAudio transport needs this: the other two taps resolve the
+    /// speaker in the page where the audio already is. Swallows every error on
+    /// purpose -- an unreadable DOM costs a speaker label, never a recording.
+    async fn current_speaker(&self) -> (Option<String>, String) {
+        #[derive(Deserialize)]
+        struct Reply {
+            #[serde(default)]
+            speaker: Option<String>,
+            #[serde(default)]
+            hits: Vec<i64>,
+            #[serde(default)]
+            tiles: u64,
+        }
+        let expr = speaker_script(self.platform().await);
+        match self.eval::<Reply>(expr).await {
+            Ok(r) => {
+                let hits = r
+                    .hits
+                    .iter()
+                    .map(|n| n.to_string())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                (r.speaker, format!("{hits} tiles={}", r.tiles))
+            }
+            Err(_) => (None, "eval-failed".to_string()),
+        }
+    }
+
+    /// Dumps what the in-call DOM actually offers for speaker attribution.
+    ///
+    /// For `doctor`, and for exactly one reason: on 6 Aug 2026 a whole meeting
+    /// came back with every line labelled "Unknown", and the only honest way to
+    /// fix that is to look at the markup Meet is shipping TODAY rather than
+    /// guess at new selectors. Reports the current selectors' hit counts
+    /// alongside the `data-*` attributes that actually exist on the page, most
+    /// common first, so a drifted attribute name is visible immediately.
+    pub async fn dump_speaker_markup(&self) -> Result<serde_json::Value> {
+        let (speaking, tile, name) = speaker_selectors(self.platform().await);
+        let expr = js::SPEAKER_MARKUP
+            .replace("__MEETBOT_SPEAKING_SELECTORS__", &json_list(speaking))
+            .replace("__MEETBOT_SPEAKER_TILE_SELECTORS__", &json_list(tile))
+            .replace("__MEETBOT_SPEAKER_NAME_SELECTORS__", &json_list(name));
+        self.eval::<serde_json::Value>(expr).await
     }
 
     /// Platform of the meeting this session joined. Defaults to Google Meet
@@ -2567,14 +3258,18 @@ fn default_max_call_duration() -> Duration {
 /// than as an error. Verified: bare-key/tuple form gives `state: "running"`,
 /// the `"--flag=value"` string form gives `state: "suspended"`.
 ///
-/// `--headless=new`, `--no-sandbox`, `--user-data-dir` and the window size are
-/// emitted by `BrowserConfig::launch` from the builder settings, so they are not
-/// repeated here. `mute-audio=false` matters because chromiumoxide appends a
-/// bare `--mute-audio` for headless runs and its arg builder merges by key, so
-/// seeding the value first keeps the tap audible.
-const LAUNCH_FLAGS: &[(&str, Option<&str>)] = &[
-    // Keep the render pipeline producing audio in headless.
-    ("mute-audio", Some("false")),
+/// `--no-sandbox`, `--user-data-dir` and the window size are emitted by
+/// `BrowserConfig::launch` from the builder settings, so they are not repeated
+/// here. `--headless=new` is passed at the launch site rather than from this
+/// table, because selecting headless through chromiumoxide would drag
+/// `--mute-audio` in with it -- see the comment there.
+///
+/// **There must be no `mute-audio` entry here, in any form.** It carried
+/// `Some("false")` for months, which reads as "audio on" and is not: the flag
+/// is presence-based, so `--mute-audio=false` mutes Chrome's OUTPUT exactly as
+/// hard as `--mute-audio`, and that silences the sink the PulseAudio capture
+/// records from. `launch_flags_never_mute_audio` guards this.
+pub const LAUNCH_FLAGS: &[(&str, Option<&str>)] = &[
     // Auto-accept the mic/cam permission prompt instead of blocking on it.
     ("use-fake-ui-for-media-stream", None),
     // A synthetic capture device. It renders as a green test pattern, so the
@@ -2592,6 +3287,13 @@ const LAUNCH_FLAGS: &[(&str, Option<&str>)] = &[
     // in a headless session. Without this the AudioContext never leaves
     // `suspended` and no audio is ever captured.
     ("autoplay-policy", Some("no-user-gesture-required")),
+    // Resolves the getDisplayMedia surface picker headlessly when the request
+    // carries `preferCurrentTab: true`, which is how `assets/capture.js` gets
+    // the tab's own audio. Without it the promise hangs on a picker no one can
+    // click and capture falls back to the DOM tap that broke on 5 Aug 2026.
+    //
+    // Bare key, no leading `--` — see the LANDMINE note above this table.
+    ("auto-accept-this-tab-capture", None),
     // /dev/shm is 64 MB in most containers and Chrome crashes on it.
     ("disable-dev-shm-usage", None),
     ("disable-gpu", None),
@@ -2689,7 +3391,7 @@ fn join_url(key: &MeetingKey) -> String {
 /// The tap itself is platform-agnostic — it walks the page's media elements —
 /// so Teams reuses it unchanged. Only the speaker-attribution selectors differ,
 /// and those come from [`speaker_selectors`].
-fn capture_script(platform: Platform) -> String {
+pub fn capture_script(platform: Platform) -> String {
     fill_selectors(js::CAPTURE, platform)
         .replace("__MEETBOT_BINDING__", &json_str(AUDIO_BINDING))
         .replace("__MEETBOT_FRAME_SAMPLES__", &FRAME_SAMPLES.to_string())
@@ -2704,6 +3406,22 @@ fn capture_script(platform: Platform) -> String {
 /// of markup knowledge — `selectors::` — so a DOM fix lands in both at once.
 fn capture_ws_script(platform: Platform, ingest_url: &str) -> String {
     fill_selectors(js::CAPTURE_WS, platform).replace("__MEETBOT_INGEST_URL__", ingest_url)
+}
+
+/// Reads the active speaker's name off the page, and nothing else.
+///
+/// The two taps resolve the speaker inside the page, per frame, because the
+/// audio is already there. The PulseAudio transport captures outside the
+/// browser entirely, so it has no such hook -- but Meet's DOM is still the only
+/// place a participant's NAME exists. This is the smallest script that answers
+/// just that question, evaluated once per watch tick.
+///
+/// Deliberately a copy of `capture.js`'s `nameFor`/`currentSpeaker` logic
+/// rather than an import: both are filled from `selectors::` by
+/// [`fill_selectors`], so the markup knowledge still lives in exactly one
+/// place, which is the rule that matters.
+fn speaker_script(platform: Platform) -> String {
+    fill_selectors(js::SPEAKER, platform)
 }
 
 /// Substitutes the speaker-attribution selector tokens shared by both taps.
@@ -2913,6 +3631,30 @@ mod tests {
         assert!(script.contains("meetbotAudio"));
     }
 
+    /// The 5 Aug 2026 fix, guarded at the source.
+    ///
+    /// Meet stopped exposing remote participant audio through media elements,
+    /// so the DOM tap alone records silence in a room full of people. Tab
+    /// capture is the only path that hears anyone; if these three pieces ever
+    /// go missing the bot still joins, still reports `completed`, and still
+    /// produces nothing.
+    #[test]
+    fn capture_script_asks_for_the_tabs_own_audio() {
+        let script = capture_script(Platform::GoogleMeet);
+        assert!(
+            script.contains("getDisplayMedia"),
+            "capture.js must capture the tab's output, not just media elements"
+        );
+        assert!(
+            script.contains("preferCurrentTab"),
+            "without preferCurrentTab, --auto-accept-this-tab-capture does not apply"
+        );
+        assert!(
+            script.contains("tabState"),
+            "a failed tab grab must be reportable; silent fallback is what hid the outage"
+        );
+    }
+
     /// capture_ws.js is a template, not standalone JS: an unsubstituted token is
     /// a syntax error in the page, so the tap would die on injection.
     #[test]
@@ -3001,8 +3743,30 @@ mod tests {
         assert!(
             LAUNCH_FLAGS
                 .iter()
-                .any(|(k, v)| *k == "mute-audio" && *v == Some("false")),
-            "headless mode appends a bare --mute-audio unless the value is seeded"
+                .any(|(k, v)| *k == "auto-accept-this-tab-capture" && v.is_none()),
+            "without auto-accept-this-tab-capture the getDisplayMedia picker never resolves \
+             headlessly and every call falls back to the deaf media-element tap"
+        );
+    }
+
+    /// The 6 Aug 2026 mute bug, guarded so it cannot come back.
+    ///
+    /// `--mute-audio` silences Chrome's audio OUTPUT, which is the signal the
+    /// PulseAudio transport records. The flag is presence-based, so a value
+    /// cannot disable it: this table carried `("mute-audio", Some("false"))`
+    /// for months, which reads as "audio on" and mutes exactly as hard as the
+    /// bare flag. Measured against a 440 Hz page at gain 0.5, reading
+    /// `RDPSink.monitor`: no flag -> peak 0.5000, `=false` -> 0.0000,
+    /// bare -> 0.0000.
+    ///
+    /// The launch site must also keep passing `--headless=new` itself rather
+    /// than going through chromiumoxide's headless mode, which appends its own
+    /// bare `--mute-audio` (its config.rs:426).
+    #[test]
+    fn launch_flags_never_mute_audio() {
+        assert!(
+            !LAUNCH_FLAGS.iter().any(|(k, _)| *k == "mute-audio"),
+            "mute-audio must not appear here in ANY form; `=false` mutes too"
         );
     }
 

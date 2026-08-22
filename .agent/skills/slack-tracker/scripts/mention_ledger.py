@@ -142,11 +142,42 @@ def load_state():
             'items': {}, 'channel_names': {}, 'last_sweep': None}
 
 def save_state(state):
+    """Merge into whatever is on disk, then write. Never replace outright.
+
+    A replace is only safe while one machine writes this file. Two do now: the
+    macOS listener and the WSL sweep, and either may be the only one running for
+    a whole day. The second write would otherwise be built on a picture that
+    never contained the first machine's records, and would delete them with no
+    conflict to notice. That is the 17 Aug 2026 incident in CLAUDE.md.
+
+    Merging makes a write additive: it can add an item or advance one, never
+    remove or revert. Deletion still happens, but only through the retention
+    rule inside the merge, which both machines derive identically from the data
+    rather than sending to each other.
+
+    Returns the state that was actually written, which is not always the one
+    passed in. A caller that reads counts back out of its own dict afterwards
+    would otherwise report a number that predates the merge.
+    """
     os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
+
+    if os.path.exists(STATE_PATH):
+        try:
+            with open(STATE_PATH) as f:
+                on_disk = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            on_disk = None      # unreadable: our copy is the better of the two
+        if on_disk is not None:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from ledger_merge import merge_states
+            state = merge_states(on_disk, state,
+                                 retention_days=ANSWERED_RETENTION_DAYS)
+
     tmp = STATE_PATH + '.tmp'
     with open(tmp, 'w') as f:
         json.dump(state, f, indent=1, ensure_ascii=False)
     os.replace(tmp, STATE_PATH)
+    return state
 
 def digest_append(rows):
     if not rows:
@@ -436,6 +467,16 @@ def sweep_noise_backlog(state):
     return n
 
 def cmd_sweep(args):
+    # The sweep used to be the only writer of this file, so it needed no lock.
+    # Push ingestion is a second writer now (slack-push/scripts/ingest.py), and
+    # both rewrite the whole document, which is a lost update whenever they
+    # overlap. Same lock, same name, on both sides.
+    sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'scripts'))
+    from ledger_lock import ledger_lock
+    with ledger_lock('slack_mention_ledger'):
+        return _sweep(args)
+
+def _sweep(args):
     token = load_token()
     auth = slack('auth.test', token)
     brian_id = auth.get('user_id') or BRIAN_ID_DEFAULT

@@ -514,6 +514,16 @@ async fn doctor(
     }
 
     // --- 4. launch -----------------------------------------------------------
+    // doctor must prepare the capture sink the same way a real session does, or
+    // it certifies a path production never takes.
+    if let Some(sink) = cfg.pulse_sink.as_deref() {
+        match meetbot::pulse::ensure_null_sink(sink) {
+            Ok(true) => step_ok("pulse sink", &format!("created {sink}")),
+            Ok(false) => step_ok("pulse sink", &format!("{sink} already present")),
+            Err(e) => step_warn("pulse sink", &format!("{e:#}")),
+        }
+    }
+
     let opts = BrowserOptions {
         chromium_path: cfg.chromium_path.clone(),
         headless: if headed { false } else { cfg.headless },
@@ -523,6 +533,7 @@ async fn doctor(
         // a code path production never takes.
         profile_template: cfg.profile_template.clone(),
         window_size: (1280, 720),
+        pulse_sink: cfg.pulse_sink.clone(),
     };
 
     let session = match MeetSession::launch(&opts).await {
@@ -584,6 +595,17 @@ async fn doctor(
             false
         }
     };
+
+    // Speaker attribution, the 6 Aug 2026 "every line says Unknown" bug.
+    // Must run BEFORE leave(): once the bot is out of the call the participant
+    // tiles are gone and the dump would report zeros that mean nothing.
+    match session.dump_speaker_markup().await {
+        Ok(v) => {
+            println!("\n--- speaker attribution (live in-call DOM) ---");
+            println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+        }
+        Err(e) => step_warn("speaker markup", &format!("{e:#}")),
+    }
 
     session.leave().await;
     session.close().await;

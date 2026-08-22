@@ -32,6 +32,7 @@ TOKEN_FILE = os.path.join(SCRIPT_DIR, 'token.json')
 REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '..', '..', '..'))
 sys.path.insert(0, os.path.join(REPO_ROOT, '.agent', 'scripts'))
 from file_utils import assert_drive_result  # Drive Operation Verification (CLAUDE.md)
+from file_utils import apply_visibility, add_visibility_arg, resolve_visibility  # sharing (CLAUDE.md LANDMINE)
 
 # Full drive access for Work's shared drive
 SCOPES = ['https://www.googleapis.com/auth/drive']
@@ -80,17 +81,16 @@ def authenticate():
             token.write(creds.to_json())
     return creds
 
-def set_commenter_permission(service, file_id):
-    """Set permissions to 'anyone' can 'comment'."""
-    try:
-        print(f"Setting permissions for {file_id} to 'anyone' can 'comment'...")
-        user_permission = {'type': 'anyone', 'role': 'commenter'}
-        service.permissions().create(fileId=file_id, body=user_permission, fields='id').execute()
-        print("Permission set successfully.")
-    except Exception as e:
-        print(f"Failed to set permissions: {e}")
+def set_commenter_permission(service, file_id, visibility='domain'):
+    """Deprecated shim. Sharing now lives in file_utils.apply_visibility.
 
-def update_file(file_id, file_path, convert_to_docs=False):
+    Kept so any caller outside this file keeps working, but it no longer
+    publishes: the default is domain-restricted. See file_utils.apply_visibility
+    for why this stopped being a local 'always make it public' helper.
+    """
+    apply_visibility(service, file_id, visibility)
+
+def update_file(file_id, file_path, convert_to_docs=False, visibility='domain'):
     """Update an existing file in Work's Google Drive without deleting it."""
     creds = authenticate()
     if not creds:
@@ -187,8 +187,7 @@ def update_file(file_id, file_path, convert_to_docs=False):
         print(f"File ID: {file.get('id')}")
         print(f"Link: {file.get('webViewLink')}")
 
-        # Always set permissions to anyone can comment by default
-        set_commenter_permission(service, file.get('id'))
+        apply_visibility(service, file.get('id'), visibility)
 
         return file.get('id')
     except Exception as e:
@@ -219,7 +218,7 @@ def share_file(file_id, email, role='commenter'):
     except Exception as e:
         print(f"[Work Drive] An error occurred sharing with {email}: {e}")
 
-def upload_file(file_path, folder_id=None, convert_to_docs=False, share=False):
+def upload_file(file_path, folder_id=None, convert_to_docs=False, visibility='domain'):
     """Upload a file to Work's Google Drive."""
     creds = authenticate()
     if not creds:
@@ -325,8 +324,7 @@ def upload_file(file_path, folder_id=None, convert_to_docs=False, share=False):
         print(f"File ID: {file.get('id')}")
         print(f"Link: {file.get('webViewLink')}")
 
-        # Always set permissions to anyone can comment by default
-        set_commenter_permission(service, file.get('id'))
+        apply_visibility(service, file.get('id'), visibility)
 
         return file.get('id')
 
@@ -506,7 +504,7 @@ def main():
     upload_parser.add_argument('--file', required=True, help='Path to the file')
     upload_parser.add_argument('--folder', help='Folder ID to upload to')
     upload_parser.add_argument('--convert', action='store_true', help='Convert to Google Docs')
-    upload_parser.add_argument('--share', action='store_true', help='Share with anyone to comment')
+    add_visibility_arg(upload_parser)
 
     search_parser = subparsers.add_parser('search', help='Search for files')
     search_parser.add_argument('--query', required=True, help='Search query')
@@ -522,6 +520,7 @@ def main():
     update_parser.add_argument('--id', required=True, help='File ID of existing Drive file to update')
     update_parser.add_argument('--file', required=True, help='Path to the new local file')
     update_parser.add_argument('--convert', action='store_true', help='Convert markdown to Google Doc')
+    add_visibility_arg(update_parser)
 
     rename_parser = subparsers.add_parser('rename', help='Rename a file')
     rename_parser.add_argument('--id', required=True, help='File ID')
@@ -541,12 +540,12 @@ def main():
 
     if args.command == 'upload':
         if os.path.exists(args.file):
-            upload_file(args.file, args.folder, args.convert, args.share)
+            upload_file(args.file, args.folder, args.convert, resolve_visibility(args))
         else:
             print(f"File not found: {args.file}")
     elif args.command == 'update':
         if os.path.exists(args.file):
-            update_file(args.id, args.file, args.convert)
+            update_file(args.id, args.file, args.convert, resolve_visibility(args))
         else:
             print(f"File not found: {args.file}")
     elif args.command == 'search':

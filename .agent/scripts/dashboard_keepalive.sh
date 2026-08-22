@@ -31,3 +31,11 @@ fi
 python3 "$REPO_DIR/.agent/scripts/heartbeat.py" \
   --job dashboard-keepalive --status "$STATUS" --summary "$SUMMARY" \
   >> "$LOG_FILE" 2>&1 || true
+
+# WSL instance uptime, so a Windows-boot without the "WSL Autostart" Task
+# Scheduler task kicking in (or a crashed instance) shows up on the Routines
+# tab instead of silently going undetected until a cron job fails.
+UPTIME_SECS="$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo unknown)"
+python3 "$REPO_DIR/.agent/scripts/heartbeat.py" \
+  --job wsl-instance --status ok --summary "uptime ${UPTIME_SECS}s" \
+  >> "$LOG_FILE" 2>&1 || true

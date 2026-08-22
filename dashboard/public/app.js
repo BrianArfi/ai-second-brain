@@ -70,20 +70,36 @@ function canRender(container) {
   return !(a && container && container.contains(a) && a.matches('input, textarea, select'));
 }
 
-/* ── Router: #today (default) | #inbox | #work[/filter] | #meetings | #system ── */
+/* ── Router: #today (default) | #inbox | #work[/filter] | #meetings | #system
+   Plus #find/<ID>, which is NOT a tab: it is the permalink to one ledger
+   record, owned by quickfind.js, which opens it in the Drawer over whatever
+   tab is already showing. Routing it as a tab would throw the owner back to Today
+   every time he clicked a WAIT- link from another tab. ── */
 const TAB_NAMES = ['today', 'inbox', 'work', 'meetings', 'hours', 'system'];
 
 function parseHash() {
   const h = (location.hash || '#today').replace(/^#/, '');
   const [tab, ...rest] = h.split('/');
+  if (tab === 'find') {
+    return { tab: App.activeTab || 'today', filter: App.filter, isFind: true };
+  }
   return {
     tab: TAB_NAMES.includes(tab) ? tab : 'today',
     filter: rest.join('/') || null,
   };
 }
 
+let routed = false;   // has a tab ever been painted?
+
 function applyRoute() {
-  const { tab, filter } = parseHash();
+  const { tab, filter, isFind } = parseHash();
+  /* a #find deep link changes nothing about the tab layout — quickfind.js
+     already reacted to the same hashchange and is painting the Drawer. On the
+     FIRST load, though, no panel is active yet: bail out here and the record
+     card floats over an empty shell, so fall through and paint the default tab
+     underneath it. */
+  if (isFind && routed) return;
+  routed = true;
   App.activeTab = tab;
   App.filter = filter;
   document.querySelectorAll('.tab-btn').forEach(b =>
@@ -240,7 +256,7 @@ function wibHourFromIso(iso) {
 }
 
 /* 📊 Momentum band — 4 trendCards from /api/progress, directly under the
-   hero tiles (the owner: "grafik cantik biar seneng lihat progress"). Fetch
+   hero tiles (the owner: "nice charts, so watching progress feels good"). Fetch
    failure (App.progress stays null) -> band absent, no chrome at all. */
 function momentumBand() {
   const p = App.progress;
@@ -258,7 +274,7 @@ function momentumBand() {
 
 /* 🗞️ Briefing card — newest Pagi/Malam section from /api/briefing. Collapsed
    by default, EXCEPT a still-fresh morning briefing before 15:00 WIB (opened
-   so the owner sees it without an extra click). "Lihat yang sebelumnya" opens
+   so the owner sees it without an extra click). "See the previous one" opens
    `other` (the other kind's most recent section) in the Drawer. Empty/failed
    fetch -> card absent. */
 function briefingCard() {
@@ -273,7 +289,7 @@ function briefingCard() {
   const hour = wibHourFromIso(App.overview?.generated_wib);
   const defaultOpen = b.latest.kind === 'pagi' && hour != null && hour < 15;
   const otherBtn = b.other
-    ? `<button class="prep-link briefing-other-btn">Lihat yang sebelumnya</button>` : '';
+    ? `<button class="prep-link briefing-other-btn">See the previous one</button>` : '';
   const body = `<div class="md">${U.mdToHtml(b.latest.markdown || '')}</div>` +
     (otherBtn ? `<p class="row-note">${otherBtn}</p>` : '');
   return Comp.card({
@@ -282,7 +298,7 @@ function briefingCard() {
   });
 }
 
-/* "Lihat yang sebelumnya" -> open the OTHER briefing section in the Drawer
+/* "See the previous one" -> open the OTHER briefing section in the Drawer
    (rendered markdown) — not a repo file, so Drawer.openHtml not Drawer.open */
 document.addEventListener('click', e => {
   const btn = e.target.closest('.briefing-other-btn');
@@ -364,14 +380,14 @@ function draftEscalationButton(it) {
     title="Draft an escalation message">✍ Draft escalation</button>`;
 }
 
-/* ✓ Beres / 👋 Udah di-nudge — resolve or nudge a WAIT item straight from the
+/* ✓ Done / 👋 Nudged — resolve or nudge a WAIT item straight from the
    escalation strip via POST /api/waiting-close. Not in components.js's
    delegated inventory (that endpoint didn't exist yet when it was written),
    so wired here the same way app.js already owns .draft-escalation-btn /
    .draft-copy-btn. */
 function escalationActionButtons(it) {
-  return `<button class="prep-link esc-close-btn" data-id="${U.esc(it.id)}" title="Tandai selesai">✓ Beres</button>
-    <button class="prep-link esc-touch-btn" data-id="${U.esc(it.id)}" title="Tandai sudah di-nudge">👋 Udah di-nudge</button>`;
+  return `<button class="prep-link esc-close-btn" data-id="${U.esc(it.id)}" title="Mark resolved">✓ Done</button>
+    <button class="prep-link esc-touch-btn" data-id="${U.esc(it.id)}" title="Mark as nudged">👋 Nudged</button>`;
 }
 
 document.addEventListener('click', async e => {
@@ -398,14 +414,14 @@ document.addEventListener('click', async e => {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id, action: 'reopen' }),
         });
-        Comp.toast(`Dibuka lagi: ${id}`, true);
+        Comp.toast(`Reopened: ${id}`, true);
         refreshOverview(true);
       },
     } : null;
-    Comp.toast(action === 'close' ? `Ditandai selesai: ${id}` : `Nudge dicatat: ${id}`, true, undo);
+    Comp.toast(action === 'close' ? `Marked resolved: ${id}` : `Nudge recorded: ${id}`, true, undo);
     refreshOverview(true);
   } catch (err) {
-    Comp.toast(`Gagal: ${err.message}`, false);
+    Comp.toast(`Failed: ${err.message}`, false);
     btn.disabled = false;
   }
 });
@@ -690,12 +706,12 @@ function prepOnlyRows(cards) {
     </div>`).join('') + '</div>';
 }
 
-/* 🎯 Action items dari meeting — open commitments sourced from a meeting
+/* 🎯 Action items from meetings — open commitments sourced from a meeting
    (Fathom or local recorder), last 7d, server-capped at 6. Hidden entirely
    when empty rather than showing EmptyState chrome: Today already has the
    hero row + meetings/tickets cards on screen, so an empty-state block here
    would just be redundant noise. (If ever surfaced on a truly bare screen,
-   the copy would be "Belum ada action item baru dari meeting".)
+   the copy would be "No new action items from meetings".)
 
    v2: hand-built row (not Comp.actionItemRow — that builder always renders
    the "→ Jadiin ticket" button with no room for a ticket chip or an AI
@@ -729,7 +745,7 @@ function actionItemsCard(ov) {
   if (!items.length) return '';
   const rows = items.map(actionItemRowV2).join('');
   return Comp.card({
-    key: 'meeting-actions', icon: '🎯', title: 'Action items dari meeting',
+    key: 'meeting-actions', icon: '🎯', title: 'Action items from meetings',
     count: `${items.length} baru`, body: `<div class="rows">${rows}</div>`, open: true,
   });
 }
@@ -753,7 +769,7 @@ window.addEventListener('psb:ticket-saved', async e => {
     });
     refreshOverview(true);   // re-fetch so the row now shows Comp.ticketChip instead of the button
   } catch (err) {
-    Comp.toast(`Link commitment→ticket gagal: ${err.message}`, false);
+    Comp.toast(`Commitment→ticket link failed: ${err.message}`, false);
   }
 });
 
@@ -908,6 +924,10 @@ function boot() {
 
   window.addEventListener('hashchange', applyRoute);
   applyRoute();
+  /* a page opened straight on #find/<ID> — quickfind.js registers its own
+     hashchange listener, but the FIRST paint needs Drawer.init() to have run,
+     which only happens here */
+  if (window.QuickFind) QuickFind.openFromHash();
   refreshOverview(true);
   setInterval(() => refreshOverview(false), 60000);
   document.addEventListener('visibilitychange', () => {

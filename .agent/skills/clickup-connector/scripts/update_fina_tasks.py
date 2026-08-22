@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Updates all FINA PoC tasks in ClickUp:
+Updates all ExampleProject PoC tasks in ClickUp:
 1. Adds actual PRD content to description for each section reference
 2. Fixes priority: P0 -> high (2), P1 -> normal (3)
 """
@@ -46,7 +46,7 @@ Rollout control: Traffic is controlled via Yellow's workflow builder (internal e
 
 "section_3_step_3": """\
 **Section 3 — Step 3: Intent Understanding & Transaction Identification (Full Text)**
-- Natural Language Understanding: FINA extracts intent, amount, bank name, date, and other clues from the user's free-text input.
+- Natural Language Understanding: ExampleProject extracts intent, amount, bank name, date, and other clues from the user's free-text input.
 - Transaction History Pull: Seamlessly pull the user's transaction history in the background.
 - AI Matching: Match extracted details to a specific Transaction ID using AI context matching (no selection UI, no carousel).
 - Transaction Detail Retrieval: Call the Get User Transaction Detail API to retrieve Status Code, Date, Transfer Pool, and Amount.""",
@@ -58,21 +58,21 @@ Rollout control: Traffic is controlled via Yellow's workflow builder (internal e
 
 "section_3_step_5": """\
 **Section 3 — Step 5: Scenario Classification (Decision Matrix)**
-- Based on the transaction details, FINA classifies the complaint into one of the 7 Scenarios (see Section 2).
+- Based on the transaction details, ExampleProject classifies the complaint into one of the 7 Scenarios (see Section 2).
 - Route to the appropriate handler: Refund Flow (Scenarios 4, 5, 6), UCC Flow (Scenario 3), or Jingga Handback (Scenarios 1, 2, 7).""",
 
 "section_3_step_6": """\
 **Section 3 — Step 6: Bank Receipt Collection & OCR Processing (Refund Scenarios Only)**
-- For all refund scenarios (4, 5, 6), FINA requests the user to upload their bank transfer receipt (bukti transfer).
+- For all refund scenarios (4, 5, 6), ExampleProject requests the user to upload their bank transfer receipt (bukti transfer).
 - The receipt image is processed through the OCR API (using the Refund Automation OCR, not the legacy Jingga OCR) to extract:
   Sender Bank Name, Recipient Bank Name, Transfer Amount, Transfer Date & Time, Sender Name, Reference Number.
-- OCR Failure Handling: If OCR fails or returns invalid data, and the user insists the receipt is correct, FINA falls back to manual text-based probing to gather the same data points.""",
+- OCR Failure Handling: If OCR fails or returns invalid data, and the user insists the receipt is correct, ExampleProject falls back to manual text-based probing to gather the same data points.""",
 
 "section_3_step_7": """\
 **Section 3 — Step 7: Fund Verification & Refund Execution**
-- FINA verifies that the transferred funds are still available and have not been processed for the original transaction purpose. This is critical to ensure we are refunding real, unprocessed money.
-- Upon successful verification, FINA calls initiate_refund with the collected data.
-- FINA notifies the user of the refund result (success or failure with the specific reason).""",
+- ExampleProject verifies that the transferred funds are still available and have not been processed for the original transaction purpose. This is critical to ensure we are refunding real, unprocessed money.
+- Upon successful verification, ExampleProject calls initiate_refund with the collected data.
+- ExampleProject notifies the user of the refund result (success or failure with the specific reason).""",
 
 "section_3_2": """\
 **Section 3.2 — Core Component Descriptions**
@@ -87,13 +87,13 @@ Rollout control: Traffic is controlled via Yellow's workflow builder (internal e
 "section_2": """\
 **Section 2 — Decision Matrix: The 7 Scenarios**
 All "Bank Transfer Pending" complaints (Txn Type 4, Status 10):
-| Scenario | Description | Route | FINA Action |
+| Scenario | Description | Route | ExampleProject Action |
 | 1 (A) | User hasn't transferred yet | Yellow (Jingga) | Identify & Handback |
 | 2 (B) | User has transferred (Correct) | Yellow (Jingga) | Identify & Handback |
-| 3 (C) | Wrong nominal/amount | FINA (UCC) | UCC Flow Trigger (Phase 0 Stretch) |
-| 4 (D) | Wrong beneficiary bank | FINA (Refund) | Full Refund Lifecycle |
-| 5 (E) | Double transfer | FINA (Refund) | Auto-Refund for Unprocessed Transfer |
-| 6 (F) | Transact w/o Txn creation | FINA (Refund) | Full Refund / OCR-Based Case |
+| 3 (C) | Wrong nominal/amount | ExampleProject (UCC) | UCC Flow Trigger (Phase 0 Stretch) |
+| 4 (D) | Wrong beneficiary bank | ExampleProject (Refund) | Full Refund Lifecycle |
+| 5 (E) | Double transfer | ExampleProject (Refund) | Auto-Refund for Unprocessed Transfer |
+| 6 (F) | Transact w/o Txn creation | ExampleProject (Refund) | Full Refund / OCR-Based Case |
 | 7 (G) | History Request / Other | Yellow (Jingga) | Identify & Handback |""",
 
 "section_21_1": """\
@@ -213,7 +213,7 @@ Measured over the first 1 week of production traffic:
 
 "rollout_strategy": """\
 **Section 7 — Phase 0 Rollout Strategy**
-Stage 1 — Internal Team (Day 1–2): ~10–15 people (Engineering, PM, Ops directly involved in FINA). Whitelisted by secondary_user_id. Goal: smoke test end-to-end flow in production.
+Stage 1 — Internal Team (Day 1–2): ~10–15 people (Engineering, PM, Ops directly involved in ExampleProject). Whitelisted by secondary_user_id. Goal: smoke test end-to-end flow in production.
 Stage 2 — All Secondary Internal Employees (Day 3–4): ~500 users (any secondary_user_id with @secondary.id email). Goal: surface edge cases, stress-test OCR and scenario classification.
 Stage 3 — 1–2% Real Secondary Users (Day 5–7): Traffic controlled via Yellow's workflow builder with a percentage-based user group rule. Full measurement tracking active.
 
@@ -231,85 +231,85 @@ Phase 0 infra scope:
 
 "us_01": """\
 **US-01: Orchestrator Identification & Scenario Classification**
-As a whitelisted user contacting FINA via chat, I want FINA to understand my problem from my text description and identify my specific transaction, so that my issue is correctly classified and handled without me repeating myself.
+As a whitelisted user contacting ExampleProject via chat, I want ExampleProject to understand my problem from my text description and identify my specific transaction, so that my issue is correctly classified and handled without me repeating myself.
 
 Acceptance Criteria:
-- AC1: FINA extracts intent and transaction details from free-text without requiring structured input.
-- AC2: FINA matches details to a unique Txn ID from history using AI matching (No selection list/carousel).
-- AC3: FINA classifies the complaint into one of the 7 scenarios.
-- AC4: FINA checks the RTFM incident database and informs the user if their issue is caused by a known bank outage.""",
+- AC1: ExampleProject extracts intent and transaction details from free-text without requiring structured input.
+- AC2: ExampleProject matches details to a unique Txn ID from history using AI matching (No selection list/carousel).
+- AC3: ExampleProject classifies the complaint into one of the 7 scenarios.
+- AC4: ExampleProject checks the RTFM incident database and informs the user if their issue is caused by a known bank outage.""",
 
 "us_02": """\
 **US-02: Handling Scenario 4 — Wrong Bank (Full Refund)**
-As a user who transferred to the wrong Secondary bank pool, I want FINA to verify the error, collect my receipt, confirm funds are available, and process my refund.
+As a user who transferred to the wrong Secondary bank pool, I want ExampleProject to verify the error, collect my receipt, confirm funds are available, and process my refund.
 
 Detailed Flow:
-1. FINA identifies bank pool mismatch (Expected Bank vs. Actual Transfer Bank).
-2. FINA informs the user with eligibility for refund.
-3. FINA requests bank transfer receipt (bukti transfer).
-4. FINA processes receipt via OCR (Verification: Bank, Amount, Date, Sender, Ref Number).
+1. ExampleProject identifies bank pool mismatch (Expected Bank vs. Actual Transfer Bank).
+2. ExampleProject informs the user with eligibility for refund.
+3. ExampleProject requests bank transfer receipt (bukti transfer).
+4. ExampleProject processes receipt via OCR (Verification: Bank, Amount, Date, Sender, Ref Number).
 5. Fallback to manual probing if OCR fails.
-6. FINA calls Fund Verification API to confirm money is still available and unprocessed.
-7. FINA presents a summary to the user for final confirmation.
-8. Upon user confirmation, FINA calls initiate_refund.
+6. ExampleProject calls Fund Verification API to confirm money is still available and unprocessed.
+7. ExampleProject presents a summary to the user for final confirmation.
+8. Upon user confirmation, ExampleProject calls initiate_refund.
 
 Acceptance Criteria: AC1: Correctly identifies mismatch. AC2: Collects receipt + OCR (or manual fallback). AC3: Verifies fund availability. AC4: Obtains explicit confirmation before action. AC5: Reports success or failure with clear reason.""",
 
 "us_03": """\
 **US-03: Handling Scenario 5 — Double Transfer (Auto-Refund Unprocessed)**
-As a user who accidentally transferred twice for the same transaction, I want FINA to detect the duplicate, automatically identify which transfer is still unprocessed, and refund it.
+As a user who accidentally transferred twice for the same transaction, I want ExampleProject to detect the duplicate, automatically identify which transfer is still unprocessed, and refund it.
 
 Detailed Flow:
 1. User describes issue ("Transfer dua kali").
-2. FINA identifies two separate payment records for a single Txn ID.
-3. FINA requests bank transfer receipt(s) for verification.
-4. FINA processes receipt(s) via OCR (or manual probing fallback).
-5. FINA cross-references: identifies one as processed/forwarded and the other as pending/unprocessed.
-6. FINA automatically selects the unprocessed transfer for refund (No user selection).
-7. FINA verifies fund availability for the unprocessed transfer.
-8. FINA calls initiate_refund for the unprocessed transfer.
+2. ExampleProject identifies two separate payment records for a single Txn ID.
+3. ExampleProject requests bank transfer receipt(s) for verification.
+4. ExampleProject processes receipt(s) via OCR (or manual probing fallback).
+5. ExampleProject cross-references: identifies one as processed/forwarded and the other as pending/unprocessed.
+6. ExampleProject automatically selects the unprocessed transfer for refund (No user selection).
+7. ExampleProject verifies fund availability for the unprocessed transfer.
+8. ExampleProject calls initiate_refund for the unprocessed transfer.
 
 Acceptance Criteria: AC1: Detects duplicate payment records. AC2: Collects receipts + verifies data. AC3: Automatically identifies unprocessed transfer. AC4: Verifies fund availability. AC5: Executes initiate_refund and reports result.""",
 
 "us_04": """\
 **US-04: Handling Scenario 6 — No Transaction Created (OCR-Based Refund)**
-As a user who transferred money to Secondary without first creating a transaction in the app, I want FINA to find my payment using my bank receipt and process a refund.
+As a user who transferred money to Secondary without first creating a transaction in the app, I want ExampleProject to find my payment using my bank receipt and process a refund.
 
 Detailed Flow:
-1. FINA identifies lack of matching Txn ID and recognizes Scenario 6.
-2. FINA mandates bank transfer receipt as primary evidence.
-3. FINA extracts details via OCR (Bank, Amount, Sender, Date/Time, Reference).
+1. ExampleProject identifies lack of matching Txn ID and recognizes Scenario 6.
+2. ExampleProject mandates bank transfer receipt as primary evidence.
+3. ExampleProject extracts details via OCR (Bank, Amount, Sender, Date/Time, Reference).
 4. Fallback to manual probing for same data points if OCR fails.
-5. FINA locates incoming payment in Secondary's money-in records using extracted data.
-6. FINA verifies funds are available and unprocessed.
-7. FINA presents summary to the user.
-8. FINA creates manual refund case and calls initiate_refund.
+5. ExampleProject locates incoming payment in Secondary's money-in records using extracted data.
+6. ExampleProject verifies funds are available and unprocessed.
+7. ExampleProject presents summary to the user.
+8. ExampleProject creates manual refund case and calls initiate_refund.
 
 Acceptance Criteria: AC1: Recognizes Scenario 6. AC2: Mandates bank receipt upload. AC3: Extracts transfer details via OCR or manual probing fallback. AC4: Locates unmatched payment in incoming records. AC5: Verifies fund availability and initiates refund.""",
 
 "us_05": """\
 **US-05: Handling Scenario 3 — Wrong Nominal (Phase 0 High Priority Stretch)**
-As a user who transferred the wrong amount, I want FINA to detect the nominal mismatch and adjust my transaction details via the UCC flow.
+As a user who transferred the wrong amount, I want ExampleProject to detect the nominal mismatch and adjust my transaction details via the UCC flow.
 
 Detailed Flow:
-1. FINA identifies nominal mismatch.
-2. FINA requests bank transfer receipt for verification via OCR.
-3. FINA triggers UCC Integration (Change Unique code) tool to update transaction details.
+1. ExampleProject identifies nominal mismatch.
+2. ExampleProject requests bank transfer receipt for verification via OCR.
+3. ExampleProject triggers UCC Integration (Change Unique code) tool to update transaction details.
 4. Fallback to Jingga handback if UCC automation is unavailable.
 
 Acceptance Criteria: AC1: Identifies nominal mismatch. AC2: Verifies actual amount via receipt. AC3: Triggers UCC flow to adjust transaction.""",
 
 "us_06": """\
 **US-06: Smart Handback (Scenarios 1, 2, 7)**
-As a user whose issue falls outside FINA's execution scope, I want FINA to identify my situation and hand me over to Jingga without losing context, so that I don't have to repeat my problem to the next system.
+As a user whose issue falls outside ExampleProject's execution scope, I want ExampleProject to identify my situation and hand me over to Jingga without losing context, so that I don't have to repeat my problem to the next system.
 
 Acceptance Criteria:
-- AC1: FINA classifies scenario correctly (1, 2, or 7).
-- AC2: FINA sends handback signal with ScenarioID, TxnID, and session summary.""",
+- AC1: ExampleProject classifies scenario correctly (1, 2, or 7).
+- AC2: ExampleProject sends handback signal with ScenarioID, TxnID, and session summary.""",
 
 "us_07": """\
 **US-07: Execution Logging & Observability**
-As an engineer or ops team member, I want FINA to log every step of its execution with structured data, so that I can measure success, debug failures, and audit response quality.
+As an engineer or ops team member, I want ExampleProject to log every step of its execution with structured data, so that I can measure success, debug failures, and audit response quality.
 
 Detailed Log Attributes:
 - session_id, secondary_user_id, scenario_classified (1–7), turns_count, response_times[]
@@ -317,7 +317,7 @@ Detailed Log Attributes:
 - refund_initiated, refund_result, handback_triggered, resolution_status
 - full_conversation_log
 
-Acceptance Criteria: AC1: Every FINA session generates a structured execution log. AC2: Logs are queryable by scenario, status, and date. AC3: Ops team can pull a random 10% sample of logs for quality auditing.""",
+Acceptance Criteria: AC1: Every ExampleProject session generates a structured execution log. AC2: Logs are queryable by scenario, status, and date. AC3: Ops team can pull a random 10% sample of logs for quality auditing.""",
 
 "section_7_prompt": """\
 **Section 7 — Prompt Spec: Language Lock (RESPONSE_LANGUAGE)**
@@ -416,8 +416,8 @@ TASKS = [
     ("Pre-Build / Alignment","Confirm KB documents from ready-doc folder are accessible","Ensure knowledge base source documents are available and can be uploaded to RAG pipeline","Muhammad Teammate","P0","To Do","Section 23.2 checklist"),
     ("Pre-Build / Alignment","Deploy Fajri's existing code to production with unit tests","Add unit tests to Fajri's existing codebase + deploy to production","Muhammad Fajry Hamzah","P0","To Do","Section 23.2 checklist"),
     ("Pre-Build / Alignment","Create pilot whitelist (secondary_user_id list)","Coordinate with Ops to define which users are included in the POC whitelist","Fadhlan Husaini","P0","To Do","Section 3 - Step 1"),
-    ("Pre-Build / Alignment","Confirm traffic split percentage from Yellow to FINA","Confirm with Fadlan how Yellow workflow builder controls traffic routing to FINA","Your Name","P0","Done","Rollout Strategy"),
-    ("Infrastructure","Set up service accounts for FINA","Create service accounts with minimal necessary permissions","Muhammad Fajry Hamzah","P0","To Do","Infra setup"),
+    ("Pre-Build / Alignment","Confirm traffic split percentage from Yellow to ExampleProject","Confirm with Fadlan how Yellow workflow builder controls traffic routing to ExampleProject","Your Name","P0","Done","Rollout Strategy"),
+    ("Infrastructure","Set up service accounts for ExampleProject","Create service accounts with minimal necessary permissions","Muhammad Fajry Hamzah","P0","To Do","Infra setup"),
     ("Infrastructure","Set up Postgres database","DB for conversation state + config (skills / tools / agents)","Muhammad Teammate","P0","To Do","Section 3.2"),
     ("Infrastructure","Set up Redis for session storage","Per-conversation session memory - maintain context across turns","Muhammad Teammate","P0","To Do","Section 3.2"),
     ("Infrastructure","Create repository + CI/CD pipeline","Repo setup (GitHub/GitLab) + automated deploy pipeline","Muhammad Teammate","P0","To Do",""),
@@ -437,7 +437,7 @@ TASKS = [
     ("Backend - Orchestrator Core","Implement language lock (RESPONSE_LANGUAGE)","Lock response language (id/en) at conversation start - does not change throughout session","BE","P0","To Do","Section 7 - Prompt spec"),
     ("Backend - Orchestrator Core","Implement structured execution logging (US-07)","Log per session: session_id / secondary_user_id / scenario_classified / tools_invoked / refund_result / etc.","BE","P0","To Do","US-07 + Section 5"),
     ("Backend - Scenario Flows","Implement Smart Handback to Jingga/Yellow (Scenarios 1 / 2 / 7)","Send handback signal to Yellow with: ScenarioID + TxnID + session summary","BE","P0","To Do","US-06; Section 3 - Step 5"),
-    ("Backend - Scenario Flows","Implement bank receipt collection request (Scenarios 4 / 5 / 6)","FINA requests user to upload their bank transfer receipt (bukti transfer)","BE","P0","To Do","Section 3 - Step 6"),
+    ("Backend - Scenario Flows","Implement bank receipt collection request (Scenarios 4 / 5 / 6)","ExampleProject requests user to upload their bank transfer receipt (bukti transfer)","BE","P0","To Do","Section 3 - Step 6"),
     ("Backend - Scenario Flows","Implement OCR integration to process receipt (Refund OCR API)","Process receipt image - extract: Sender Bank / Recipient Bank / Amount / Date / Sender Name / Ref Number","BE","P0","To Do","Section 3 - Step 6; Use Refund Automation OCR not legacy Jingga OCR"),
     ("Backend - Scenario Flows","Implement manual text probing fallback if OCR fails","If OCR fails/returns invalid data but user insists receipt is correct - probe manually via conversation","BE","P0","To Do","Section 3 - Step 6"),
     ("Backend - Scenario Flows","Implement Fund Verification API call (Step 7)","Verify funds are still available and unprocessed before initiating refund","BE","P0","To Do","Section 3 - Step 7; Critical safety check"),
@@ -447,7 +447,7 @@ TASKS = [
     ("Backend - Scenario Flows","Implement Scenario 5 logic - Double Transfer (US-03)","Detect 2 payment records for 1 TxnID → auto-identify the unprocessed one → refund (no user selection)","BE","P0","To Do","US-03"),
     ("Backend - Scenario Flows","Implement Scenario 6 logic - No Transaction Created (US-04)","Locate incoming payment in money-in records without a matching TxnID using OCR data","BE","P0","To Do","US-04"),
     ("Backend - Scenario Flows","Implement UCC flow trigger for Scenario 3 - Wrong Nominal (US-05 - Stretch)","Trigger UCC Integration tool to adjust transaction nominal. Fallback to Jingga handback if unavailable","BE","P1","To Do","US-05; Phase 0 Stretch / High Priority"),
-    ("Backend - Scenario Flows","Implement generic escalation to human agent","Fallback to human if FINA cannot handle (turn limit / low confidence / sensitive case)","BE","P0","To Do","Section 21.2"),
+    ("Backend - Scenario Flows","Implement generic escalation to human agent","Fallback to human if ExampleProject cannot handle (turn limit / low confidence / sensitive case)","BE","P0","To Do","Section 21.2"),
     ("Backend - API Layer","Implement POST /v1/conversations","Create new conversation. Accept: ticket_id / user_id / initial_message. Return: conversation_id","BE","P0","To Do","Section 20.1"),
     ("Backend - API Layer","Implement POST /v1/conversations/{id}/messages","Send user message → return agent response + metadata (intent / domain / confidence / tools called)","BE","P0","To Do","Section 20.1"),
     ("Backend - API Layer","Implement GET /v1/conversations/{id}","Retrieve full conversation history + tool calls + metadata + resolution status","BE","P0","To Do","Section 20.1"),
@@ -479,8 +479,8 @@ TASKS = [
     ("Configuration","Write LLM settings config (llm.yaml)","Define primary (Gemini 3.0) + fallback (Gemini 2.5) + temperature + token settings","BE","P0","To Do","Section 22"),
     ("Configuration","Write guardrails config (guardrails.yaml)","Define: PII masking / max loops / escalation triggers / amount thresholds","BE","P0","To Do","Section 22"),
     ("Configuration","Write feature flags config (features.yaml)","Feature flags to control rollout behavior","BE","P0","To Do","Section 22"),
-    ("Configuration","Set up Yellow workflow builder to call FINA endpoint","Configure HTTP call from Yellow to FINA /v1/conversations endpoint. Coordinate with Mukhib/Fadlan","BE + Ops","P0","To Do","Section 18.3; Critical integration point"),
-    ("Configuration","Set up pilot whitelist in Yellow workflow","Add secondary_user_id check in Yellow workflow to route only whitelisted users to FINA","BE + Ops","P0","To Do","Section 3 - Step 1"),
+    ("Configuration","Set up Yellow workflow builder to call ExampleProject endpoint","Configure HTTP call from Yellow to ExampleProject /v1/conversations endpoint. Coordinate with Mukhib/Fadlan","BE + Ops","P0","To Do","Section 18.3; Critical integration point"),
+    ("Configuration","Set up pilot whitelist in Yellow workflow","Add secondary_user_id check in Yellow workflow to route only whitelisted users to ExampleProject","BE + Ops","P0","To Do","Section 3 - Step 1"),
     ("Analytics / Measurement","Set up deflection rate measurement","Tag each session with FINA_RESOLVED or HANDBACK_TO_AGENT in execution logs - query for deflection %","BE","P0","To Do","Section 5.1"),
     ("Analytics / Measurement","Set up response latency tracking","Compute avg latency per turn from response_times[] array in execution logs","BE","P0","To Do","Section 5.2; Target: avg < 8s per turn"),
     ("Analytics / Measurement","Set up tool call accuracy tracking","Compute success rate from tools_invoked[] vs tool_results[] per session","BE","P0","To Do","Section 5.2; Target: > 95%"),
@@ -488,7 +488,7 @@ TASKS = [
     ("Analytics / Measurement","Set up CSAT measurement via Yellow.ai widget","Confirm CSAT collection setup via Yellow's existing CSAT widget post-resolution","Ops + BE","P0","To Do","Section 5.1; Target: > 7.0/10"),
     ("Analytics / Measurement","Set up Ops daily audit process - 10% log sampling","Ops reviews 10% random sample of full_conversation_log daily for quality + hallucination check","Ops + PM","P0","To Do","Section 5.2; Target: < 2% hallucination rate"),
     ("Analytics / Measurement","Set up scenario classification accuracy tracking","Ops verifies scenario_classified in logs against actual user intent","Ops","P0","To Do","Section 5.2; Target: > 90% accuracy"),
-    ("Testing / QA","Write test cases for US-01: Orchestrator classification (all 7 scenarios)","Test that FINA correctly classifies each scenario from free-text input","QA + BE","P0","To Do","US-01"),
+    ("Testing / QA","Write test cases for US-01: Orchestrator classification (all 7 scenarios)","Test that ExampleProject correctly classifies each scenario from free-text input","QA + BE","P0","To Do","US-01"),
     ("Testing / QA","Write test cases for US-02: Scenario 4 - Wrong Bank Refund (full flow)","Test end-to-end: mismatch detection → receipt → OCR → fund verify → confirm → refund","QA + BE","P0","To Do","US-02"),
     ("Testing / QA","Write test cases for US-03: Scenario 5 - Double Transfer","Test: detect duplicate → OCR → auto-identify unprocessed → fund verify → refund","QA + BE","P0","To Do","US-03"),
     ("Testing / QA","Write test cases for US-04: Scenario 6 - No Transaction Created","Test: no TxnID match → mandatory receipt → OCR → locate in money-in records → refund","QA + BE","P0","To Do","US-04"),
@@ -500,7 +500,7 @@ TASKS = [
     ("Testing / QA","Performance / load testing","Verify response latency < 8s per turn under load conditions","QA + BE","P0","To Do","Section 5.2"),
     ("Testing / QA","Security testing - PII masking verification","Verify NIK / names / phone numbers are masked in all logs and responses before leaving the system","QA + BE","P0","To Do","Section 13 - NFR"),
     ("Testing / QA","Write tool safety testing","Verify that initiate_refund never executes without explicit user confirmation","QA + BE","P0","To Do","Section 21.3; Zero unintended executions required"),
-    ("Testing / QA","Yellow integration end-to-end testing","Test full flow: Yellow workflow → FINA endpoint → response back to Yellow → customer","QA + BE + Ops","P0","To Do",""),
+    ("Testing / QA","Yellow integration end-to-end testing","Test full flow: Yellow workflow → ExampleProject endpoint → response back to Yellow → customer","QA + BE + Ops","P0","To Do",""),
     ("PM / Product","Finalize + publish Definition of Done (DoD) checklist for Phase 0","Lock down Go/No-Go criteria with Engineering + Ops Lead","PM","P0","To Do","Section 6 + 23.1"),
     ("PM / Product","Schedule daily standups for the 2-week POC sprint","Daily progress coordination during the sprint","PM","P0","To Do",""),
     ("PM / Product","Coordinate pilot launch with Ops team + Fadlan","Brief Ops team on what to expect during pilot + how to audit logs","PM + Ops","P0","To Do",""),
@@ -534,7 +534,7 @@ def build_description(description: str, notes: str) -> str:
         parts.append("---")
         parts.append(prd_content)
     parts.append("---")
-    parts.append(f"*Source: FINA PoC Action Item Sheet | [PRD: Agentic AI Platform for Support Operations]({PRD_URL})*")
+    parts.append(f"*Source: ExampleProject PoC Action Item Sheet | [PRD: Agentic AI Platform for Support Operations]({PRD_URL})*")
     return "\n\n".join(parts)
 
 def get_all_tasks(session):

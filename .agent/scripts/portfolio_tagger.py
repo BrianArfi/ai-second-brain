@@ -42,7 +42,7 @@ WAITING_ON_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'waiting_on.json')
 VALID = ('marketplace', 'platform', 'b2c', 'ecom-solution', 'unknown')
 
 # Curated aliases for work that has no initiative entry in portfolio.json yet
-# (Entertainer is the live example: greenfield, built by the Marketplace squad,
+# (ExampleClient is the live example: greenfield, built by the Marketplace squad,
 # but not registered as an initiative). Each mapping below was verified against a
 # primary source -- a PRD/BRD owner line, a MOM label, or the Jira project key.
 ALIASES = {
@@ -283,9 +283,17 @@ def process(path, ini_to_team, name_keywords, apply_changes, overrides):
         # indent=1 matches how the ledger writers format these files. Using a
         # different indent reformats every line and buries a 600-line change in
         # an 18,000-line diff, which also makes concurrent cron writes conflict.
-        with open(path, 'w', encoding='utf-8') as fh:
+        #
+        # tmp + os.replace, like every other writer of these files. This used to
+        # be a plain `open(path, 'w')`, which meant a crash or a kill partway
+        # through the dump left `commitments.json` truncated and unparseable --
+        # on the two hottest files in the repo, from a script that runs
+        # unattended.
+        tmp = path + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as fh:
             json.dump(blob, fh, indent=1, ensure_ascii=False)
             fh.write('\n')
+        os.replace(tmp, path)
 
     return {'path': path, 'stats': stats, 'changed': changed, 'unknown_open': unknown_open}
 
@@ -340,4 +348,18 @@ def main():
         print('\nDry-run only. Re-run with --apply to write.')
 
 if __name__ == '__main__':
+    # This script rewrites commitments.json and waiting_on.json wholesale, so on
+    # an --apply run it takes the same locks the ledger CLIs take. Without them a
+    # cron sweep mid read-modify-write has its file swapped underneath it and
+    # writes its stale copy back, which is the lost-update this repo has already
+    # paid for twice. A dry run reads only and stays lock-free so a long report
+    # cannot block a writer.
+    #
+    # Acquired in sorted order, matching ledger_sync.all_ledger_locks, so a fixed
+    # order cannot deadlock against it.
+    if '--apply' in sys.argv[1:]:
+        sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'scripts'))
+        from ledger_lock import hold_ledger_lock
+        for _ledger in ('commitments', 'waiting_on'):
+            hold_ledger_lock(_ledger)
     main()

@@ -29,7 +29,7 @@ Command line:
     python3 .agent/scripts/work_tree.py add-node --id promo-p2 --label "Phase 2" \
         --kind phase --parent promo --summary "..."
     python3 .agent/scripts/work_tree.py archive-node apple-stc --why "shipped"
-    python3 .agent/scripts/work_tree.py alias --initiative <other-id> --node <node-id>
+    python3 .agent/scripts/work_tree.py alias --initiative mp-exampleprogram-eshop --node exampleprogram
     python3 .agent/scripts/work_tree.py validate
 """
 import argparse
@@ -52,18 +52,15 @@ VALID_KINDS = {"domain", "world", "client", "drop", "track", "item", "thread",
                "initiative", "phase", "product", "service", "group",
                "domain-note"}
 
-
 def wib_now():
     return (datetime.datetime.utcnow() + datetime.timedelta(hours=7)).strftime(
         "%Y-%m-%dT%H:%M+07:00")
-
 
 # ------------------------------------------------------------------ loading
 
 def load_tree():
     with open(TREE) as fh:
         return json.load(fh)
-
 
 def save_tree(tree):
     tree["refreshed_wib"] = wib_now()
@@ -72,7 +69,6 @@ def save_tree(tree):
         json.dump(tree, fh, indent=1, ensure_ascii=False)
         fh.write("\n")
     os.replace(tmp, TREE)
-
 
 def walk(tree=None):
     """Every node, depth first, as (node, parent_id, path_labels)."""
@@ -89,7 +85,6 @@ def walk(tree=None):
         rec(root, None, [])
     return out
 
-
 def node_index(tree=None):
     """id -> {node, parent, path, archived}. The lookup every caller wants."""
     idx = {}
@@ -103,7 +98,6 @@ def node_index(tree=None):
             "archived": node.get("status") == "archived",
         }
     return idx
-
 
 # ------------------------------------------------------------- resolution
 
@@ -135,10 +129,8 @@ def suggest(query, idx=None, n=5):
     scored.sort()
     return [nid for _, _, nid in scored[:n]]
 
-
 class UnknownNode(Exception):
     pass
-
 
 def resolve_or_die(node_id, allow_unfiled=False, idx=None):
     """Return the node id, or exit with the closest matches printed.
@@ -156,7 +148,7 @@ def resolve_or_die(node_id, allow_unfiled=False, idx=None):
             return UNFILED
         raise UnknownNode(
             "--node unfiled is for unattended runs only (cron, sweep, subagent), "
-            "and needs --node-why. In a live session, ask the user instead.")
+            "and needs --node-why. In a live session, ask the owner instead.")
     if node_id in idx:
         if idx[node_id]["archived"]:
             raise UnknownNode(f"node '{node_id}' is archived; file under a live node.")
@@ -165,7 +157,6 @@ def resolve_or_die(node_id, allow_unfiled=False, idx=None):
     hint = "\n".join(f"    {c}  ({idx[c]['path']})" for c in close) or "    (no close match)"
     raise UnknownNode(f"unknown node '{node_id}'. Closest:\n{hint}\n"
                       f"  Search: python3 .agent/scripts/work_tree.py find <text>")
-
 
 # ----------------------------------------------------------------- aliases
 
@@ -178,7 +169,6 @@ def load_alias():
     with open(ALIAS) as fh:
         return json.load(fh)
 
-
 def save_alias(data):
     data["updated_wib"] = wib_now()
     tmp = ALIAS + ".tmp"
@@ -186,7 +176,6 @@ def save_alias(data):
         json.dump(data, fh, indent=1, ensure_ascii=False)
         fh.write("\n")
     os.replace(tmp, ALIAS)
-
 
 def portfolio_initiatives():
     if not os.path.exists(PORTFOLIO):
@@ -198,7 +187,6 @@ def portfolio_initiatives():
         for ini in team.get("initiatives", []) or []:
             out[ini["id"]] = {"name": ini.get("name", ""), "team": team.get("name", "")}
     return out
-
 
 # ---------------------------------------------------------------- commands
 
@@ -213,7 +201,6 @@ def cmd_find(args):
         flag = "  [archived]" if m["archived"] else ""
         print(f"{nid:<18} {m['kind'] or '':<11} {m['path']}{flag}")
     return 0
-
 
 def cmd_show(args):
     idx = node_index()
@@ -234,7 +221,6 @@ def cmd_show(args):
         print(f"  children: {', '.join(k['id'] for k in kids)}")
     return 0
 
-
 def cmd_list(args):
     idx = node_index()
     for nid, m in idx.items():
@@ -244,7 +230,6 @@ def cmd_list(args):
             continue
         print(f"{nid:<18} {m['kind'] or '':<11} {m['path']}")
     return 0
-
 
 def cmd_add_node(args):
     tree = load_tree()
@@ -270,7 +255,6 @@ def cmd_add_node(args):
     print(f"added node {args.id} under {where}")
     return 0
 
-
 def cmd_archive_node(args):
     tree = load_tree()
     idx = node_index(tree)
@@ -285,7 +269,6 @@ def cmd_archive_node(args):
     save_tree(tree)
     print(f"archived {args.node_id} (id kept; records pointing at it still resolve)")
     return 0
-
 
 def cmd_alias(args):
     data = load_alias()
@@ -312,7 +295,6 @@ def cmd_alias(args):
     save_alias(data)
     print(f"{args.initiative} -> {nid}")
     return 0
-
 
 def cmd_validate(args):
     tree = load_tree()
@@ -349,7 +331,6 @@ def cmd_validate(args):
         print(f"DRIFT: {p}")
     return 1 if problems else 0
 
-
 def cmd_coverage(args):
     """How much of the ledgers has a home, and what is still unfiled.
 
@@ -383,7 +364,6 @@ def cmd_coverage(args):
     if args.fail_on_open and open_unfiled > args.fail_on_open:
         return 1
     return 0
-
 
 def main():
     p = argparse.ArgumentParser(description="Work tree: stable node ids for every ticket")
@@ -432,7 +412,6 @@ def main():
         p.print_help()
         return 2
     return fn(args)
-
 
 READONLY = {"find", "show", "list", "validate", "coverage", None}
 

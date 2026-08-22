@@ -1,3 +1,8 @@
+---
+name: execution-guard
+description: Stops a script or subprocess hanging forever on an external API. Use when writing any automated runner that calls Slack, Drive, or a note-taker.
+---
+
 # Execution Guard Skill
 
 A utility skill to prevent scripts and subprocesses from running indefinitely (hanging). This is critical for automated runners like `daily_update_runner.py` that depend on external APIs (Slack, Fathom, Google Drive).

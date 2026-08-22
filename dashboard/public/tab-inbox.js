@@ -1,13 +1,15 @@
 /* ═══════════════════════════════════════════════════════════════════
-   tab-inbox.js — 📥 Inbox: SEMUA inquiry masuk (Slack mention/DM, Gmail,
-   GDoc comment, Jira) dalam satu antrian follow-up. Data: /api/inbox
-   (journal/state/inbox.json, di-refresh cron 30-menit + tombol ↻ Sweep).
+   tab-inbox.js — 📥 Inbox: EVERY incoming inquiry (Slack mention/DM, Gmail,
+   GDoc comment, Jira) in one follow-up queue. Data: /api/inbox
+   (journal/state/inbox.json, refreshed by the 30-minute cron + the ↻ Sweep
+   button).
 
-   Per item: triage reversible (✓ Beres / 🙈 Abaikan ↔ ↩ Buka lagi, semua
-   lewat /api/inbox-action + Undo toast), link ke ticket tracker, dan AI
-   copilot — tombol 🤖 Kerjain (atau instruksi bebas) spawn headless
-   claude (opus, subscription) via /api/ai-task kind:'inbox'; hasil +
-   live log kebaca di drawer lewat shared AI poller components.js.
+   Per item: reversible triage (✓ Done / 🙈 Ignore ↔ ↩ Reopen, all through
+   /api/inbox-action + an Undo toast), a link to the ticket tracker, and an AI
+   copilot — the 🤖 Work on it button (or a free-form instruction) spawns a
+   headless claude (opus, subscription) via /api/ai-task kind:'inbox'; the
+   result and the live log read in the drawer through the shared AI poller in
+   components.js.
    ═══════════════════════════════════════════════════════════════════ */
 'use strict';
 
@@ -83,7 +85,7 @@ window.Tabs = window.Tabs || {};
 
     const sweepAge = inbox.last_sweep
       ? U.fmtAge((Date.now() / 1000 - inbox.last_sweep) / 3600) + ' ago'
-      : 'belum pernah';
+      : 'never';
     const srcNotes = Object.entries(inbox.sources || {})
       .filter(([, s]) => !s.ok)
       .map(([n, s]) => `${n}: ${s.note}`).join(' · ');
@@ -91,23 +93,23 @@ window.Tabs = window.Tabs || {};
     const visible = items.filter(it =>
       it.status === state.status && (state.src === 'all' || it.source === state.src));
 
-    /* Open view is triaged: reply-needed (🔥 high dulu) di atas, FYI di bawah —
-       the owner langsung lihat mana yang perlu dibales, sisanya nggak berisik */
+    /* Open view is triaged: reply-needed (🔥 high first) on top, FYI below, so
+       the owner sees what needs an answer and the rest stays quiet */
     let rows;
     if (!visible.length) {
       rows = Comp.emptyState({
         icon: state.status === 'open' ? '🌤' : '🗂',
-        title: state.status === 'open' ? 'Antrian bersih' : `Tidak ada item ${state.status}`,
-        hint: state.status === 'open' ? 'Tidak ada inquiry menunggu di filter ini.' : '',
+        title: state.status === 'open' ? 'Queue is clear' : `No ${state.status} items`,
+        hint: state.status === 'open' ? 'No inquiry is waiting in this filter.' : '',
       });
     } else if (state.status === 'open') {
       const reply = visible.filter(it => it.triage === 'reply')
         .sort((a, b) => (b.priority_hi ? 1 : 0) - (a.priority_hi ? 1 : 0) || (b.ts || 0) - (a.ts || 0));
       const fyi = visible.filter(it => it.triage !== 'reply');
       rows =
-        (reply.length ? `<div class="section-label">🔴 Perlu dibales (${reply.length})</div>
+        (reply.length ? `<div class="section-label">🔴 Needs a reply (${reply.length})</div>
            <div class="rows">${reply.map(itemRow).join('')}</div>` : '') +
-        (fyi.length ? `<div class="section-label">📎 FYI — nggak nunggu jawaban lo (${fyi.length})</div>
+        (fyi.length ? `<div class="section-label">📎 FYI — no answer expected from you (${fyi.length})</div>
            <div class="rows">${fyi.map(itemRow).join('')}</div>` : '');
     } else {
       rows = `<div class="rows">${visible.map(itemRow).join('')}</div>`;
@@ -116,16 +118,16 @@ window.Tabs = window.Tabs || {};
     panel.innerHTML = `
       <div class="row" data-key="ibx-toolbar">
         <span class="row-icon">📥</span>
-        <span class="row-title"><b>Inbox</b> — semua inquiry masuk, satu antrian follow-up</span>
-        <span class="row-meta" title="sweep terakhir">sweep ${U.esc(sweepAge)}</span>
+        <span class="row-title"><b>Inbox</b> — every incoming inquiry, one follow-up queue</span>
+        <span class="row-meta" title="last sweep">sweep ${U.esc(sweepAge)}</span>
         <span class="row-right">
           <button class="prep-link ibx-sweep"${state.sweeping ? ' disabled' : ''}>
-            ${state.sweeping ? '⏳ Sweeping…' : '↻ Sweep sekarang'}</button>
+            ${state.sweeping ? '⏳ Sweeping…' : '↻ Sweep now'}</button>
         </span>
       </div>
       ${srcNotes ? `<p class="row-note">⚠ ${U.esc(srcNotes)}</p>` : ''}
       <div class="chips">
-        ${srcChip('all', 'Semua')}
+        ${srcChip('all', 'All')}
         ${srcChip('slack', '💬 Slack')}
         ${srcChip('gmail', '📧 Gmail')}
         ${srcChip('gdoc', '📄 GDoc')}
@@ -146,14 +148,14 @@ window.Tabs = window.Tabs || {};
     const ticket = it.linked_ticket ? Comp.ticketChip(it.linked_ticket) : '';
     const runPill = it.last_run ? Comp.aiResultPill({ run: { kind: 'inbox', ref: it.id, ...it.last_run } }) : '';
     const replyChip = it.draft_reply
-      ? `<button class="prep-link ibx-open-detail" data-id="${U.esc(it.id)}" title="Draft balasan siap — review di drawer">✍ draft siap</button>` : '';
+      ? `<button class="prep-link ibx-open-detail" data-id="${U.esc(it.id)}" title="Draft reply ready — review it in the drawer">✍ draft ready</button>` : '';
     const draftChip = (!it.last_run && it.ai_draft)
       ? `<button class="prep-link" data-drawer-path="${U.esc(it.ai_draft)}"
            data-drawer-title="AI draft — ${U.esc(it.id)}">📝 draft</button>` : '';
     const actions = it.status === 'open'
-      ? `<button class="prep-link ibx-done" data-id="${U.esc(it.id)}" title="Tandai beres">✓ Beres</button>
-         <button class="prep-link ibx-ignore" data-id="${U.esc(it.id)}" title="Abaikan (bukan buat gw)">🙈</button>`
-      : `<button class="prep-link ibx-reopen" data-id="${U.esc(it.id)}" title="Buka lagi (undo)">↩ Buka lagi</button>`;
+      ? `<button class="prep-link ibx-done" data-id="${U.esc(it.id)}" title="Mark done">✓ Done</button>
+         <button class="prep-link ibx-ignore" data-id="${U.esc(it.id)}" title="Ignore (not for me)">🙈</button>`
+      : `<button class="prep-link ibx-reopen" data-id="${U.esc(it.id)}" title="Reopen (undo)">↩ Reopen</button>`;
     return `<div class="row ibx-row${it.status !== 'open' ? ' is-dim' : ''}" data-key="ibx:${U.esc(it.id)}">
       <span class="row-icon" title="${U.esc(it.source)}">${icon}</span>
       <span class="row-title ibx-open-detail" data-id="${U.esc(it.id)}" title="${U.esc(it.title || it.text || '')}">
@@ -165,7 +167,7 @@ window.Tabs = window.Tabs || {};
     </div>`;
   }
 
-  /* ── drawer: konteks penuh + AI copilot per item ── */
+  /* ── drawer: full context + a per-item AI copilot ── */
   function openDetail(id) {
     const it = byId.get(id);
     if (!it) return;
@@ -178,11 +180,11 @@ window.Tabs = window.Tabs || {};
       : '';
     const ticketVal = it.linked_ticket || '';
     const triageLabel = it.triage === 'reply'
-      ? (it.priority_hi ? '🔥 perlu dibales (prioritas)' : '🔴 perlu dibales')
+      ? (it.priority_hi ? '🔥 needs a reply (priority)' : '🔴 needs a reply')
       : '📎 FYI';
-    /* riwayat percakapan: satu bubble per pesan, kronologis — bukan blob.
-       Teks dirender sebagai markdown (numbered list, `code`, [label](url)) +
-       bare URL di-linkify dulu, jadi formatnya setara tampilan Slack. */
+    /* conversation history: one bubble per message, in order, not one blob.
+       The text renders as markdown (numbered list, `code`, [label](url)) and
+       bare URLs are linkified first, so it matches how Slack shows it. */
     const linkify = s => (s || '').replace(/(?<![("\]])(https?:\/\/[^\s<)\]]+)/g, '[$1]($1)');
     const msgs = Array.isArray(it.messages) && it.messages.length
       ? it.messages.map(m => {
@@ -193,42 +195,42 @@ window.Tabs = window.Tabs || {};
         }).join('')
       : `<div class="md">${U.mdToHtml(linkify(it.text || it.title || '(no content)'))}</div>`;
     const canSend = it.source === 'slack' && it.send_channel && it.status === 'open';
-    const srcTag = it.draft_source === 'claude-copilot' ? 'AI copilot (instruksi lo)'
-      : it.draft_source === 'claude' ? 'AI (riset konteks)'
-      : it.draft_source === 'glm' ? 'GLM (placeholder cepat)' : 'AI';
+    const srcTag = it.draft_source === 'claude-copilot' ? 'AI copilot (your instruction)'
+      : it.draft_source === 'claude' ? 'AI (context research)'
+      : it.draft_source === 'glm' ? 'GLM (quick placeholder)' : 'AI';
     const draftBlock = it.draft_reply ? `
-      <div class="section-label">✍ Draft balasan — ${U.esc(srcTag)}. Edit dulu kalau perlu; Approve = kirim AS OWNER.</div>
+      <div class="section-label">✍ Draft reply — ${U.esc(srcTag)}. Edit it first if you need to; Approve = send AS OWNER.</div>
       <textarea class="draft-area ibx-draft-area" rows="5">${U.esc(resolveMentions(it.draft_reply))}</textarea>
       <div class="action-bar">
         ${canSend ? `<button class="prep-link ibx-approve-send" data-id="${U.esc(it.id)}"
-            data-channel="${U.esc(it.channel || '')}">✅ Approve & kirim</button>` : ''}
+            data-channel="${U.esc(it.channel || '')}">✅ Approve &amp; send</button>` : ''}
         <button class="prep-link ibx-copy-draft">📋 Copy draft</button>
-        ${!canSend && it.source === 'gmail' ? `<span class="row-note">gmail: copy lalu balas dari Gmail (send API belum support thread-reply)</span>` : ''}
+        ${!canSend && it.source === 'gmail' ? `<span class="row-note">gmail: copy it and reply from Gmail (the send API has no thread-reply support yet)</span>` : ''}
       </div>` : (it.triage === 'reply'
-        ? `<p class="row-note">⏳ Draft belum digenerate — nunggu siklus digest berikutnya, atau pakai 🤖 Kerjain di bawah.</p>` : '');
+        ? `<p class="row-note">⏳ No draft yet — it comes with the next digest cycle, or use 🤖 Work on it below.</p>` : '');
     const sentNote = it.sent_permalink
-      ? `<p class="row-note">📨 Terkirim: <a href="${U.esc(it.sent_permalink)}" target="_blank" rel="noopener">lihat di Slack ↗</a></p>` : '';
+      ? `<p class="row-note">📨 Sent: <a href="${U.esc(it.sent_permalink)}" target="_blank" rel="noopener">open in Slack ↗</a></p>` : '';
     const body = `<div class="stack" data-ibx-id="${U.esc(it.id)}">
       <p class="row-note">${icon} ${U.esc(it.source)} · <b>${U.esc(it.from || it.from_id || '?')}</b>
-        · ${U.esc(it.channel || '')} · ${it.msg_count > 1 ? `${it.msg_count} pesan · ` : ''}status <b>${U.esc(it.status)}</b> · ${triageLabel}</p>
+        · ${U.esc(it.channel || '')} · ${it.msg_count > 1 ? `${it.msg_count} messages · ` : ''}status <b>${U.esc(it.status)}</b> · ${triageLabel}</p>
       <div class="ibx-thread">${msgs}</div>
       ${sentNote}
-      ${links.length ? `<p class="row-note">Referensi: ${Comp.linkChips(links)}</p>` : ''}
+      ${links.length ? `<p class="row-note">References: ${Comp.linkChips(links)}</p>` : ''}
       ${draftBlock}
       <div class="action-bar">
-        <input type="text" class="ibx-ticket-input" placeholder="Link ke ticket (T-123 / MTG-…)"
+        <input type="text" class="ibx-ticket-input" placeholder="Link to a ticket (T-123 / MTG-…)"
           value="${U.esc(ticketVal)}" />
         <button class="prep-link ibx-link-save" data-id="${U.esc(it.id)}">💾 Link</button>
         ${it.status === 'open'
-          ? `<button class="prep-link ibx-done" data-id="${U.esc(it.id)}">✓ Beres</button>
-             <button class="prep-link ibx-ignore" data-id="${U.esc(it.id)}">🙈 Abaikan</button>`
-          : `<button class="prep-link ibx-reopen" data-id="${U.esc(it.id)}">↩ Buka lagi</button>`}
+          ? `<button class="prep-link ibx-done" data-id="${U.esc(it.id)}">✓ Done</button>
+             <button class="prep-link ibx-ignore" data-id="${U.esc(it.id)}">🙈 Ignore</button>`
+          : `<button class="prep-link ibx-reopen" data-id="${U.esc(it.id)}">↩ Reopen</button>`}
       </div>
-      <div class="section-label">🤖 AI copilot (opus — riset konteks, iket ke ticket, siapin draft; tidak pernah kirim apa pun)</div>
+      <div class="section-label">🤖 AI copilot (opus — researches context, links the ticket, prepares a draft; it never sends anything)</div>
       <textarea class="draft-area ibx-instruction" rows="3"
-        placeholder="${it.draft_reply ? 'Revisi: kasih instruksi buat perbaiki draft di atas (mis. \'lebih singkat\', \'tambahin minta timeline\', \'tolak opsi B\'). Hasilnya nimpa draft + siap di-Approve.' : 'Opsional: instruksi spesifik (mis. \'balas setuju tapi minta timeline\', \'putuskan opsi A/B pakai data PRD\'). Kosongkan untuk riset+rekomendasi standar.'}"></textarea>
+        placeholder="${it.draft_reply ? 'Revision: tell it how to improve the draft above (for example \'shorter\', \'ask for a timeline\', \'decline option B\'). The result replaces the draft and is ready to Approve.' : 'Optional: a specific instruction (for example \'agree but ask for a timeline\', \'decide A or B from the PRD data\'). Leave it empty for standard research and a recommendation.'}"></textarea>
       <div class="ibx-ai-slot">
-        <button class="prep-link ibx-ai-run" data-id="${U.esc(it.id)}">${it.draft_reply ? '♻ Revise draft' : '🤖 Kerjain'}</button>
+        <button class="prep-link ibx-ai-run" data-id="${U.esc(it.id)}">${it.draft_reply ? '♻ Revise draft' : '🤖 Work on it'}</button>
         ${runPill}
       </div>
     </div>`;
@@ -237,7 +239,7 @@ window.Tabs = window.Tabs || {};
   }
 
   /* fetch fresh inbox state then re-open a detail drawer — used after an AI copilot
-     run finishes so the new draft_reply + Approve & kirim appear in place */
+     run finishes so the new draft_reply + Approve & send appear in place */
   async function reopenDetail(id) {
     try {
       state.inbox = await U.fetchJSON('/api/inbox');
@@ -260,12 +262,12 @@ window.Tabs = window.Tabs || {};
   }
 
   function undoFor(id, prevAction) {
-    /* done/ignore ↔ reopen: setiap triage bisa dibalik dari toast-nya */
+    /* done/ignore ↔ reopen: every triage can be undone from its own toast */
     return {
       label: 'Undo',
       onClick: async () => {
         await inboxAction(id, prevAction === 'reopen' ? 'done' : 'reopen');
-        Comp.toast(prevAction === 'reopen' ? `Ditutup lagi: ${id}` : `Dibuka lagi: ${id}`, true);
+        Comp.toast(prevAction === 'reopen' ? `Closed again: ${id}` : `Reopened: ${id}`, true);
         load();
       },
     };
@@ -277,7 +279,7 @@ window.Tabs = window.Tabs || {};
       Comp.toast(`${label}: ${id}`, true, undoFor(id, action));
       load();
     } catch (err) {
-      Comp.toast(`Gagal: ${err.message}`, false);
+      Comp.toast(`Failed: ${err.message}`, false);
     }
   }
 
@@ -293,9 +295,9 @@ window.Tabs = window.Tabs || {};
       if (panel) render(panel);
       try {
         const r = await U.fetchJSON('/api/inbox-sweep', { method: 'POST', timeoutMs: 95000 });
-        Comp.toast(r.summary || 'Sweep beres', true);
+        Comp.toast(r.summary || 'Sweep finished', true);
       } catch (err) {
-        Comp.toast(`Sweep gagal: ${err.message}`, false);
+        Comp.toast(`Sweep failed: ${err.message}`, false);
       }
       state.sweeping = false;
       load();
@@ -319,15 +321,16 @@ window.Tabs = window.Tabs || {};
       const chan = approve.dataset.channel || '?';
       const ta = approve.closest('[data-ibx-id]')?.querySelector('.ibx-draft-area');
       const readable = ta ? ta.value.trim() : '';
-      if (!readable) { Comp.toast('Draft kosong', false); return; }
+      if (!readable) { Comp.toast('Draft is empty', false); return; }
       /* convert @Name back to <@ID> so mentions ping; confirm shows the readable form */
       const text = unresolveMentions(readable);
-      /* double-confirm: klik Approve = persetujuan eksplisit the owner atas draft yang
-         TAMPIL — konfirmasi kedua nunjukin target + potongan teks biar nggak salah kirim */
-      const ok = window.confirm(`Kirim AS OWNER ke ${chan}?\n\n"${readable.slice(0, 220)}${readable.length > 220 ? '…' : ''}"`);
+      /* double-confirm: clicking Approve is the owner's explicit approval of the draft
+         ON SCREEN, and the second confirm shows the target plus a text excerpt so
+         nothing goes to the wrong place */
+      const ok = window.confirm(`Send AS OWNER to ${chan}?\n\n"${readable.slice(0, 220)}${readable.length > 220 ? '…' : ''}"`);
       if (!ok) return;
       approve.disabled = true;
-      approve.textContent = '⏳ Mengirim…';
+      approve.textContent = '⏳ Sending…';
       try {
         /* one-shot approval token, minted for THIS item right after the confirm and
            consumed by the send. Server-side the send route also demands the browser
@@ -342,14 +345,14 @@ window.Tabs = window.Tabs || {};
           headers: { 'Content-Type': 'application/json', 'X-PSB-Send-Token': t.token },
           body: JSON.stringify({ id, text }), timeoutMs: 60000,
         });
-        Comp.toast(`Terkirim ke ${chan} ✓`, true);
+        Comp.toast(`Sent to ${chan} ✓`, true);
         if (r.permalink) window.open(r.permalink, '_blank', 'noopener');
         document.querySelector('.drawer-close')?.click();
         load();
       } catch (err) {
         approve.disabled = false;
-        approve.textContent = '✅ Approve & kirim';
-        Comp.toast(`Gagal kirim: ${err.message}`, false);
+        approve.textContent = '✅ Approve &amp; send';
+        Comp.toast(`Send failed: ${err.message}`, false);
       }
       return;
     }
@@ -362,7 +365,7 @@ window.Tabs = window.Tabs || {};
         await navigator.clipboard.writeText(ta ? ta.value : '');
         Comp.toast('Draft dicopy — paste di Slack/Gmail', true);
       } catch (err) {
-        Comp.toast(`Copy gagal: ${err.message}`, false);
+        Comp.toast(`Copy failed: ${err.message}`, false);
       }
       return;
     }
@@ -371,13 +374,13 @@ window.Tabs = window.Tabs || {};
     if (detail) { e.preventDefault(); openDetail(detail.dataset.id); return; }
 
     const done = e.target.closest('.ibx-done');
-    if (done) { e.preventDefault(); done.disabled = true; triage(done.dataset.id, 'done', 'Beres'); return; }
+    if (done) { e.preventDefault(); done.disabled = true; triage(done.dataset.id, 'done', 'Done'); return; }
 
     const ign = e.target.closest('.ibx-ignore');
-    if (ign) { e.preventDefault(); ign.disabled = true; triage(ign.dataset.id, 'ignore', 'Diabaikan'); return; }
+    if (ign) { e.preventDefault(); ign.disabled = true; triage(ign.dataset.id, 'ignore', 'Ignored'); return; }
 
     const rop = e.target.closest('.ibx-reopen');
-    if (rop) { e.preventDefault(); rop.disabled = true; triage(rop.dataset.id, 'reopen', 'Dibuka lagi'); return; }
+    if (rop) { e.preventDefault(); rop.disabled = true; triage(rop.dataset.id, 'reopen', 'Reopened'); return; }
 
     const linkSave = e.target.closest('.ibx-link-save');
     if (linkSave) {
@@ -387,10 +390,10 @@ window.Tabs = window.Tabs || {};
       const id = linkSave.dataset.id;
       try {
         await inboxAction(id, 'link', input ? input.value.trim() : '');
-        Comp.toast(input && input.value.trim() ? `Linked: ${id} → ${input.value.trim()}` : `Link dihapus: ${id}`, true);
+        Comp.toast(input && input.value.trim() ? `Linked: ${id} → ${input.value.trim()}` : `Link removed: ${id}`, true);
         load();
       } catch (err) {
-        Comp.toast(`Gagal link: ${err.message}`, false);
+        Comp.toast(`Link failed: ${err.message}`, false);
       }
       return;
     }
@@ -412,21 +415,21 @@ window.Tabs = window.Tabs || {};
            works exactly like every other AI run on the dashboard */
         const slot = wrap && wrap.querySelector('.ibx-ai-slot');
         if (slot) {
-          slot.innerHTML = `<span class="row-note">⏳ AI lagi riset + nyiapin draft… drawer refresh sendiri pas selesai.</span>`
+          slot.innerHTML = `<span class="row-note">⏳ AI is researching and preparing a draft… the drawer refreshes itself when it finishes.</span>`
             + Comp.aiResultPill({ run: { id: r.id, status: 'running', kind: 'inbox', ref: id } });
         }
-        Comp.toast('AI jalan — draft bakal muncul di sini pas beres', true);
+        Comp.toast('AI is running — the draft appears here when it finishes', true);
       } catch (err) {
         aiRun.disabled = false;
-        aiRun.textContent = '🤖 Kerjain';
-        Comp.toast(`Gagal spawn AI: ${err.message}`, false);
+        aiRun.textContent = '🤖 Work on it';
+        Comp.toast(`Could not start the AI run: ${err.message}`, false);
       }
       return;
     }
   });
 
-  /* selesai run inbox copilot → re-open the SAME detail drawer so the fresh
-     draft_reply + Approve & kirim + Revise show up in place (the copilot saved
+  /* when an inbox copilot run finishes → re-open the SAME detail drawer so the fresh
+     draft_reply + Approve & send + Revise show up in place (the copilot saved
      its reply into draft_reply via set-draft). Falls back to a list refresh. */
   window.addEventListener('psb:ai-done', e => {
     if (!e.detail || e.detail.kind !== 'inbox') return;

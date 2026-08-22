@@ -269,7 +269,7 @@ def parse_meet(s):
 def cmd_setup(_):
     tok = admin_token()
     user = req("POST", "/admin/users",
-               {"email": "owner.local@yourcompany.com", "name": "the owner (local)"},
+               {"email": "teammate@yourcompany.com", "name": "the owner (local)"},
                {"X-Admin-API-Key": tok})
     uid = user.get("id", 1)
     t = req("POST", f"/admin/users/{uid}/tokens?scopes=bot,tx,browser", {},
@@ -373,16 +373,40 @@ def cmd_pull(a):
                       f"transcript -- treat as unrecorded, NOT as not-admitted",
                       file=sys.stderr)
                 return
-            # Empty after a clean finish is operational: the bot was never
-            # admitted from the waiting room, or nobody spoke. Classify as a
-            # skip so harness-health alerts stay meaningful.
+            # Empty after a clean finish splits into two OPPOSITE cases, and
+            # `start_time` is what tells them apart. The bot writes it exactly
+            # once, in session.rs, the instant admission is granted -- so its
+            # presence means the bot was in the room.
+            #
+            #   absent  -> never admitted. Nothing was ever recordable. A real
+            #              operational skip, ok heartbeat, no MOM.
+            #   present -> admitted, sat through the call, produced nothing.
+            #              That is a LOST MEETING, not a skip.
+            #
+            # Filing the second as `skipped_not_admitted` with an ok heartbeat
+            # is what hid the 5 Aug 2026 outage for two days: 14 sessions, 0
+            # transcripts, every heartbeat green, because a bot that sat deaf in
+            # a live meeting was indistinguishable from one left in a waiting
+            # room.
+            if data.get("start_time"):
+                st["meetings"][kid] = {**meta, "title": title,
+                                       "status": "admitted_no_audio"}
+                save_state(st)
+                heartbeat("fail", f"vexa {mid} ({title}): bot was ADMITTED and recorded "
+                                  "NOTHING -- the meeting is lost, not skipped. Check the "
+                                  "'tap stats' line in `journalctl --user -u meetbot.service`: "
+                                  "any tab_state other than 'ok' means Chrome never handed "
+                                  "over the tab's audio")
+                print(f"LOST: {kid} was admitted at {data.get('start_time')} but the "
+                      f"transcript is empty -- deaf capture, NOT a skip", file=sys.stderr)
+                return
             st["meetings"][kid] = {**meta, "title": title,
                                    "status": "skipped_not_admitted"}
             save_state(st)
-            heartbeat("ok", f"vexa {mid} ({title}): finished with empty transcript "
-                            "(likely not admitted / no audio) -- skipped, no MOM")
-            print(f"SKIPPED: {kid} finished but transcript is empty "
-                  f"(not admitted / no audio)", file=sys.stderr)
+            heartbeat("ok", f"vexa {mid} ({title}): never admitted, empty transcript "
+                            "-- skipped, no MOM")
+            print(f"SKIPPED: {kid} finished but was never admitted "
+                  f"(no start_time, empty transcript)", file=sys.stderr)
         else:
             print("no segments yet; meeting may not have started")
         return

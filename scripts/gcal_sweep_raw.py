@@ -1,4 +1,4 @@
-#!/ reentry/python3
+#!/usr/bin/env python3
 import os
 import json
 import datetime
@@ -6,7 +6,7 @@ from urllib.request import Request, urlopen
 from urllib.parse import urlencode
 
 # Base settings
-BASE_DIR = "."
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_TOKEN = os.path.join(BASE_DIR, "token_calendar.json")
 WORK_TOKEN = os.path.join(BASE_DIR, ".agent/skills/work-drive-connector/token_calendar_work.json")
 

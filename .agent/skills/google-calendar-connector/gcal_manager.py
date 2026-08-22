@@ -8,6 +8,7 @@ import datetime
 import argparse
 import json
 import signal
+import secrets
 import uuid
 from collections import defaultdict
 from google.auth.transport.requests import Request
@@ -82,13 +83,24 @@ def authenticate(profile='default'):
                 print(f"Error: {creds_file} not found.")
                 return None
             
+            if not sys.stdin.isatty():
+                # Non-interactive caller (cron, hook, agent session). Blocking on
+                # input() here hangs the caller until its timeout and produces no
+                # token anyway, so fail fast and point at the two-step flow.
+                print(f"Error: {profile} calendar token is missing or its refresh token was revoked, "
+                      f"and this is not an interactive terminal.")
+                print(f"  Re-authorize without a TTY:")
+                print(f"    python3 {os.path.relpath(__file__, BASE_DIR)} auth --profile {profile} --start")
+                print(f"    python3 {os.path.relpath(__file__, BASE_DIR)} auth --profile {profile} --code <CODE>")
+                return None
+
             flow = InstalledAppFlow.from_client_secrets_file(creds_file, SCOPES)
             # Set explicit redirect_uri for manual flow
             flow.redirect_uri = 'http://localhost:8080/'
-            
+
             # Use console flow instead of local server for headless environments
             auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
-            
+
             print("\n" + "="*60)
             print(f"GOOGLE CALENDAR AUTHENTICATION REQUIRED ({profile.upper()})")
             print("="*60)
@@ -96,14 +108,162 @@ def authenticate(profile='default'):
             print("2. Authorize the application and copy the 'code' parameter from the resulting URL.")
             print("   (The page may fail to load, just copy the 'code=' value from the address bar)")
             print("="*60 + "\n")
-            
+
             code = input(f"[{profile.upper()} Calendar] Enter the authorization code: ").strip()
             flow.fetch_token(code=code)
             creds = flow.credentials
-            
+
         with open(token_file, 'w') as token:
             token.write(creds.to_json())
     return creds
+
+def _profile_paths(profile):
+    if profile == 'work':
+        return WORK_CREDENTIALS, WORK_TOKEN
+    if profile == 'secondary':
+        return SECONDARY_CREDENTIALS, SECONDARY_TOKEN
+    return DEFAULT_CREDENTIALS, DEFAULT_TOKEN
+
+def _pending_path(token_file):
+    return token_file + '.authpending.json'
+
+def auth_start(profile, login_hint=None):
+    """Print the authorization URL and persist the PKCE verifier.
+
+    Split from the exchange so a session with no TTY can still re-authorize: the
+    verifier lives in a sidecar file instead of on an in-memory flow object.
+
+    login_hint matters here. On 13 Aug 2026 the personal profile was re-authorized
+    against the Work account by accident, because the browser was already signed
+    into it and the consent screen never asked which account to use. That produced
+    a working token for the wrong calendar, which looks identical to success.
+    """
+    creds_file, token_file = _profile_paths(profile)
+    if not os.path.exists(creds_file):
+        print(f"Error: {creds_file} not found.")
+        return 1
+
+    flow = InstalledAppFlow.from_client_secrets_file(creds_file, SCOPES)
+    flow.redirect_uri = 'http://localhost:8080/'
+    verifier = secrets.token_urlsafe(64)[:128]
+    flow.code_verifier = verifier
+    extra = {'prompt': 'consent', 'access_type': 'offline'}
+    if login_hint:
+        extra['login_hint'] = login_hint
+    auth_url, state = flow.authorization_url(**extra)
+
+    pending = _pending_path(token_file)
+    with open(pending, 'w') as fh:
+        json.dump({'code_verifier': verifier, 'state': state,
+                   'expected_account': login_hint}, fh)
+    os.chmod(pending, 0o600)
+
+    print("=" * 60)
+    print(f"AUTHORIZE {profile.upper()} CALENDAR")
+    if login_hint:
+        print(f"Sign in as: {login_hint}")
+    print("=" * 60)
+    print("1. Open this URL and approve access:\n")
+    print(f"   {auth_url}\n")
+    print("2. The browser lands on a localhost page that will not load. That is expected.")
+    print("   Copy the whole address bar, or just the code= value.")
+    print("3. Finish with:")
+    print(f"   python3 {os.path.relpath(__file__, BASE_DIR)} auth --profile {profile} --code '<PASTE>'")
+    print("=" * 60)
+    return 0
+
+def auth_finish(profile, code):
+    """Exchange the authorization code for a token, then prove it works."""
+    creds_file, token_file = _profile_paths(profile)
+    pending = _pending_path(token_file)
+    if not os.path.exists(pending):
+        print(f"Error: no pending authorization for '{profile}'. Run --start first.")
+        return 1
+
+    with open(pending) as fh:
+        saved = json.load(fh)
+
+    code = (code or '').strip().strip('"').strip("'")
+    if code.startswith('http'):
+        from urllib.parse import urlparse, parse_qs
+        code = (parse_qs(urlparse(code).query).get('code') or [''])[0]
+    if not code:
+        print("Error: no code found in what was pasted.")
+        return 1
+
+    flow = InstalledAppFlow.from_client_secrets_file(
+        creds_file, SCOPES, state=saved.get('state'))
+    flow.redirect_uri = 'http://localhost:8080/'
+    flow.code_verifier = saved['code_verifier']
+
+    try:
+        flow.fetch_token(code=code)
+    except Exception as e:
+        print(f"Exchange failed: {e}")
+        print("Authorization codes are single use and expire in minutes. Run --start again.")
+        return 1
+
+    creds = flow.credentials
+    if not creds.refresh_token:
+        print("Warning: Google returned no refresh token, so this will die again on expiry.")
+        print("Run --start again and make sure you approve the consent screen rather than "
+              "reusing a previous grant.")
+
+    # Check WHICH account was granted before overwriting anything. A token for the
+    # wrong Google account is still a valid token, so this is the only place the
+    # mistake is catchable.
+    svc = build('calendar', 'v3', credentials=creds)
+    primary = svc.calendarList().get(calendarId='primary').execute()
+    granted = primary.get('id')
+    expected = saved.get('expected_account')
+
+    if expected and granted and granted.lower() != expected.lower():
+        print(f"REFUSED: authorized as {granted}, but this profile expects {expected}.")
+        print(f"  {token_file} was left untouched.")
+        print("  Sign out of the wrong account, or use a private window, then run --start again.")
+        os.remove(pending)
+        return 1
+
+    with open(token_file, 'w') as fh:
+        fh.write(creds.to_json())
+    os.chmod(token_file, 0o600)
+    os.remove(pending)
+
+    cals = svc.calendarList().list(maxResults=20).execute().get('items', [])
+    print(f"Token written: {token_file}")
+    print(f"Account: {granted}")
+    print(f"Refresh token stored: {bool(creds.refresh_token)}")
+    print("Calendars now visible:")
+    for c in cals:
+        print(f"  - {c.get('summary')}{'  [primary]' if c.get('primary') else ''}")
+    return 0
+
+def auth_status():
+    """Report token health per profile.
+
+    The personal calendar's refresh token was revoked in June 2026 and nothing
+    noticed until August, because every caller passed --profile work and the
+    dead profile only failed when someone asked for it by hand.
+    """
+    rc = 0
+    for profile in ('default', 'work', 'secondary'):
+        creds_file, token_file = _profile_paths(profile)
+        label = f"{profile:<10}"
+        if not os.path.exists(token_file):
+            print(f"{label} NO TOKEN      {token_file}")
+            rc = 1
+            continue
+        try:
+            creds = Credentials.from_authorized_user_file(token_file, SCOPES)
+            creds.refresh(Request())
+            svc = build('calendar', 'v3', credentials=creds)
+            primary = svc.calendarList().get(calendarId='primary').execute()
+            print(f"{label} OK            {primary.get('id')}")
+        except Exception as e:
+            print(f"{label} DEAD          {str(e)[:90]}")
+            print(f"{'':<10} fix: python3 {os.path.relpath(__file__, BASE_DIR)} auth --profile {profile} --start")
+            rc = 1
+    return rc
 
 def list_events(days_back=7, days_forward=7, profile='default', as_json=False):
     """List calendar events for the specified range.
@@ -138,6 +298,7 @@ def list_events(days_back=7, days_forward=7, profile='default', as_json=False):
         start = event['start'].get('dateTime', event['start'].get('date'))
         summary = event.get('summary', '(No title)')
         event_list.append({
+            'id': event.get('id', ''),
             'start': start,
             'end': event['end'].get('dateTime', event['end'].get('date')) if event.get('end') else None,
             'summary': summary,
@@ -433,6 +594,137 @@ def create_event(summary, start_time, end_time, description=None, profile='defau
         print(f"Error creating event: {e}")
         return None
 
+def update_event(event_id, profile='default', summary=None, start_time=None,
+                 end_time=None, description=None, attendees=None, notify=True):
+    """Patch an existing event in place. Only the fields passed are touched.
+
+    Kept separate from create_event so that fixing a typo or adding a pre-read
+    link never deletes and recreates the event, which would drop existing RSVPs
+    and re-notify everyone from scratch.
+    """
+    creds = authenticate(profile)
+    if not creds:
+        return None
+
+    service = build('calendar', 'v3', credentials=creds)
+
+    body = {}
+    if summary:
+        body['summary'] = summary
+    if description is not None:
+        body['description'] = description
+    if start_time:
+        body['start'] = {'dateTime': start_time, 'timeZone': 'Asia/Jakarta'}
+    if end_time:
+        body['end'] = {'dateTime': end_time, 'timeZone': 'Asia/Jakarta'}
+    if attendees:
+        body['attendees'] = [{'email': e.strip()} for e in attendees.split(',')]
+
+    if not body:
+        print("Nothing to update: pass at least one of --summary/--start/--end/--desc/--attendees.")
+        return None
+
+    try:
+        result = service.events().patch(
+            calendarId='primary',
+            eventId=event_id,
+            body=body,
+            sendUpdates='all' if notify else 'none',
+        ).execute()
+        print(f"Event updated: {result.get('htmlLink')}")
+        print(f"Fields changed: {', '.join(sorted(body))}")
+        return result
+    except Exception as e:
+        print(f"Error updating event: {e}")
+        return None
+
+def rsvp_event(event_id=None, response='accepted', profile='default', find=None):
+    """Answer an invite on someone else's event without touching anyone else's RSVP.
+
+    `update --attendees` replaces the whole attendee list, so using it to answer
+    an invite would drop every other guest off an event this account does not
+    own. This patches the full list back with only this account's own
+    responseStatus changed, which is the only status Google lets a guest set.
+    """
+    creds = authenticate(profile)
+    if not creds:
+        return None
+
+    service = build('calendar', 'v3', credentials=creds)
+
+    try:
+        me = service.calendarList().get(calendarId='primary').execute().get('id', '').lower()
+    except Exception as e:
+        print(f"Error resolving this profile's own address: {e}")
+        return None
+    if not me:
+        print("Could not resolve this profile's own address; refusing to guess which attendee is you.")
+        return None
+
+    if not event_id:
+        if not find:
+            print("Pass either --event-id or --find <text in the title>.")
+            return None
+        now = datetime.datetime.now(datetime.timezone.utc)
+        matches = service.events().list(
+            calendarId='primary',
+            timeMin=now.isoformat().replace('+00:00', 'Z'),
+            timeMax=(now + datetime.timedelta(days=30)).isoformat().replace('+00:00', 'Z'),
+            singleEvents=True,
+            orderBy='startTime',
+            q=find,
+        ).execute().get('items', [])
+        if not matches:
+            print(f"No upcoming event in the next 30 days matching '{find}'.")
+            return None
+        if len(matches) > 1:
+            print(f"'{find}' matches {len(matches)} events. Pass --event-id for the one you mean:")
+            for m in matches:
+                print(f"  {m.get('id')}  {m['start'].get('dateTime', m['start'].get('date'))}  {m.get('summary')}")
+            return None
+        event_id = matches[0]['id']
+
+    try:
+        event = service.events().get(calendarId='primary', eventId=event_id).execute()
+    except Exception as e:
+        print(f"Error fetching event {event_id}: {e}")
+        return None
+
+    attendees = event.get('attendees', [])
+    if not any(a.get('email', '').lower() == me for a in attendees):
+        print(f"{me} is not on the attendee list of '{event.get('summary')}'. "
+              "Refusing to add an attendee: this account was never invited.")
+        return None
+
+    patched = []
+    for a in attendees:
+        entry = dict(a)
+        if entry.get('email', '').lower() == me:
+            entry['responseStatus'] = response
+        patched.append(entry)
+
+    try:
+        result = service.events().patch(
+            calendarId='primary',
+            eventId=event_id,
+            body={'attendees': patched},
+            sendUpdates='none',
+        ).execute()
+    except Exception as e:
+        print(f"Error answering invite: {e}")
+        return None
+
+    final = {a.get('email', ''): a.get('responseStatus', '') for a in result.get('attendees', [])}
+    if final.get(me) != response:
+        print(f"RSVP did not stick: Google still reports '{final.get(me)}' for {me}.")
+        return None
+
+    print(f"RSVP set to {response}: {result.get('summary')} "
+          f"({result['start'].get('dateTime', result['start'].get('date'))})")
+    print(f"Link: {result.get('htmlLink')}")
+    print(f"Attendees now ({len(final)}): " + ", ".join(f"{e}={s}" for e, s in final.items()))
+    return result
+
 def main():
     parser = argparse.ArgumentParser(description='Google Calendar Manager')
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
@@ -463,9 +755,46 @@ def main():
     create_parser.add_argument('--no-meet', action='store_true', help='Do NOT attach a Google Meet link (default: attach)')
     create_parser.add_argument('--profile', default='default', choices=['default', 'work', 'secondary'], help='Authentication profile to use')
 
+    # Update command
+    update_parser = subparsers.add_parser('update', help='Patch an existing event in place')
+    update_parser.add_argument('--event-id', required=True, help='Event ID (decode it from the calendar eid if needed)')
+    update_parser.add_argument('--summary', help='New title')
+    update_parser.add_argument('--start', help='New start (ISO: YYYY-MM-DDTHH:MM:SS)')
+    update_parser.add_argument('--end', help='New end (ISO: YYYY-MM-DDTHH:MM:SS)')
+    update_parser.add_argument('--attendees', help='Comma-separated emails, REPLACES the current list')
+    update_parser.add_argument('--desc', help='New description')
+    update_parser.add_argument('--no-notify', action='store_true', help='Do NOT email attendees about the change')
+    update_parser.add_argument('--profile', default='default', choices=['default', 'work', 'secondary'], help='Authentication profile to use')
+
+    # RSVP command: answer an invite. Never use `update --attendees` for this;
+    # it replaces the guest list instead of changing one response.
+    rsvp_parser = subparsers.add_parser('rsvp', help="Answer an invite (accept/decline/tentative)")
+    rsvp_parser.add_argument('--event-id', help='Event ID (decode it from the calendar eid if needed)')
+    rsvp_parser.add_argument('--find', help='Instead of --event-id: text in the title of an upcoming event')
+    rsvp_parser.add_argument('--response', default='accepted',
+                             choices=['accepted', 'declined', 'tentative'], help='Your answer')
+    rsvp_parser.add_argument('--profile', default='default', choices=['default', 'work', 'secondary'], help='Authentication profile to use')
+
+    # Auth command: two-step OAuth so a session with no TTY can re-authorize
+    auth_parser = subparsers.add_parser('auth', help='Re-authorize a profile without an interactive prompt')
+    auth_parser.add_argument('--profile', default='default', choices=['default', 'work', 'secondary'], help='Profile to authorize')
+    auth_parser.add_argument('--start', action='store_true', help='Print the authorization URL')
+    auth_parser.add_argument('--login-hint', help='Google account to sign in as, e.g. you@example.com. Also enforced at exchange time.')
+    auth_parser.add_argument('--code', help='Authorization code, or the full localhost redirect URL')
+    auth_parser.add_argument('--status', action='store_true', help='Report token health for every profile')
+
     args = parser.parse_args()
 
-    if args.command == 'list':
+    if args.command == 'auth':
+        if args.status:
+            sys.exit(auth_status())
+        if args.start:
+            sys.exit(auth_start(args.profile, args.login_hint))
+        if args.code:
+            sys.exit(auth_finish(args.profile, args.code))
+        auth_parser.print_help()
+        sys.exit(1)
+    elif args.command == 'list':
         # as_json: list_events emits a clean JSON array (text suppressed, status to stderr)
         list_events(args.days_back, args.days_forward, args.profile, as_json=args.json)
     elif args.command == 'sweep':
@@ -474,6 +803,11 @@ def main():
         run_mcp_server(args.profile)
     elif args.command == 'create':
         create_event(args.summary, args.start, args.end, args.desc, args.profile, args.attendees, add_meet=not args.no_meet)
+    elif args.command == 'update':
+        update_event(args.event_id, args.profile, args.summary, args.start,
+                     args.end, args.desc, args.attendees, notify=not args.no_notify)
+    elif args.command == 'rsvp':
+        rsvp_event(args.event_id, args.response, args.profile, args.find)
     else:
         parser.print_help()
 

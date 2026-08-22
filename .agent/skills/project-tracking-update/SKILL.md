@@ -26,6 +26,13 @@ This skill defines the **mandatory** procedure for updating the project's source
 > | Someone owes the owner something (new or done) | `waiting_watchdog.py add \| close <WAIT-id> --note "..."` |
 > | A decision was made or an open question closed | `decision_log.py add \| decide <DEC-id> --decision "..."` |
 
+> [!IMPORTANT]
+> **Same turn as the action, not later (added 2026-08-11).** The trigger for updating a record is the *action* -- the Slack message sent, the doc published, the ticket transitioned -- not a later tidy-up pass. Other sessions and 19 cron jobs read the ledgers, never this conversation, so an action with no record behind it keeps reporting as open and gets chased again.
+>
+> **Propagation is automatic; do not do it by hand.** Since 2026-08-11 all four ledger CLIs call `.agent/scripts/ledger_sync.py` on the way out, which re-renders `journal/state/*.index.json` and `master_followup_tracker.md`, then commits and pushes. One CLI call is the whole chain. Step 5 below is therefore normally a no-op.
+>
+> Enforced by three hooks: `ledger_freshness.py` (pull before reading), `ledger_watch.py` (flags hand-edits and tracked actions), `ledger_guard.py` (syncs at end of turn, blocks once on an action with no record). Full rule: `CLAUDE.md` -> `## Ledger Discipline`.
+
 ---
 
 ## The "Triple-Check" Protocol
@@ -80,8 +87,9 @@ When a task is completed or a status changes, perform ALL 7 steps in order.
     - **YourManager Mandate Check**: If a breached item is a YourManager/Management mandate, move it to the TOP of the Dashboard priorities and add a 🚨 emoji.
     - Surface breached items in the Dashboard Advisor's Note / today's block.
 
-    #### Regenerate the view (only if you need it fresh mid-session, e.g. before showing the owner):
-    - `python3 .agent/skills/project-tracking-update/scripts/render_followup_tracker.py`
+    #### Regenerate the view: not needed any more.
+    - The CLIs above already re-rendered the indexes and the tracker and pushed them, so every other session and cron job is already reading the new value. `render_followup_tracker.py` by hand is only for recovering from a failed sync.
+    - To confirm it landed: `python3 .agent/scripts/ledger_sync.py check` (exit 0 = ledgers, derived views, and origin/main agree).
 
 ### Step 6: Update Team Workload & Design reporting
 - **Target**: `Dashboard.md` -> `Advisor's Note` or a specific `Team Health` section.
@@ -109,6 +117,8 @@ When a task is completed or a status changes, perform ALL 7 steps in order.
     3. **Orphan Check**: Look for tasks in `todo.md` that reference external people (Gaith, ExampleVendor, Teammate, etc.) but are NOT tracked in `waiting_watchdog.py report`. If found, add them: `waiting_watchdog.py add --owner "..." --what "..." --sla-hours <n>`.
     
     4. **Staleness Check**: `waiting_watchdog.py add` requires `--sla-hours` at creation, so new items can't go untracked-for-staleness by construction. If a ledger item genuinely has no useful SLA (rare), default to **3 business days** (72h) when adding it.
+
+    5. **Propagation Check**: `python3 .agent/scripts/ledger_sync.py check`. Exit 0 means the ledgers, the generated views, and `origin/main` all agree, so every other session reads what this one just wrote. Exit 1 names what is still local-only. This is the one that catches "I updated the record and it never left my working tree."
 
 ---
 

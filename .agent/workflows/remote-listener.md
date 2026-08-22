@@ -2,6 +2,8 @@
 description: Autonomously check, process, and complete remote instructions from the Telegram bridge queue.
 ---
 
+**Windows-only workflow: every command below proxies into WSL via `wsl.exe`, which does not exist on macOS. Never run this workflow on macOS.**
+
 1. Run the queue helper to check for any pending tasks:
    ```bash
    wsl.exe bash -c "python3 scripts/queue_helper.py get-pending"

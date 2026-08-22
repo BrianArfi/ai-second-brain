@@ -1,0 +1,19 @@
+{
+  "name": "ASB Meeting Recorder",
+  "short_name": "ASB Rec",
+  "description": "Record a meeting on the phone and hand it straight to the harness.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#111417",
+  "theme_color": "#111417",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

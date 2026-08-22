@@ -33,6 +33,7 @@ TOKEN_FILE = os.path.join(BASE_DIR, 'token.json')
 REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '..', '..', '..'))
 sys.path.insert(0, os.path.join(REPO_ROOT, '.agent', 'scripts'))
 from file_utils import assert_drive_result  # Drive Operation Verification (CLAUDE.md)
+from file_utils import apply_visibility, add_visibility_arg, resolve_visibility  # sharing (CLAUDE.md LANDMINE)
 
 # Scopes - drive.file only accesses files created by this app
 # Change to 'https://www.googleapis.com/auth/drive' for full access (requires re-auth)
@@ -69,17 +70,16 @@ def authenticate():
     return creds
     
 
-def set_commenter_permission(service, file_id):
-    """Set permissions to 'anyone' can 'comment'."""
-    try:
-        print(f"Setting permissions for {file_id} to 'anyone' can 'comment'...")
-        user_permission = {'type': 'anyone', 'role': 'commenter'}
-        service.permissions().create(fileId=file_id, body=user_permission, fields='id').execute()
-        print("Permission set successfully.")
-    except Exception as e:
-        print(f"Failed to set permissions: {e}")
+def set_commenter_permission(service, file_id, visibility='private'):
+    """Deprecated shim. Sharing now lives in file_utils.apply_visibility.
 
-def update_file(file_id, file_path, convert_to_docs=False):
+    This is the personal Drive, so there is no Workspace domain to fall back on:
+    the default here is 'private' rather than 'domain'. Pass --share (or
+    --visibility public) to publish deliberately.
+    """
+    apply_visibility(service, file_id, visibility)
+
+def update_file(file_id, file_path, convert_to_docs=False, visibility='private'):
     """Update an existing file in Google Drive in-place without deleting it."""
     creds = authenticate()
     if not creds:
@@ -112,15 +112,14 @@ def update_file(file_id, file_path, convert_to_docs=False):
         print(f"File ID: {file.get('id')}")
         print(f"Link: {file.get('webViewLink')}")
 
-        # Always set permissions to anyone can comment by default
-        set_commenter_permission(service, file.get('id'))
+        apply_visibility(service, file.get('id'), visibility)
 
         return file.get('id')
     except Exception as e:
         print(f"An error occurred: {e}")
         return None
 
-def upload_file(file_path, folder_id=None, convert_to_docs=False, share=False, role='commenter'):
+def upload_file(file_path, folder_id=None, convert_to_docs=False, visibility='private', role='commenter'):
     """Upload a file to Google Drive."""
     creds = authenticate()
     if not creds:
@@ -151,8 +150,7 @@ def upload_file(file_path, folder_id=None, convert_to_docs=False, share=False, r
         print(f"File ID: {file.get('id')}")
         print(f"Link: {file.get('webViewLink')}")
 
-        # Always set permissions to anyone can comment by default
-        set_commenter_permission(service, file.get('id'))
+        apply_visibility(service, file.get('id'), visibility)
 
         return file.get('id')
 
@@ -349,7 +347,7 @@ def main():
     upload_parser.add_argument('--file', required=True, help='Path to the file to upload')
     upload_parser.add_argument('--folder', help='ID of the folder to upload to')
     upload_parser.add_argument('--convert', action='store_true', help='Convert to Google Docs')
-    upload_parser.add_argument('--share', action='store_true', help='Share with anyone')
+    add_visibility_arg(upload_parser, default='private')
     upload_parser.add_argument('--role', default='commenter', choices=['viewer', 'commenter', 'writer'], help='Role for sharing (default: commenter)')
 
     # Search command
@@ -376,6 +374,7 @@ def main():
     update_parser.add_argument('--id', required=True, help='File ID of existing Drive file to update')
     update_parser.add_argument('--file', required=True, help='Path to the new local file')
     update_parser.add_argument('--convert', action='store_true', help='Convert to Google Doc format')
+    add_visibility_arg(update_parser, default='private')
 
     # Delete command
     delete_parser = subparsers.add_parser('delete', help='Move file to trash (or permanently delete)')
@@ -386,12 +385,12 @@ def main():
 
     if args.command == 'upload':
         if os.path.exists(args.file):
-            upload_file(args.file, args.folder, args.convert, args.share, args.role)
+            upload_file(args.file, args.folder, args.convert, resolve_visibility(args, 'private'), args.role)
         else:
             print(f"File not found: {args.file}")
     elif args.command == 'update':
         if os.path.exists(args.file):
-            update_file(args.id, args.file, args.convert)
+            update_file(args.id, args.file, args.convert, resolve_visibility(args, 'private'))
         else:
             print(f"File not found: {args.file}")
     elif args.command == 'delete':

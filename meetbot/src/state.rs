@@ -192,6 +192,27 @@ pub struct Config {
     /// back to the default and is never read as "uncapped".
     #[serde(default)]
     pub max_call_duration_min: Option<u64>,
+    /// PulseAudio source to record when `capture_transport = "pulse"`.
+    ///
+    /// Almost always the MONITOR of the sink Chrome plays into, e.g.
+    /// `"RDPSink.monitor"` under WSLg. There is deliberately no default: the
+    /// default Pulse source is a microphone, so guessing would record the room
+    /// the laptop is in rather than the meeting, and do it silently.
+    /// `python3 tools/pulse_probe.py` lists what this host offers.
+    #[serde(default)]
+    pub pulse_source: Option<String>,
+    /// Dedicated PulseAudio sink Chrome plays into, created on demand.
+    ///
+    /// Set this rather than pointing `pulse_source` at a real device's monitor.
+    /// On WSLg the default sink is `RDPSink`, the bridge to Windows audio;
+    /// pushing a bot's meetings through it overran its queue and took the whole
+    /// audio server down on 6 Aug 2026, after which every session failed at
+    /// capture start. A null sink has no such bridge and cannot wedge.
+    ///
+    /// When set, meetbot creates it if missing and exports `PULSE_SINK` to
+    /// Chrome, and `pulse_source` should be `"<pulse_sink>.monitor"`.
+    #[serde(default)]
+    pub pulse_sink: Option<String>,
 }
 
 /// SPEC.md §1.3.2: fail fast by default.
@@ -223,6 +244,12 @@ pub enum CaptureTransport {
     Cdp,
     /// `assets/capture_ws.js` -> `audio::start_ingest_server`.
     WebSocket,
+    /// Record the PulseAudio sink Chrome plays into, from outside the browser
+    /// entirely (`crate::pulse`). The only transport that still hears anything
+    /// as of 6 Aug 2026: Meet stopped exposing remote audio through media
+    /// elements, and every in-browser alternative dies on Chrome's audio
+    /// service having no capture device. Requires `pulse_source`.
+    Pulse,
 }
 
 impl Config {

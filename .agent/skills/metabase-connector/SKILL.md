@@ -23,7 +23,7 @@ This skill allows the agent to interact with a Metabase instance using either Em
   METABASE_BASE_URL=https://metabase.yourcompany.me
   
   # Option A: Email/Password login
-  METABASE_USERNAME=your-email@yourcompany.com
+  METABASE_USERNAME=yourteammate@yourcompany.com
   METABASE_PASSWORD=your-password
   
   # Option B: Direct Session Token (Mandatory for Google OAuth users)

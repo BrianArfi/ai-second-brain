@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111417">
+<title>ASB Recorder</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<style>
+  :root {
+    --bg: #111417; --card: #1a1f24; --line: #2b3238;
+    --fg: #e8edf2; --muted: #8b98a5;
+    --accent: #4f9dff; --rec: #e5484d; --ok: #46a758; --warn: #ffb224;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0 auto; background: var(--bg); color: var(--fg);
+    font: 16px/1.5 -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
+    padding: 20px 18px calc(28px + env(safe-area-inset-bottom));
+    max-width: 560px;
+  }
+  h1 { font-size: 17px; margin: 0 0 2px; letter-spacing: .2px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 16px; margin-bottom: 14px;
+  }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  input[type=text], textarea {
+    width: 100%; padding: 12px 13px; font-size: 16px;
+    background: #0d1114; color: var(--fg);
+    border: 1px solid var(--line); border-radius: 10px;
+  }
+  textarea { font-family: ui-monospace, monospace; font-size: 13px; }
+  input[type=text]:focus, textarea:focus { outline: none; border-color: var(--accent); }
+  .row { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+  .row input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--accent); }
+  .row label { margin: 0; color: var(--fg); font-size: 14px; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 6px; line-height: 1.45; }
+  code { background: #0d1114; padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
+
+  #record {
+    width: 100%; padding: 22px; font-size: 19px; font-weight: 600;
+    border: none; border-radius: 14px; color: #fff; background: var(--rec);
+  }
+  #record:disabled { opacity: .45; }
+  #record.recording { background: #23282d; border: 1px solid var(--rec); color: var(--rec); }
+
+  #timer { font-size: 40px; font-variant-numeric: tabular-nums; text-align: center;
+           margin: 8px 0 14px; letter-spacing: 1px; }
+  #timer.idle { color: var(--muted); }
+
+  .stat { display: flex; justify-content: space-between; font-size: 13px;
+          padding: 8px 0; border-top: 1px solid var(--line); }
+  .stat:first-child { border-top: none; padding-top: 0; }
+  .stat b { font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+         margin-right: 8px; background: var(--muted); }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); }
+  .dot.bad { background: var(--rec); }
+
+  #banner { display: none; padding: 11px 13px; border-radius: 10px; font-size: 13.5px;
+            margin-bottom: 14px; line-height: 1.45; }
+  #banner.show { display: block; }
+  #banner.err { background: #3a1c1f; border: 1px solid var(--rec); color: #ffc9cb; }
+  #banner.warn { background: #3a2f14; border: 1px solid var(--warn); color: #ffe0a8; }
+  #banner.ok { background: #16301d; border: 1px solid var(--ok); color: #b6ecc4; }
+
+  #log { font-size: 12px; color: var(--muted); white-space: pre-wrap;
+         max-height: 160px; overflow-y: auto; font-family: ui-monospace, monospace; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  details[open] summary { margin-bottom: 14px; }
+  button.link { background: none; border: none; color: var(--accent);
+                font-size: 13px; padding: 6px 0; }
+</style>
+</head>
+<body>
+
+<h1>ASB Meeting Recorder</h1>
+<div class="sub">Records the room, uploads while it records, hands the meeting to the harness.</div>
+
+<div id="banner"></div>
+
+<div class="card">
+  <label for="title">Meeting title</label>
+  <input type="text" id="title" placeholder="e.g. Work x ExamplePartner follow-up" autocomplete="off">
+
+  <div class="row">
+    <input type="checkbox" id="adhoc" checked>
+    <label for="adhoc">Ad-hoc (not on the calendar)</label>
+  </div>
+  <div class="hint">Keep this on for a room conversation. Turn it off only when the
+    recording really matches a calendar event, so the harness can take that event's
+    title and attendees instead of yours.</div>
+
+  <div style="margin-top:16px">
+    <label for="attendees">Attendees (optional, comma separated)</label>
+    <input type="text" id="attendees" placeholder="Teammate" autocomplete="off">
+  </div>
+</div>
+
+<div id="timer" class="idle">00:00</div>
+<button id="record" disabled>Checking host…</button>
+
+<div class="card" style="margin-top:14px">
+  <div class="stat"><span><i class="dot" id="hostDot"></i>Host</span><b id="hostName">checking…</b></div>
+  <div class="stat"><span>Uploaded</span><b id="uploaded">0 chunks</b></div>
+  <div class="stat"><span>Waiting to upload</span><b id="pending">0</b></div>
+</div>
+
+<details class="card">
+  <summary>Settings &amp; activity</summary>
+
+  <label for="token">Pairing token</label>
+  <input type="text" id="token" placeholder="paste once from the laptop" autocomplete="off">
+  <div class="hint">On the laptop:<br>
+    <code>python3 meeting-recorder/ingest_server.py --print-token</code></div>
+
+  <div style="margin-top:16px">
+    <label for="hosts">Hosts to try (one per line, first to answer wins)</label>
+    <textarea id="hosts" rows="3" spellcheck="false"></textarea>
+  </div>
+
+  <div class="row" style="justify-content:space-between">
+    <button class="link" id="save">Save settings</button>
+    <button class="link" id="recheck">Re-check hosts</button>
+    <button class="link" id="drain">Retry uploads</button>
+  </div>
+
+  <div id="log" style="margin-top:12px"></div>
+</details>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -11,14 +11,14 @@ committed tree, in order of how much damage a miss would do:
 3. Does every skill and command carry the frontmatter an agent reads to decide
    whether to use it?
 
-(1) and (2) fail the build. (3) reports and does not fail, because a number of
-skills predate the frontmatter convention and are fixed as they are touched.
-Making it fatal today would leave main red, and a permanently red check is a
-check everybody learns to ignore.
+All three fail the build. Frontmatter was a warning until 23 Aug 2026, when the
+last eleven offenders were fixed upstream; it is fatal now, so the tree can only
+stay clean. Use --lenient if you are mid-migration and need the report without
+the exit code.
 
 Usage:
     python3 tools/repo_check.py              # check the whole repo
-    python3 tools/repo_check.py --strict     # also fail on missing frontmatter
+    python3 tools/repo_check.py --lenient    # report frontmatter, do not fail on it
     python3 tools/repo_check.py --selftest   # test the rules themselves, no I/O
 """
 
@@ -87,7 +87,8 @@ PLACEHOLDER_LOCALS = {
     "you", "your-email", "youremail", "user", "username", "me", "name",
     "owner", "addr", "address", "someone", "example", "test", "admin",
     "first.last", "firstname.lastname", "email", "teammate", "owner.local",
-    "colleague", "manager", "recipient", "sender",
+    "colleague", "manager", "recipient", "sender", "other", "third", "second",
+    "yourteammate", "your-teammate", "someone.else", "anyone",
 }
 PLACEHOLDER_DOMAINS = {"example.com", "example.org", "example.net", "yourcompany.com",
                        "yourdomain.com", "company.com", "examplevendor.com", "exampleclient.com"}
@@ -140,8 +141,17 @@ def rules() -> list:
              "a real email address, or a real person's name on a placeholder domain."),
         Rule("jira-key", re.compile(r"\b([A-Z]{2,10})-\d+\b"), "a real ticket key.",
              frozenset(JIRA_EXCEPTIONS)),
-        Rule("secret", re.compile(r"\b(?:xox[bpsa]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})"),
+        Rule("secret", re.compile(r"\b(?:xox[bpsa]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|GOCSPX-[A-Za-z0-9_-]{10,}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})"),
              "a credential. Rotate it now, then remove it."),
+        Rule("private-key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----"),
+             "a private key. Rotate it now, then remove it."),
+        # A JSON secret field carrying a real value. Placeholders pass: the value
+        # has to be long and must not start like <YOUR_...>, so the docs can
+        # still show the shape of the file.
+        Rule("secret-field", re.compile(
+            r'"(?:client_secret|code_verifier|private_key|refresh_token|api_key)"\s*:\s*"'
+            r'(?![<{\[]|YOUR|your|xxx|XXX|CHANGE|changeme|\s*")[^"]{16,}"'),
+             "a secret in a JSON field. Rotate it now, then remove it."),
     ]
 
 
@@ -225,6 +235,9 @@ def selftest() -> int:
         "ping brian@example.org",
         "ticket MP-1234 is open",
         "token xoxb-1234567890-abcdefghijkl",
+        '{"web":{"client_secret":"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"}}',
+        '{"code_verifier": "KuxnERHrltt_lX1LHMD8O5tuI5TzE~P5m1IpsGzNewmnVT7_xrpZ"}',
+        "-----BEGIN RSA PRIVATE KEY-----",
     ]
     cases_ok = [
         "the example client weekly report",
@@ -235,6 +248,9 @@ def selftest() -> int:
         "write to you@example.com",
         "the UTF-8 encoding, HTTP-2, and P0 items",
         "token from token.env",
+        '"client_secret": "<YOUR_CLIENT_SECRET>"',
+        '"api_key": "your-key-here"',
+        '"client_secret": ""',
     ]
     checks = rules()
     failures = 0
@@ -253,7 +269,8 @@ def selftest() -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--strict", action="store_true", help="also fail on missing frontmatter")
+    ap.add_argument("--lenient", action="store_true",
+                    help="report missing frontmatter without failing on it")
     ap.add_argument("--selftest", action="store_true", help="test the rules, touch no files")
     ap.add_argument("--write-baseline", action="store_true",
                     help="record today's findings as accepted debt")
@@ -304,11 +321,11 @@ def main() -> int:
 
     missing = scan_frontmatter()
     if missing:
-        label = "FRONTMATTER" if args.strict else "frontmatter (warning)"
+        label = "frontmatter (warning)" if args.lenient else "FRONTMATTER"
         print(f"\n{label}: {len(missing)} file(s)")
         for line in missing:
             print(f"  {line}")
-        if args.strict:
+        if not args.lenient:
             fatal += 1
     else:
         print("frontmatter: clean")

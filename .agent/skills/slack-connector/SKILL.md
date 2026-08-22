@@ -48,8 +48,9 @@ python .agent/skills/slack-connector/scripts/slack_client.py --action list_chann
 
 ### Send Approval Gate
 
-`post`, `upload`, and `invite` mutate outbound Slack state (they post messages,
-files, or add channel members), so they are default-blocked. The gate itself
+`post`, `upload`, `update`, `delete`, and `invite` mutate outbound Slack state
+(they post, edit, or delete messages, post files, or add channel members), so
+they are default-blocked. The gate itself
 lives in `.agent/scripts/file_utils.py` as `require_send_approval()` and is
 imported by both this connector and `secondary-slack-connector`, so there is one
 implementation and no ungated twin.

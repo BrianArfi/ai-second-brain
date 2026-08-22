@@ -107,22 +107,118 @@ click Start / Stop, and optionally tick "Auto-process after stop."
 
 ---
 
-## Transcription engines
+## Transcription providers
 
-`config.json`'s `engine` field controls the chain. Default is `auto`:
-
-1. **`whispercpp`**: local GPU. Fast, private, free, no API key. Skipped automatically if the GPU probe fails (unless you force it).
-2. **`cli`**: Gemini API (audio-in, gives speaker labels). Needs a Google AI API key. Put it in `.agent/skills/gemini-image/token.env` as your Gemini key, or set the model in `config.json` (`gemini_model`).
-
-`auto` tries whisper.cpp first, then falls back to Gemini. It never silently falls back to
-slow CPU whisper; set `engine: "cpu"` explicitly if you actually want that. Set
-`require_gpu: false` to allow whisper.cpp without a detected GPU.
-
-Run a single file through any engine:
+**Start here:**
 
 ```bash
-python3 meeting-recorder/transcribe.py --in recording.m4a --out transcript.md --engine auto --lang auto
+python3 meeting-recorder/transcribe.py --doctor
 ```
+
+It prints every provider in the order it will be tried, whether this machine can
+actually use it, and the exact step to fix the ones it cannot. Nothing else in this
+section is worth reading until that command tells you something is wrong.
+
+Providers live in `config.json` under `transcription.providers` and are tried in
+order until one succeeds. Adding a provider is a config entry, not a code change.
+
+| Provider | Cost | Speaker labels | Needs |
+| :--- | :--- | :--- | :--- |
+| `gemini` | free tier | **yes** | key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| `groq` | free tier | no | key from [console.groq.com/keys](https://console.groq.com/keys) |
+| `openai` | paid | no | key from [platform.openai.com](https://platform.openai.com/api-keys) |
+| `whispercpp` | free | no | a GPU, the binary, and a model file |
+| `cpu` | free | no | `pip install faster-whisper`, and patience |
+
+Gemini leads the default chain because it is the only one that returns speaker
+labels. Everything else produces one unattributed stream, which a MOM can still be
+drafted from, but attribution has to come from you.
+
+### Where keys go
+
+Read from the environment first, then from the first of these that has the line:
+
+```
+meeting-recorder/.env
+.env               (workspace root)
+secrets.env        (workspace root)
+```
+
+One `KEY=value` per line. All three are gitignored.
+
+```bash
+echo 'GEMINI_API_KEY=your-key-here' >> meeting-recorder/.env
+```
+
+### The CPU fallback
+
+`transcription.cpu_fallback` decides what happens when nothing else is available.
+When `true` (the default for a new install), transcription runs locally on the CPU
+so the pipeline works with no account and no GPU. It warns first, because it takes
+roughly as long as the meeting itself. When `false`, the run fails and names every
+provider it tried instead.
+
+CPU is always appended **last** and never sits mid-chain. A fallback that always
+"works" would otherwise hide a misconfigured fast provider behind an hour of
+grinding laptop.
+
+### If your Gemini access comes from a local router
+
+Some setups reach Gemini through a local LLM router rather than an API key. Set
+`transcription.autodetect_local: true` and the recorder probes `127.0.0.1` for one,
+adds whatever it finds to the chain, and picks a model the router claims can take
+audio.
+
+That claim is **not trusted**, and this is the important part.
+
+### Provider verification, and why it exists
+
+On 21 Aug 2026 a local router advertised `audioInput: true` on nine Gemini models.
+Every one of them accepted the audio and threw it away. One model was honest
+("it appears that you forgot to attach the audio file"). The other six returned
+fluent, speaker-labelled, entirely invented meetings:
+
+> **[00:00]** Speaker 1: Good morning, everyone. Thanks for joining today's strategy sync.
+
+The clip actually said "The violet kangaroo audits seventeen bridges in Lisbon."
+Nothing errored. Left alone, that fiction becomes a MOM.
+
+So any provider reached over a **non-default endpoint** must first transcribe a
+known 3-second clip (`fixtures/probe.ogg`) and match its ground truth
+(`fixtures/probe.json`) before it may touch a real meeting. The sentence is
+deliberately absurd, so a model that never heard the audio cannot guess it.
+
+```bash
+python3 meeting-recorder/transcribe.py --verify-providers
+```
+
+Results cache in `meeting-recorder/provider_probe.json`. A provider that fails is
+disabled and the reason is kept; `--doctor` shows it. Delete that file to re-test.
+Stock cloud endpoints are not probed, because the risk comes from a proxy in the
+middle rather than from the vendor. Force a probe on any provider with
+`"verify": true`.
+
+### Any OpenAI-compatible endpoint
+
+Set `base_url` on an `openai` provider to point anywhere that speaks
+`/audio/transcriptions` -- a self-hosted whisper server, another vendor, a router:
+
+```json
+{"kind": "openai", "base_url": "http://127.0.0.1:8080/v1", "model": "whisper-1", "api_key_env": "MY_KEY"}
+```
+
+Files over the 25 MB API cap are compressed to 16 kHz mono Opus and, if still too
+large, split on time with each part's timestamps shifted, rather than the first
+25 MB being transcribed and the rest silently dropped.
+
+### Running one file
+
+```bash
+python3 meeting-recorder/transcribe.py --in recording.m4a --out transcript.md
+python3 meeting-recorder/transcribe.py --in recording.m4a --out transcript.md --engine groq
+```
+
+`--engine` pins a single provider. `cli` is still accepted as an alias for `gemini`.
 
 ---
 
@@ -142,6 +238,83 @@ Each processed meeting writes:
 
 To wire it to your calendar and MOM template, see the paths in `meeting-recorder/watcher.py`
 (it invokes your calendar connector to match a recording to a calendar event).
+
+---
+
+## Recording from the phone
+
+For a meeting in a room, away from the laptop. The phone runs a small web app that
+records and streams the audio to whichever machine answers; from there the pipeline
+above is unchanged, because the phone lands exactly the two files `recorder.py`
+would have written.
+
+```
+phone (browser)  --15s chunks-->  ingest_server.py  -->  <recordings_dir>/x.m4a + x.json
+                                                            |
+                                                            +--> watcher.py --file  (fired directly)
+```
+
+### Why it is a web app and why Tailscale is required
+
+A browser refuses the microphone to any page that is not a **secure context**, so
+`http://192.168.1.x:8787` cannot record and a self-signed certificate does not help.
+Tailscale issues a real Let's Encrypt certificate for `<machine>.<tailnet>.ts.net`,
+which makes one hostname solve three problems at once: microphone permission,
+transport on the LAN (Tailscale goes peer-to-peer, so no internet round-trip), and
+transport from cellular.
+
+### One-time setup
+
+1. Install Tailscale on the phone and on every machine that should receive recordings,
+   all signed into the same tailnet. Enable HTTPS in the admin console.
+2. On each machine:
+   ```bash
+   tailscale cert <machine>.<tailnet>.ts.net
+   tailscale serve --bg --https=443 http://127.0.0.1:8787
+   ```
+3. List every machine's public address in `meeting-recorder/config.json` under
+   `ingest.hosts`. The phone reads this from `/health` and learns the other machines
+   by itself, so the address is typed once, not on every device.
+4. Print the pairing token and keep it for step 5:
+   ```bash
+   python3 meeting-recorder/ingest_server.py --print-token
+   ```
+5. On the phone, open `https://<machine>.<tailnet>.ts.net`, expand **Settings**, paste
+   the token, press Save. Then Chrome menu → **Add to Home Screen**.
+
+The server itself starts automatically at the beginning of every Claude Code session
+(`.agent/scripts/ensure_ingest.sh`, the same health-check-and-replace pattern as the
+dashboard). To run it by hand:
+
+```bash
+python3 meeting-recorder/ingest_server.py            # port + bind come from config.json
+python3 meeting-recorder/ingest_server.py --bind 0.0.0.0   # plain-LAN testing only
+```
+
+### How a phone recording behaves
+
+- **Chunked while recording.** A piece goes out every 15 seconds. Android eventually
+  kills backgrounded tabs, so a tab that dies at minute 47 of a 60-minute meeting has
+  already delivered 47 minutes; the server's stale sweep (`ingest.stale_minutes`,
+  default 30) then finishes that session into a real transcript instead of losing it.
+- **Works with no network.** Chunks that cannot be sent are held in IndexedDB on the
+  phone, and the session is opened late with its original start time attached, so the
+  file stamp still describes the meeting rather than the upload.
+- **Ad-hoc by default.** A phone recording is usually a room conversation, so calendar
+  matching is skipped and the typed title wins. Turn the toggle off only when the
+  recording really matches a calendar event.
+- **Fires the watcher directly** rather than waiting for cron, because macOS has no
+  crontab: a recording landing on the Mac would otherwise never be processed.
+
+### Limits worth knowing
+
+- Android does not let any app, web or native, capture another app's audio. A phone
+  recording is **the room through the microphone**. For a Google Meet call the laptop
+  path is still better.
+- A browser tab is less durable than a native foreground service. Chunking bounds the
+  loss to the last 15 seconds; it does not remove it.
+- The pairing token lives in `meeting-recorder/ingest_token.env` (gitignored, `0600`).
+  Reachability is already limited to your own tailnet; the token is the second layer.
 
 ---
 

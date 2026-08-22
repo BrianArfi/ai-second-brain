@@ -33,6 +33,24 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# macOS has neither GNU `timeout` nor `grep -oP`. Both were used unguarded and
+# both fail closed on a Mac: the create step exited rc=127 before python ever
+# ran (14 Aug 2026). Resolve a timeout command once, tolerate not finding one.
+TIMEOUT_BIN=""
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_BIN="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_BIN="gtimeout"
+fi
+run_with_timeout() {   # run_with_timeout <seconds> <cmd...>
+  local secs="$1"; shift
+  if [[ -n "$TIMEOUT_BIN" ]]; then
+    "$TIMEOUT_BIN" "${secs}s" "$@"
+  else
+    "$@"
+  fi
+}
+
 [[ -z "$FILE" ]] && { echo "ERROR: --file is required" >&2; exit 2; }
 [[ ! -f "$FILE" ]] && { echo "ERROR: no such file: $FILE" >&2; exit 2; }
 [[ -z "$ID" && -z "$TITLE" ]] && { echo "ERROR: pass --id to update, or --title to create" >&2; exit 2; }
@@ -88,10 +106,11 @@ else
   # the doc (public by default) and THEN fail or hit the timeout. Extract the
   # ID from whatever it printed so the EXIT trap can still restrict it.
   CREATE_RC=0
-  OUT=$(timeout 180s python3 .agent/skills/gdocs-create/gdocs_create.py create-doc \
+  OUT=$(run_with_timeout 180 python3 .agent/skills/gdocs-create/gdocs_create.py create-doc \
         --title "$TITLE" --file "$FILE" --account "$ACCOUNT" 2>&1) || CREATE_RC=$?
   echo "$OUT"
-  ID=$(echo "$OUT" | grep -oP 'ID:\s*\K[A-Za-z0-9_-]+' | head -1 || true)
+  ID=$(echo "$OUT" | grep -oE 'ID:[[:space:]]*[A-Za-z0-9_-]+' | head -1 \
+       | sed -E 's/^ID:[[:space:]]*//' || true)
   if [[ $CREATE_RC -ne 0 ]]; then
     echo "ERROR: doc creation failed (rc=$CREATE_RC), treat as FAILURE" >&2
     exit 1   # EXIT trap restricts $ID if one was created before the failure

@@ -36,6 +36,7 @@ Reports: journal/harness_health/<YYYY-MM>.md (one run = one section, appended)
 import argparse
 import json
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -233,6 +234,14 @@ def classify_cron_lines(lines):
     return repo_lines, other_lines
 
 def check_cron(findings):
+    if platform.system() == 'Darwin':
+        # Cron for this repo only runs on the WSL automation host. On a macOS
+        # checkout, crontab -l reflects the local machine, not the repo's
+        # jobs, so treat the whole check as not applicable rather than
+        # producing false "missing job" findings.
+        return {'installed_repo_jobs': [], 'other_repo_blocks_count': 0,
+                'registry_status': [], 'error': None,
+                'skipped': 'not_applicable_macos: automation host is WSL'}
     lines, err = read_crontab()
     result = {'installed_repo_jobs': [], 'other_repo_blocks_count': 0,
               'registry_status': [], 'error': err}

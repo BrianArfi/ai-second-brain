@@ -3,7 +3,9 @@ description: Extract durable lessons from this session into harness memory - the
 argument-hint: "[optional: the specific lesson, or 'promote' to graduate a recurring memory into CLAUDE.md]"
 ---
 
-Memory dir: `~/.claude/projects/-home-you-antigravity-projects-product-second-brain/memory/`
+Memory dir: `$HOME/.claude/projects/$(printf %s "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}" | tr '/' '-')/memory/`
+
+Note: memory files are per-machine and not in git, so memories saved on macOS do not exist on WSL, and vice versa.
 
 1. Read `MEMORY.md` (the index) first so you do not duplicate existing memories.
 2. Review THIS session for extractable patterns:
