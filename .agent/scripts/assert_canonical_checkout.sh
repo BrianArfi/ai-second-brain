@@ -31,9 +31,9 @@ esac
 # First guard: the retired Windows scratch clone.
 # Normalise the Windows mount so /mnt/c and C:\ compare the same.
 case "$HERE" in
-  /mnt/c/Users/the owner/.gemini/antigravity/scratch/product-second-brain*|\
-  [Cc]:/Users/the owner/.gemini/antigravity/scratch/product-second-brain*|\
-  *"\\Users\\the owner\\.gemini\\antigravity\\scratch\\product-second-brain"*)
+  /mnt/c/Users/you/.gemini/antigravity/scratch/product-second-brain*|\
+  [Cc]:/Users/you/.gemini/antigravity/scratch/product-second-brain*|\
+  *"\\Users\\you\\.gemini\\antigravity\\scratch\\product-second-brain"*)
     cat <<'EOF'
 
   ┌────────────────────────────────────────────────────────────────────┐

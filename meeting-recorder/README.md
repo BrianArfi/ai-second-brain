@@ -173,7 +173,7 @@ python(.exe) recorder.py "Teammate x the owner: OC pricing" --ad-hoc \
 
 # 2. Watcher memproses otomatis (kalau jalan), atau manual:
 python3 meeting-recorder/watcher.py --once
-python3 meeting-recorder/watcher.py --file /mnt/c/Users/the owner/MeetingRecordings/xxx.wav
+python3 meeting-recorder/watcher.py --file /mnt/c/Users/you/MeetingRecordings/xxx.wav
 
 # 3. Hasil
 #    Transcript : Clients/Work/meetings/transcripts/<file>.md

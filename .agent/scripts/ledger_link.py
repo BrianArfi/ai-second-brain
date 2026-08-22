@@ -32,7 +32,7 @@ BASE = os.environ.get('PSB_DASHBOARD_BASE', 'http://localhost:3737').rstrip('/')
 
 # The three local ledgers. External tracker keys are NOT included: Jira keys
 # (MP-, MPS-, MSP-, MBA-, STOR-) belong to an Atlassian instance and Linear
-# identifiers (team key + number, e.g. ENG-123) belong to
+# identifiers (a team key followed by a number) belong to
 # linear.app/yourcompany. Linkifying either here would send the owner to the
 # wrong system. Their homes are jql_url()/the Linear issue URL in
 # work_tree_link.py, not the local dashboard.

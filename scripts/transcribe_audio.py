@@ -6,7 +6,7 @@ Run with the dedicated venv: ~/.venvs/whisper/bin/python
 
 Usage:
   ~/.venvs/whisper/bin/python scripts/transcribe_audio.py \
-      --in "/mnt/c/Users/the owner/Documents/Sound Recordings/<file>.m4a" \
+      --in "/mnt/c/Users/you/Documents/Sound Recordings/<file>.m4a" \
       --out scratch/<name>.md \
       [--model small|medium|large-v3] [--lang en|id|auto]
 

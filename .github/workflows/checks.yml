@@ -19,6 +19,8 @@ jobs:
         run: python3 tools/repo_check.py --selftest
       - name: Personal data, syntax, frontmatter
         run: python3 tools/repo_check.py
+      - name: Capability pack installer
+        run: python3 tools/test_pack.py
 
   install:
     name: install.sh on ${{ matrix.os }}
