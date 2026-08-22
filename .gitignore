@@ -22,6 +22,10 @@ credentials.json
 .linkedin_cookie
 *.token
 
+# Your own brain. install.sh copies CLAUDE.md.template here and it becomes
+# personal from the first edit. The template itself stays tracked.
+CLAUDE.md
+
 # Generated outputs (personal data)
 _temp/
 _output/

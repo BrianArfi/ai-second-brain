@@ -1,0 +1,43 @@
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  repo-check:
+    name: repo check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Rules self-test
+        run: python3 tools/repo_check.py --selftest
+      - name: Personal data, syntax, frontmatter
+        run: python3 tools/repo_check.py
+
+  install:
+    name: install.sh on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Shell syntax
+        run: bash -n install.sh
+      - name: Run the installer
+        run: bash install.sh
+      - name: The installer must produce a working brain
+        run: |
+          test -f CLAUDE.md || { echo "install.sh did not create CLAUDE.md"; exit 1; }
+          test -f .env || { echo "install.sh did not create .env"; exit 1; }
+          echo "install.sh produced CLAUDE.md and .env"

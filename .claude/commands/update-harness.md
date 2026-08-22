@@ -16,10 +16,11 @@ Update this harness from the upstream template repo. Do each phase in order and 
 
 ## Phase 2: Resolve conflicts (only if the merge stops)
 
-- Personal files (`CLAUDE.md`, `.env`, `token*.json`, `journal/`, `Dashboard.md`) are gitignored and can never conflict - do not touch them.
+- Gitignored personal files (`CLAUDE.md`, `.env`, `token*.json`) can never conflict - do not touch them.
+- Four seed files ARE tracked and WILL conflict once the user has edited them: `Dashboard.md`, `journal/todo.md`, `journal/master_followup_tracker.md`, `journal/state/work_tree.json`. Always keep the user's version, without asking: `git checkout --ours <file>` then `git add <file>`. Their content is the user's own work, and upstream only ever ships an empty starter.
 - For template files (skills, scripts, docs) the user has NOT deliberately customized: take the upstream version (`git checkout --theirs <file>`).
 - For files the user HAS customized: show both versions and ask which to keep before resolving. Never silently discard their edits.
-- Finish with `git add -A` on the resolved files + `git commit`.
+- Finish by staging ONLY the files you resolved, by name, then `git commit`. Never `git add -A` here: it sweeps up whatever untracked personal files the user happens to have in the tree.
 
 ## Phase 3: Surface new setup steps
 

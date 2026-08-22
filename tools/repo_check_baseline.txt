@@ -1,0 +1,29 @@
+# Accepted personal-data findings, one per line.
+# CI fails on anything NOT listed here, so this file can only shrink.
+# Most of these are fixed upstream in the export scrub, not by hand.
+.agent/scripts/portfolio_tagger.py:45  [client-name] Entertainer  -- a real client name. Use ExampleClient.
+.agent/scripts/verify_briefing_numbers.py:27  [jira-key] ECOM-12  -- a real ticket key.
+.agent/scripts/verify_briefing_numbers.py:27  [jira-key] MP-11685  -- a real ticket key.
+.agent/skills/draft-reviewer/SKILL.md:46  [jira-key] MBA-237  -- a real ticket key.
+.agent/skills/gmail-connector/SKILL.md:34  [email] faraz.saleem@yourcompany.com  -- a real email address, or a real person's name on a placeholder domain.
+.agent/skills/gmail-connector/SKILL.md:35  [email] Teammate.khoder@yourcompany.com  -- a real email address, or a real person's name on a placeholder domain.
+.agent/skills/gmail-connector/SKILL.md:35  [email] amr.abokhalil@yourcompany.com  -- a real email address, or a real person's name on a placeholder domain.
+.agent/skills/premeeting-cards/SKILL.md:61  [jira-key] MPS-1550  -- a real ticket key.
+.agent/skills/premeeting-cards/scripts/enrich_cards_agy.py:165  [jira-key] MPS-1550  -- a real ticket key.
+.agent/skills/premeeting-cards/scripts/enrich_cards_agy.py:210  [jira-key] MPS-1550  -- a real ticket key.
+.agent/skills/proactive-assistant/SKILL.md:40  [client-name] Gogogo  -- a real client name. Use ExampleClient.
+.agent/skills/proactive-assistant/SKILL.md:40  [client-name] Safaraya  -- a real client name. Use ExampleClient.
+.agent/workflows/weekly-planning.md:47  [client-name] Gogogo  -- a real client name. Use ExampleClient.
+.agent/workflows/weekly-planning.md:67  [client-name] Gogogo  -- a real client name. Use ExampleClient.
+.agent/workflows/weekly-planning.md:69  [client-name] Safaraya  -- a real client name. Use ExampleClient.
+.claude/commands/prd.md:59  [jira-key] MBA-237  -- a real ticket key.
+dashboard/public/components.js:130  [jira-key] MSP-183  -- a real ticket key.
+dashboard/public/components.js:135  [jira-key] MPS-1524  -- a real ticket key.
+dashboard/public/quickfind.js:4  [jira-key] MBA-237  -- a real ticket key.
+dashboard/public/tab-work.js:177  [jira-key] MP-123  -- a real ticket key.
+dashboard/public/tab-work.js:191  [jira-key] MP-123  -- a real ticket key.
+dashboard/server.py:1315  [client-name] Safaraya  -- a real client name. Use ExampleClient.
+dashboard/server.py:1316  [client-name] Gogogo  -- a real client name. Use ExampleClient.
+dashboard/server.py:1317  [client-name] Gogogo  -- a real client name. Use ExampleClient.
+dashboard/server.py:1687  [jira-key] MP-123  -- a real ticket key.
+meeting-recorder/README.md:105  [jira-key] STOR-115  -- a real ticket key.

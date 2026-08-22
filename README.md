@@ -434,6 +434,32 @@ CLAUDE.md.template  Rename to CLAUDE.md and make it yours
 
 ---
 
+## Contributing
+
+Patches are welcome. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md): it explains the three
+layers, the shape of a skill, and the one thing about the release pipeline you have to know
+before you spend an evening on a patch.
+
+Before you open a pull request:
+
+```bash
+python3 tools/repo_check.py
+```
+
+That checks the tree for anything personal (client names, home paths, emails, ticket keys,
+credentials), makes sure every script parses, and reports skills that are missing frontmatter.
+
+Found a security problem? Do not open an issue. Follow [`SECURITY.md`](SECURITY.md).
+
+## License
+
+[Apache-2.0](LICENSE). Use it, fork it, sell what you build with it.
+
+The name "AI Second Brain", the AI Circle name, and the artwork are not part of that grant.
+Give your fork its own name. See [`NOTICE`](NOTICE).
+
+---
+
 <div align="center">
 
 **Ready to start?**

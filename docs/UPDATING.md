@@ -3,8 +3,23 @@
 The template repo keeps improving after you fork it. This guide shows how to pull
 those updates into YOUR fork without losing your personal setup.
 
-**Your personal files are safe.** `CLAUDE.md`, `.env`, all `token*.json` files,
-`journal/`, and `Dashboard.md` are gitignored - an update never touches them.
+**Most of your personal files are safe.** `CLAUDE.md`, `.env`, and all
+`token*.json` files are gitignored, so an update never touches them.
+
+**Four files are different, and you should know about them.** `Dashboard.md`,
+`journal/todo.md`, `journal/master_followup_tracker.md`, and
+`journal/state/work_tree.json` ship in the template as starter files, so they
+are tracked by git. Once you edit them they become yours, and an upstream change
+to the same file makes a merge conflict. The answer is always the same: keep
+your version.
+
+```bash
+git checkout --ours Dashboard.md journal/todo.md \
+    journal/master_followup_tracker.md journal/state/work_tree.json
+git add Dashboard.md journal/
+```
+
+`/update-harness` does this for you.
 
 ## You will be told when there is something to pull
 
