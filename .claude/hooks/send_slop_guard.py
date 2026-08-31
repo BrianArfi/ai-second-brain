@@ -31,9 +31,22 @@ Two severities, matching how the skill itself is written
                         word can be the right word inside a quote), so the hook
                         names what it found and leaves the call to the drafter.
 
-Scope: `slack_client.py` in either connector (primary + secondary), both `--text`
-and `--text-file`. Other outbound paths (Gmail, Jira/GDoc comments via MCP) still
-have no machine check; they need their own matcher, not a wider Bash regex.
+  over budget /       -> additionalContext only. `answer_budget.md` says an outbound
+  unasked rationale      message carries what the reader needs to act and stops. The
+                         guard counts words (quotes, code blocks and tables excluded)
+                         and names a rationale section the reader did not ask for.
+                         A warning rather than a block, because a long message is
+                         sometimes right and no regex can tell which one this is.
+
+Scope: `slack_client.py` in either connector, `gmail_manager.py`, and
+`gdoc_comment.py`. Flags read: `--text`, `--text-file`, `--body`, `--body-file`,
+and the `text` fields inside `--items` JSON. Paths that never touch Bash (a
+comment posted through an MCP tool) still have no machine check; they need their
+own matcher, not a wider Bash regex.
+
+A chat reply to the owner is out of scope by construction. Hooks fire on tool
+calls, and no hook sees assistant text on its way to a human, so that half of
+`answer_budget.md` runs on the rule alone.
 
 Contract: always exit 0. A crash here must never break a send.
 """
@@ -76,7 +89,48 @@ BANNED_PHRASES = [
     "please don't hesitate", 'let me know if you have any questions',
 ]
 
-SEND_MARKERS = ('slack_client.py',)
+# Marker -> (channel name, word ceiling from answer_budget.md). A ceiling triggers a
+# cut, not a justification. Quotes, code blocks and tables do not count toward it.
+SEND_TARGETS = {
+    'slack_client.py': ('Slack', 80),
+    'gmail_manager.py': ('email', 150),
+    'gdoc_comment.py': ('a document comment', 60),
+}
+SEND_MARKERS = tuple(SEND_TARGETS)
+
+# Lead-ins that introduce reasoning the reader did not ask for. Multi-word only, so
+# an ordinary sentence never trips them.
+RATIONALE_LEADINS = [
+    'for context', 'some context', 'a bit of context', 'to give you context',
+    'for background', 'background:', 'context:', 'rationale:', 'reasoning:',
+    'why this matters', 'here is why', "here's why", 'let me explain',
+    'to explain why', 'just to explain', 'for your awareness',
+    'to walk you through', 'the reason for this is', 'by way of background',
+]
+
+
+def payload_words(text):
+    """Words the reader has to read, with the payload excluded.
+
+    A quoted message, a code block and a table of parallel data are the point of
+    the message rather than padding, so they do not count. Counting them would
+    make the guard fire on exactly the messages that are correct.
+    """
+    out, in_fence = [], False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith('```'):
+            in_fence = not in_fence
+            continue
+        if in_fence or stripped.startswith('>') or stripped.startswith('|'):
+            continue
+        out.append(line)
+    return len(' '.join(out).split())
+
+
+def find_rationale(text):
+    low = ' '.join(text.lower().split())
+    return [p for p in RATIONALE_LEADINS if p in low]
 
 def read_payload():
     try:
@@ -90,9 +144,49 @@ def read_payload():
     except Exception:
         return None
 
+# Flags that carry a message to a human. Inline flags hold the text itself; file
+# flags hold a path to it. `--items` is gdoc_comment's JSON of [{anchor, text}].
+INLINE_FLAGS = ('--text', '--body')
+FILE_FLAGS = ('--text-file', '--text_file', '--body-file', '--body_file')
+JSON_FLAGS = ('--items',)
+
+
+def read_send_file(path, label):
+    try:
+        if os.path.getsize(path) > MAX_FILE_BYTES:
+            return None, None
+        with open(path, encoding='utf-8', errors='replace') as f:
+            return f.read(), f'{label} {os.path.basename(path)}'
+    except OSError:
+        return None, None
+
+
+def comment_text(path):
+    """Every `text` field in a gdoc_comment items file, joined.
+
+    One malformed comment must not hide the other nine, so a file that does not
+    parse is skipped rather than guessed at.
+    """
+    if path == '-':
+        return None, None            # stdin: the hook cannot read it without stealing it
+    raw, _ = read_send_file(path, '--items')
+    if raw is None:
+        return None, None
+    try:
+        items = json.loads(raw)
+    except Exception:
+        return None, None
+    if not isinstance(items, list):
+        return None, None
+    texts = [str(i.get('text') or '') for i in items if isinstance(i, dict)]
+    joined = '\n\n'.join(t for t in texts if t.strip())
+    if not joined:
+        return None, None
+    return joined, f'--items {os.path.basename(path)} ({len(texts)} comment(s))'
+
+
 def outbound_text(command):
-    """The text this command would send: --text inline, or --text-file's contents.
-    Returns (text, origin) or (None, None)."""
+    """The text this command would send. Returns (text, origin) or (None, None)."""
     try:
         tokens = shlex.split(command, comments=False, posix=True)
     except ValueError:
@@ -101,24 +195,30 @@ def outbound_text(command):
         return command, 'raw command'
 
     for i, tok in enumerate(tokens):
-        if tok == '--text' and i + 1 < len(tokens):
-            return tokens[i + 1], '--text'
-        if tok.startswith('--text='):
-            return tok.split('=', 1)[1], '--text'
-        path = None
-        if tok in ('--text-file', '--text_file') and i + 1 < len(tokens):
-            path = tokens[i + 1]
-        elif tok.startswith('--text-file='):
-            path = tok.split('=', 1)[1]
-        if path:
-            try:
-                if os.path.getsize(path) > MAX_FILE_BYTES:
-                    return None, None
-                with open(path, encoding='utf-8', errors='replace') as f:
-                    return f.read(), f'--text-file {os.path.basename(path)}'
-            except OSError:
-                return None, None
+        for flag in INLINE_FLAGS:
+            if tok == flag and i + 1 < len(tokens):
+                return tokens[i + 1], flag
+            if tok.startswith(flag + '='):
+                return tok.split('=', 1)[1], flag
+        for flag in FILE_FLAGS:
+            if tok == flag and i + 1 < len(tokens):
+                return read_send_file(tokens[i + 1], flag)
+            if tok.startswith(flag + '='):
+                return read_send_file(tok.split('=', 1)[1], flag)
+        for flag in JSON_FLAGS:
+            if tok == flag and i + 1 < len(tokens):
+                return comment_text(tokens[i + 1])
+            if tok.startswith(flag + '='):
+                return comment_text(tok.split('=', 1)[1])
     return None, None
+
+
+def send_target(command):
+    """(channel, word ceiling) for the first marker this command matches."""
+    for marker, target in SEND_TARGETS.items():
+        if marker in command:
+            return target
+    return ('this channel', 0)
 
 def find_words(text):
     low = text.lower()
@@ -145,9 +245,13 @@ def main():
     if not text or not text.strip():
         sys.exit(0)
 
+    channel, ceiling = send_target(command)
     dashes = [c for c in ('—', '–') if c in text]
     words = find_words(text)
     phrases = find_phrases(text)
+    rationale = find_rationale(text)
+    count = payload_words(text)
+    over = ceiling and count > ceiling
 
     # verbatim-quote escape hatch, set on the command itself
     if dashes and re.search(r'(?<![\w-])SLOP_GUARD_ALLOW_EMDASH=1(?![\w-])', command):
@@ -167,6 +271,10 @@ def main():
             extra.append('banned words: ' + ', '.join(words[:6]))
         if phrases:
             extra.append('slop phrases: ' + ', '.join(phrases[:4]))
+        if over:
+            extra.append(f'{count} words against a {ceiling}-word budget for {channel}')
+        if rationale:
+            extra.append('unrequested rationale: ' + ', '.join(rationale[:3]))
         if extra:
             reason += ' Also present, fix in the same pass: ' + '; '.join(extra) + '.'
         print(json.dumps({
@@ -178,20 +286,32 @@ def main():
         }))
         sys.exit(0)
 
-    if words or phrases:
+    if words or phrases or over or rationale:
         bits = []
         if words:
             bits.append('banned words: ' + ', '.join(words[:6]))
         if phrases:
             bits.append('slop phrases: ' + ', '.join(phrases[:4]))
+        if over:
+            bits.append(
+                f'{count} words against the {ceiling}-word budget for {channel}, '
+                'excluding quotes, code blocks and tables'
+            )
+        if rationale:
+            bits.append('unrequested rationale: ' + ', '.join(rationale[:3]))
+        advice = '.agent/skills/no-ai-slop/SKILL.md'
+        if over or rationale:
+            advice = '.agent/skills/no-ai-slop/answer_budget.md'
         print(json.dumps({
             'hookSpecificOutput': {
                 'hookEventName': 'PreToolUse',
                 'additionalContext': (
                     f'no-ai-slop: outbound text ({origin}) still contains '
                     + '; '.join(bits)
-                    + '. Cut them before this goes to a named human '
-                      '(.agent/skills/no-ai-slop/SKILL.md).'
+                    + f'. Cut before this goes to a named human ({advice}).'
+                    + (' The budget is a ceiling that triggers a cut, not a length to '
+                       'justify. It lifts only when the reader asked for depth.'
+                       if (over or rationale) else '')
                 ),
             }
         }))

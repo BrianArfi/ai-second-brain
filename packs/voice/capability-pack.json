@@ -1,0 +1,33 @@
+{
+  "name": "voice",
+  "apiVersion": "0.1",
+  "version": "1.0.0",
+  "description": "Removes AI voice from everything this workspace writes: the answer budget that cuts unrequested explanation, the no-ai-slop wordlists, Simplified Technical English, and the two hooks that check the rules by machine.",
+  "requires": {
+    "python": ">=3.9"
+  },
+  "contents": {
+    "skills": [
+      ".agent/skills/no-ai-slop/SKILL.md",
+      ".agent/skills/no-ai-slop/answer_budget.md",
+      ".agent/skills/no-ai-slop/eval.md",
+      ".agent/skills/no-ai-slop/ste.md",
+      ".agent/skills/no-emdash/SKILL.md"
+    ],
+    "commands": [
+      ".claude/commands/no-ai-slop.md"
+    ],
+    "hooks": [
+      ".claude/hooks/send_slop_guard.py",
+      ".claude/hooks/emdash_guard.py"
+    ]
+  },
+  "postInstall": [
+    "Two hooks are now on disk. Wire them in .claude/settings.json, because the installer never edits your settings:",
+    "  PreToolUse  matcher Bash          -> python3 .claude/hooks/send_slop_guard.py",
+    "  PostToolUse matcher Write|Edit    -> python3 .claude/hooks/emdash_guard.py",
+    "Then paste the Quality Gates section from CLAUDE.md.template into your CLAUDE.md, so the rules run without being asked for.",
+    "To drop Simplified Technical English, delete the STE subsection from that block and delete .agent/skills/no-ai-slop/ste.md. The rest keeps working.",
+    "Check it: echo '{\"tool_input\":{\"command\":\"slack_client.py --text \\\"a - b\\\"\"}}' | python3 .claude/hooks/send_slop_guard.py"
+  ]
+}

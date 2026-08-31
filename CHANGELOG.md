@@ -9,6 +9,40 @@ names, and personal data. This file is copied verbatim, so it reads the same in 
 Dated headings below are the history. From v0.1.0 on, releases also carry a
 version, and the rule is in [`docs/VERSIONING.md`](docs/VERSIONING.md).
 
+## Unreleased
+
+### Added
+- **The `no-ai-slop` skill, which the template shipped a command for and never
+  shipped.** `/no-ai-slop` pointed at `.agent/skills/no-ai-slop/SKILL.md`, and that
+  folder did not exist here, so the command was dead in every clone. The skill is
+  now in the template with its eval and its Simplified Technical English rules.
+- **`answer_budget.md`, a new gate that runs before every wording rule.** The
+  wordlists fix how a sentence reads. They cannot say whether the paragraph should
+  exist, and the loudest AI tell is explanation nobody asked for: reasoning shown to
+  a reader who wanted the answer, process narration, closing recaps. The budget
+  answers first and stops, with a word ceiling per channel that triggers a cut
+  rather than a justification. It covers replies to the owner as well as outbound
+  drafts, because the owner is a named human too.
+- **A real Quality Gates block in `CLAUDE.md.template`.** It was four checklist
+  ticks, one of which asked for no em-dash and used one in the asking. It is now the
+  four gates in order: budget, slop, STE, review, with what the machine checks and
+  what it cannot. A command runs when somebody types it. A standing instruction runs
+  every time.
+- **`packs/voice`**, so a workspace that was set up before this can take the whole
+  gate with `python3 tools/pack.py install packs/voice` instead of forking.
+- **`tools/test_voice_pack.py`**, which fails when the pack copies drift from the
+  workspace files they ship.
+
+### Changed
+- **`send_slop_guard.py` reads more than Slack.** It now covers
+  `gmail_manager.py` (`--body`, `--body-file`) and `gdoc_comment.py` (the `text`
+  fields inside `--items`), and it warns when outbound text goes over its channel
+  budget or carries a rationale section the reader did not ask for. Quotes, code
+  blocks and tables are excluded from the count, so a message that is mostly a
+  quoted thread does not trip it. Em-dash still denies the send.
+- **Every em-dash removed from `CLAUDE.md.template`.** Twelve of them, in the file
+  that bans them.
+
 ## v0.1.0 - 2026-08-23
 
 First tagged release of the public template. It has been usable for months; what
