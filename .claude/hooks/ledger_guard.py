@@ -74,9 +74,18 @@ def main():
 
     # --- 1. propagate anything still sitting in the working tree -----------
     if os.path.exists(sync) and dirty(project):
+        # --background: the sync detaches and this returns in well under a
+        # second. Run inline it cost 6.7 seconds on EVERY turn on an idle
+        # machine, and far more on a slow link (renderers plus git fetch/push),
+        # and nothing in the turn reads the result, so the user was waiting on
+        # propagation for its own sake. The locks, the deletion guard and the
+        # rebase-and-retry push all still run, inside the child. A failure
+        # surfaces on the next turn instead of this one; ledger_sync.py replays
+        # the last background result to say so.
         rc, out, err = run(
-            ["python3", sync, "sync", "--reason", "end-of-turn ledger sync"],
-            project)
+            ["python3", sync, "sync", "--background",
+             "--reason", "end-of-turn ledger sync"],
+            project, timeout=20)
         line = out or err
         if line:
             messages.append(line.splitlines()[-1])
