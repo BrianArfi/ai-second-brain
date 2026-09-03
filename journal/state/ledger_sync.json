@@ -3,36 +3,36 @@
  "last_render_problems": [
   "state indexes: exit 1 "
  ],
- "last_sync_wib": "2026-09-03 08:26:53 WIB",
+ "last_sync_wib": "2026-09-03 08:27:36 WIB",
  "ledgers": {
   "chase_queue": {
-   "commit": "7d348fd",
-   "last_sync_epoch": 1788398813.315995,
-   "last_sync_wib": "2026-09-03 08:26:53 WIB",
-   "pushed": true,
-   "reason": "lock test A"
+   "commit": "4cc0e20",
+   "last_sync_epoch": 1788398856.214114,
+   "last_sync_wib": "2026-09-03 08:27:36 WIB",
+   "pushed": false,
+   "reason": "end-of-turn ledger sync"
   },
   "commitments": {
-   "commit": "7d348fd",
-   "last_sync_epoch": 1788398813.315995,
-   "last_sync_wib": "2026-09-03 08:26:53 WIB",
-   "pushed": true,
-   "reason": "lock test A"
+   "commit": "4cc0e20",
+   "last_sync_epoch": 1788398856.214114,
+   "last_sync_wib": "2026-09-03 08:27:36 WIB",
+   "pushed": false,
+   "reason": "end-of-turn ledger sync"
   },
   "decisions": {
-   "commit": "7d348fd",
-   "last_sync_epoch": 1788398813.315995,
-   "last_sync_wib": "2026-09-03 08:26:53 WIB",
-   "pushed": true,
-   "reason": "lock test A"
+   "commit": "4cc0e20",
+   "last_sync_epoch": 1788398856.214114,
+   "last_sync_wib": "2026-09-03 08:27:36 WIB",
+   "pushed": false,
+   "reason": "end-of-turn ledger sync"
   },
   "waiting_on": {
-   "commit": "7d348fd",
-   "last_sync_epoch": 1788398813.315995,
-   "last_sync_wib": "2026-09-03 08:26:53 WIB",
-   "pushed": true,
-   "reason": "lock test A"
+   "commit": "4cc0e20",
+   "last_sync_epoch": 1788398856.214114,
+   "last_sync_wib": "2026-09-03 08:27:36 WIB",
+   "pushed": false,
+   "reason": "end-of-turn ledger sync"
   }
  },
- "pending_push": false
+ "pending_push": true
 }
