@@ -170,6 +170,12 @@ LANES = [
 
 TS_RE = re.compile(rb'"timestamp"\s*:\s*"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})')
 ENT_RE = re.compile(rb'"entrypoint"\s*:\s*"([^"]+)"')
+# Markers only the interactive desktop app writes (typed prompt latch, mode
+# switches, session titles). A headless `sdk-cli` cron run has none of them,
+# so they are what separates an app session from automation now that BOTH
+# carry entrypoint 'sdk-cli'.
+UI_RE = re.compile(rb'"type"\s*:\s*"(?:atis-latch|last-prompt|ai-title|mode)"')
+SCAN_V = 2   # bump to invalidate every cached parse (new fields below)
 CMD_RE = re.compile(r'<command-name>(/[\w:-]+)</command-name>')
 TAG_RE = re.compile(r'<[^>]{1,80}>')
 
@@ -234,6 +240,8 @@ def scan_file(path, cached):
       {mtime, size, offset, ent, title, first_human, act: [min...], hum: [min...]}
     """
     st = os.stat(path)
+    if cached and cached.get('v') != SCAN_V:
+        cached = None   # parsed by an older reader, missing fields -> full rescan
     if cached and cached.get('mtime') == st.st_mtime and cached.get('size') == st.st_size:
         return cached
     # incremental resume ONLY when the file grew (append-only pattern); a changed
@@ -246,10 +254,12 @@ def scan_file(path, cached):
         ent = cached.get('ent')
         title = cached.get('title')
         first_human = cached.get('first_human')
+        ui = bool(cached.get('ui'))
     else:
         start = 0
         act, hum = set(), set()
         ent = title = first_human = None
+        ui = False
     with open(path, 'rb') as f:
         f.seek(start)
         buf = f.read()
@@ -265,6 +275,8 @@ def scan_file(path, cached):
         m = TS_RE.search(line[:600]) or TS_RE.search(line)
         if m:
             act.add(minute_epoch(m.group(1).decode()))
+        if not ui and UI_RE.search(line[:200]):
+            ui = True
         if ent is None:
             em = ENT_RE.search(line)
             if em:
@@ -316,8 +328,8 @@ def scan_file(path, cached):
                     ok = bool(kinds) and kinds <= {'text', 'image'}
                 if ok and m:
                     hum.add(minute_epoch(m.group(1).decode()))
-    return {'mtime': st.st_mtime, 'size': st.st_size, 'offset': offset, 'ent': ent,
-            'title': title, 'first_human': first_human,
+    return {'v': SCAN_V, 'mtime': st.st_mtime, 'size': st.st_size, 'offset': offset,
+            'ent': ent, 'title': title, 'first_human': first_human, 'ui': ui,
             'act': sorted(act), 'hum': sorted(hum)}
 
 def is_automated(entry):
@@ -329,7 +341,14 @@ def is_automated(entry):
         return (entry.get('turns') or 0) < AGY_MIN_USER_TURNS
     ent = entry.get('ent')
     if ent in AUTOMATED_ENTRYPOINTS:
-        return True
+        # 'sdk-cli' used to mean cron only. The AI Second Brain desktop app
+        # drives Claude Code through the same SDK entrypoint, so every
+        # interactive session on macOS is stamped 'sdk-cli' too, and the old
+        # rule silently dropped all of them (0 sessions, leverage 1.0x, from
+        # 9 Aug 2026). Two signals rescue an app session: the interactive UI
+        # markers, and more than one human-typed minute. A cron run is a
+        # single injected prompt with no UI records, so it stays excluded.
+        return not (entry.get('ui') and len(entry.get('hum') or ()) >= 2)
     if ent:
         return False
     label = entry.get('label') or ''
@@ -357,8 +376,9 @@ def collect_sessions(window_start_min, cache):
             sid = f.stem
             e = sessions.setdefault(sid, {'lane': lane, 'slug': proj.name, 'ent': None,
                                           'label': None, 'act': set(), 'hum': set(),
-                                          'runtime': 'claude-code'})
+                                          'ui': False, 'runtime': 'claude-code'})
             e['ent'] = cached.get('ent') or e['ent']
+            e['ui'] = e.get('ui') or bool(cached.get('ui'))
             e['label'] = cached.get('title') or cached.get('first_human') or e['label']
             e['act'].update(cached.get('act') or [])
             e['hum'].update(cached.get('hum') or [])
@@ -970,9 +990,28 @@ def cmd_sweep(args):
         try:
             back = (datetime.now(WIB).date() - datetime.strptime(days[0], '%Y-%m-%d').date()).days
             fetched = fetch_gcal_days(back)
+            blanked = []
             for d in days:
-                state['gcal_cache'][d] = fetched.get(d, [])
+                got = fetched.get(d, [])
+                had = state['gcal_cache'].get(d) or []
+                # A day that HAD events and comes back with none is a fetch
+                # defect far more often than a cleared calendar: the API pages
+                # at 250 events, so a wide window used to return the recent
+                # days empty and this line cached the emptiness over real data
+                # (9 Aug - 3 Sep 2026). Keep what we had and say so.
+                if had and not got:
+                    blanked.append(d)
+                    continue
+                state['gcal_cache'][d] = got
             state['calendar_ok'] = True
+            state.pop('calendar_error', None)
+            if blanked:
+                state['calendar_blanked_days'] = blanked
+                print('[work-hours] WARNING: calendar returned 0 events for %d day(s) that '
+                      'had some (%s); kept the cached events. Check gcal_manager paging.'
+                      % (len(blanked), ', '.join(blanked[:5])), file=sys.stderr)
+            else:
+                state.pop('calendar_blanked_days', None)
         except Exception as ex:
             state['calendar_ok'] = False
             state['calendar_error'] = str(ex)[:200]
@@ -999,6 +1038,27 @@ def cmd_sweep(args):
                       f"+ {day['meetings_count']} meetings")
             else:
                 print(f'{d}: no activity found')
+
+    # Sanity check: transcripts exist for the window but every one of them was
+    # classified as automation. That is what the 'sdk-cli' misread looked like
+    # for three weeks, and it renders as a plausible chart (leverage 1.0x)
+    # rather than an error, so it has to be asserted rather than eyeballed.
+    counted = sum(state['days'][d].get('sessions', 0) for d in days if d in state['days'])
+    interactive = sum(1 for e in sessions.values() if not is_automated(e))
+    warn = None
+    if sessions and interactive == 0:
+        warn = ('%d session transcript(s) in the window, none counted as interactive '
+                '(every one classified as automation). Check AUTOMATED_ENTRYPOINTS / '
+                'is_automated against the entrypoint your Claude client writes.'
+                % len(sessions))
+    elif sessions and counted == 0:
+        warn = ('%d session transcript(s) and %d interactive session(s) in the window, '
+                'but 0 landed on any day.' % (len(sessions), interactive))
+    if warn:
+        state['sessions_warning'] = warn
+        print('[work-hours] WARNING: ' + warn, file=sys.stderr)
+    else:
+        state.pop('sessions_warning', None)
 
     # prune
     keep = sorted(state['days'])[-KEEP_DAYS:]

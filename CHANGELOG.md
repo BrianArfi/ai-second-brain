@@ -11,6 +11,31 @@ version, and the rule is in [`docs/VERSIONING.md`](docs/VERSIONING.md).
 
 ## Unreleased
 
+### Fixed
+
+- **The Hours tab froze for three weeks and said nothing.** Four defects, one
+  shape: every failure was silent and no watch existed on the file.
+  `dashboard/server.py` spawned the background sweep behind `flock`, a
+  Linux-only binary, and the `except Exception: pass` around it turned the
+  resulting `FileNotFoundError` on macOS into a no-op, so the tab served a
+  frozen `work_hours.json` and rendered it in the same muted grey as fresh
+  data. The same `flock` prefix broke the dashboard's manual run-job buttons on
+  macOS. `work_hours.py` counted every `sdk-cli` session as cron automation,
+  which drops every session of anyone running Claude through the desktop app or
+  the SDK (0 sessions, leverage 1.0x); an app session is now recognised by the
+  chat UI's own line types plus more than one human-typed minute. And
+  `gcal_manager.py list` never followed `nextPageToken`, so a window wider than
+  250 events came back truncated at the old end and the sweep cached the recent
+  days as "no meetings".
+- **Guards, so the next variant of this is loud.** A calendar fetch that
+  returns nothing for a day that had events keeps the cached events and warns
+  instead of blanking them. A sweep that finds session transcripts but counts
+  none of them as interactive writes `sessions_warning` into the state and
+  warns on stderr. `work_hours.json` joined the `harness_health` staleness
+  table at 6 hours, next to the four ledgers. The refresh spawn logs both its
+  attempts and its failures, and the failure reaches the Hours tab, which now
+  turns the "updated Xh ago" label into a warning past 6 hours.
+
 ### Added
 - **The `no-ai-slop` skill, which the template shipped a command for and never
   shipped.** `/no-ai-slop` pointed at `.agent/skills/no-ai-slop/SKILL.md`, and that

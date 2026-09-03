@@ -284,14 +284,26 @@ def list_events(days_back=7, days_forward=7, profile='default', as_json=False):
     # status line: stderr when emitting JSON so stdout stays parseable
     print(f"Fetching events from {time_min} to {time_max}...", file=sys.stderr if as_json else sys.stdout)
 
-    events_result = service.events().list(
-        calendarId='primary',
-        timeMin=time_min,
-        timeMax=time_max,
-        singleEvents=True,
-        orderBy='startTime'
-    ).execute()
-    events = events_result.get('items', [])
+    # The API returns 250 events per page and stops there. A wide window (a
+    # month of a busy calendar is ~400 events) therefore came back truncated
+    # at the OLD end of the range, so the most recent days looked empty and the
+    # work-hours sweep cached them as "no meetings". Follow every page.
+    events = []
+    page_token = None
+    while True:
+        events_result = service.events().list(
+            calendarId='primary',
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy='startTime',
+            maxResults=2500,
+            pageToken=page_token,
+        ).execute()
+        events.extend(events_result.get('items', []))
+        page_token = events_result.get('nextPageToken')
+        if not page_token:
+            break
 
     event_list = []
     for event in events:
