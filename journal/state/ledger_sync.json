@@ -1,0 +1,38 @@
+{
+ "last_error": null,
+ "last_render_problems": [
+  "state indexes: exit 1 "
+ ],
+ "last_sync_wib": "2026-09-03 08:26:53 WIB",
+ "ledgers": {
+  "chase_queue": {
+   "commit": "7d348fd",
+   "last_sync_epoch": 1788398813.315995,
+   "last_sync_wib": "2026-09-03 08:26:53 WIB",
+   "pushed": true,
+   "reason": "lock test A"
+  },
+  "commitments": {
+   "commit": "7d348fd",
+   "last_sync_epoch": 1788398813.315995,
+   "last_sync_wib": "2026-09-03 08:26:53 WIB",
+   "pushed": true,
+   "reason": "lock test A"
+  },
+  "decisions": {
+   "commit": "7d348fd",
+   "last_sync_epoch": 1788398813.315995,
+   "last_sync_wib": "2026-09-03 08:26:53 WIB",
+   "pushed": true,
+   "reason": "lock test A"
+  },
+  "waiting_on": {
+   "commit": "7d348fd",
+   "last_sync_epoch": 1788398813.315995,
+   "last_sync_wib": "2026-09-03 08:26:53 WIB",
+   "pushed": true,
+   "reason": "lock test A"
+  }
+ },
+ "pending_push": false
+}
