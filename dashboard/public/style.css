@@ -2023,6 +2023,9 @@ a.ticket-chip:hover { border-color: var(--border-active); color: var(--text-acce
 .hours-daynav .chip:disabled { opacity: .35; cursor: default; }
 .hours-daynav .chip { cursor: pointer; }
 .hours-updated { margin-left: auto; color: var(--text-muted); font-size: var(--fs-xs); }
+/* stale sweep: the frozen Hours tab read as normal for three weeks because the
+   age label stayed the same muted grey whether it said 2h or 25d. */
+.hours-updated.is-stale { color: var(--danger, #ef6d6d); font-weight: 600; }
 
 .hours-legend {
   display: flex; flex-wrap: wrap; gap: var(--sp-4);

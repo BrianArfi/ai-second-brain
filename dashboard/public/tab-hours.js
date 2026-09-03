@@ -125,6 +125,33 @@ window.Tabs = window.Tabs || {};
     return `<div class="hero-row">${tiles.join('')}</div>`;
   }
 
+  /* ── freshness label ─────────────────────────────────────────────
+     The sweep froze on 9 Aug 2026 and the tab kept rendering the frozen file
+     in muted grey, so nothing on screen said the numbers were three weeks old.
+     Past STALE_H the label turns into a warning that names the fix. */
+  const STALE_H = 6;
+
+  function sweepAgeH() {
+    if (!state.data || !state.data.last_sweep_wib) return null;
+    const t = new Date(state.data.last_sweep_wib).getTime();
+    if (!isFinite(t)) return null;
+    return Math.max(0, (Date.now() - t) / 3600000);
+  }
+
+  function updatedLabel() {
+    const err = state.data && state.data.refresh_error;
+    const age = sweepAgeH();
+    if (age === null) return '<span class="hours-updated is-stale">never swept</span>';
+    const txt = `updated ${U.fmtAge(age)} ago`;
+    if (err) {
+      return `<span class="hours-updated is-stale" title="${U.esc(String(err))}">${U.esc(txt)} · auto-refresh failing</span>`;
+    }
+    if (age > STALE_H) {
+      return `<span class="hours-updated is-stale" title="python3 .agent/skills/work-hours/scripts/work_hours.py sweep --backfill 14">${U.esc(txt)} · stale, run a sweep</span>`;
+    }
+    return `<span class="hours-updated">${U.esc(txt)}</span>`;
+  }
+
   /* ── day selector chips ──────────────────────────────────────── */
   function dayChips(sel) {
     const days = sortedDays();
@@ -133,16 +160,14 @@ window.Tabs = window.Tabs || {};
     const prev = i > 0 ? days[i - 1] : null;
     const next = i < days.length - 1 ? days[i + 1] : null;
     const latest = days[days.length - 1];
-    const upd = state.data.last_sweep_wib
-      ? `updated ${U.fmtAge(Math.max(0, (Date.now() - new Date(state.data.last_sweep_wib).getTime()) / 3600000))} ago`
-      : '';
+    const upd = updatedLabel();
     return `<div class="chips hours-daynav">
       <button class="chip hours-nav-btn" data-goto="${prev ? U.esc(prev) : ''}" ${prev ? '' : 'disabled'}>‹</button>
       <span class="chip is-active">${U.esc(niceDate(sel, d && d.weekday))}</span>
       <button class="chip hours-nav-btn" data-goto="${next ? U.esc(next) : ''}" ${next ? '' : 'disabled'}>›</button>
       ${sel !== latest ? `<button class="chip hours-nav-btn" data-goto="${U.esc(latest)}">today</button>` : ''}
       <button class="chip hours-nav-btn" data-nav="hours/week/${U.esc(mondayOf(sel))}">📅 week view</button>
-      <span class="hours-updated">${U.esc(upd)}</span>
+      ${upd}
     </div>`;
   }
 
@@ -152,16 +177,14 @@ window.Tabs = window.Tabs || {};
     const prev = i > 0 ? mondays[i - 1] : null;
     const next = i < mondays.length - 1 ? mondays[i + 1] : null;
     const latest = mondays[mondays.length - 1];
-    const upd = state.data.last_sweep_wib
-      ? `updated ${U.fmtAge(Math.max(0, (Date.now() - new Date(state.data.last_sweep_wib).getTime()) / 3600000))} ago`
-      : '';
+    const upd = updatedLabel();
     return `<div class="chips hours-daynav">
       <button class="chip hours-nav-btn" data-nav="${prev ? `hours/week/${U.esc(prev)}` : ''}" ${prev ? '' : 'disabled'}>‹</button>
       <span class="chip is-active">Week of ${U.esc(weekLabel(sel))}</span>
       <button class="chip hours-nav-btn" data-nav="${next ? `hours/week/${U.esc(next)}` : ''}" ${next ? '' : 'disabled'}>›</button>
       ${sel !== latest ? `<button class="chip hours-nav-btn" data-nav="hours/week/${U.esc(latest)}">this week</button>` : ''}
       <button class="chip hours-nav-btn" data-nav="hours">📆 day view</button>
-      <span class="hours-updated">${U.esc(upd)}</span>
+      ${upd}
     </div>`;
   }
 

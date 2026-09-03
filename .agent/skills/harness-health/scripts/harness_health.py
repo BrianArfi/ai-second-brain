@@ -182,6 +182,12 @@ STALENESS_TABLE = [
      'max_age_hours': 48, 'ts_field': 'updated_wib', 'ts_kind': 'iso'},
     {'name': 'decisions', 'path': 'journal/state/decisions.json',
      'max_age_hours': None, 'ts_field': None, 'ts_kind': None},   # exempt
+    # The Hours tab froze on 9 Aug 2026 and nobody noticed until 3 Sep, because
+    # this file was the only dashboard state with no age watch: the four ledgers
+    # above are watched, work_hours.json was not. 6h covers a normal working day
+    # with the tab open (it self-refreshes hourly) without firing overnight.
+    {'name': 'work_hours', 'path': 'journal/state/work_hours.json',
+     'max_age_hours': 6, 'ts_field': 'last_sweep_wib', 'ts_kind': 'iso'},
 ]
 
 # ------------------------------------------------------------------ state --

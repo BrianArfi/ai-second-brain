@@ -10,6 +10,7 @@ import os
 import re
 import secrets
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1599,6 +1600,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._maybe_refresh_work_hours()
             data = json.loads(WORK_HOURS_PATH.read_text(encoding='utf-8'))
             data.pop('gcal_cache', None)
+            if DashboardHandler._wh_refresh_error:
+                data['refresh_error'] = DashboardHandler._wh_refresh_error
             self._send_json(200, json.dumps(data, ensure_ascii=False))
         except FileNotFoundError:
             self._send_json(404, json.dumps({
@@ -1623,14 +1626,36 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 return
             DashboardHandler._wh_spawned_at = now
             log_path = BASE_DIR / '.agent' / 'skills' / 'work-hours' / 'work_hours_cron.log'
+            argv = [sys.executable, '.agent/skills/work-hours/scripts/work_hours.py',
+                    'sweep', '--backfill', '2', '--quiet']
+            # flock is a util-linux binary and does NOT exist on macOS: prefixing
+            # it there made Popen raise FileNotFoundError, which the except below
+            # swallowed, so the tab served a file frozen on 9 Aug 2026 and said
+            # nothing. The in-process 120s debounce above is the lock on macOS.
+            if shutil.which('flock'):
+                argv = ['flock', '-n', '/tmp/work_hours.lock'] + argv
             with open(log_path, 'ab') as log:
-                subprocess.Popen(
-                    ['flock', '-n', '/tmp/work_hours.lock', sys.executable,
-                     '.agent/skills/work-hours/scripts/work_hours.py',
-                     'sweep', '--backfill', '2', '--quiet'],
-                    cwd=str(BASE_DIR), stdout=log, stderr=log, start_new_session=True)
-        except Exception:
-            pass  # refresh is best-effort; serving the stale file is still correct
+                log.write(('[%s] spawn %s\n' % (
+                    datetime.now().isoformat(timespec='seconds'), ' '.join(argv[:4])
+                )).encode())
+                subprocess.Popen(argv, cwd=str(BASE_DIR), stdout=log, stderr=log,
+                                 start_new_session=True)
+        except Exception as ex:
+            # Best-effort still means SAYING SO. A silent `pass` here hid a
+            # missing `flock` binary for three weeks and the tab kept serving a
+            # frozen file that looked fine. Record it where both the log and the
+            # API can show it.
+            msg = '%s: %s' % (type(ex).__name__, ex)
+            DashboardHandler._wh_refresh_error = msg
+            try:
+                with open(BASE_DIR / '.agent' / 'skills' / 'work-hours'
+                          / 'work_hours_cron.log', 'ab') as log:
+                    log.write(('[%s] refresh spawn FAILED: %s\n' % (
+                        datetime.now().isoformat(timespec='seconds'), msg)).encode())
+            except Exception:
+                pass
+        else:
+            DashboardHandler._wh_refresh_error = None
 
     def do_POST(self):
         if not self._check_client_ip():
@@ -2574,7 +2599,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     'error': f'unknown job {job!r}', 'allowed': sorted(JOB_RUN_MAP.keys()),
                 }))
                 return
-            cmd = ['flock', '-n', '-E', str(LOCK_CONFLICT_CODE), entry['lock']] + entry['argv']
+            cmd = list(entry['argv'])
+            # macOS ships no flock, so the prefix turned every manual run into a
+            # FileNotFoundError instead of running the job. Cron only runs on the
+            # Linux/WSL host, where flock exists and the race it guards is real.
+            if shutil.which('flock'):
+                cmd = ['flock', '-n', '-E', str(LOCK_CONFLICT_CODE), entry['lock']] + cmd
             t0 = time.time()
             timed_out = False
             try:
