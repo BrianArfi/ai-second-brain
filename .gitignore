@@ -42,3 +42,14 @@ journal/todo_*.md
 # Editor
 .vscode/
 .idea/
+
+# Atomic-write scratch files. Every writer under journal/state/ writes `x.tmp`
+# then os.replace()s it into place, so a .tmp file exists for microseconds and is
+# never content anyone wants committed. Un-ignored, a sync that ran while one of
+# them was in flight died with "git add failed: unable to stat ... .tmp" and left
+# the whole turn's ledger change uncommitted.
+*.tmp
+
+# Runtime lock files. Process-local, meaningless in another checkout, and a
+# committed one makes flock behave unpredictably for whoever clones it.
+journal/state/.locks/

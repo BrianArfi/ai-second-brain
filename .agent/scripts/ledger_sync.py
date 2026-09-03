@@ -54,6 +54,7 @@ Safety
 
 import argparse
 import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -66,6 +67,8 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 STATE_DIR = os.path.join(BASE_DIR, 'journal', 'state')
 HEARTBEAT = os.path.join(STATE_DIR, 'ledger_sync.json')
 FETCH_STAMP = os.path.join(STATE_DIR, '.locks', 'ledger_fetch.stamp')
+BG_LOCK = os.path.join(STATE_DIR, '.locks', 'ledger_bg_sync.lock')
+BG_LOG = os.path.join(STATE_DIR, '.locks', 'ledger_bg_sync.log')
 
 WIB = timezone(timedelta(hours=7))
 GIT_LOCAL_TIMEOUT = 20
@@ -998,10 +1001,128 @@ def cmd_status(args):
         print('  pending push: yes')
     return 0
 
+# --------------------------------------------------------------------------
+# background sync: take the sync off the turn's critical path
+# --------------------------------------------------------------------------
+#
+# A sync is propagation, and nothing in the turn that triggered it reads the
+# result. Run in the foreground from the Stop hook it cost 6.7 seconds of wall
+# clock on every single turn on an idle machine, and far more on a slow link or
+# a loaded one: roughly half in the renderers (`render_followup_tracker.py`
+# shells out to three ledger CLIs) and half in `git fetch` plus `push`. The
+# person who triggered the turn waited for all of it before they could read the
+# reply, for work whose result they never see.
+#
+# So the Stop hook now detaches it. Correctness is unchanged, because every
+# guarantee this module makes is enforced inside the child: the ledger locks,
+# the deletion guard, the rebase-and-retry push. The only thing given up is
+# seeing the result inside the same turn, and `bg_last_result()` hands the
+# previous run's outcome to the next turn so a failure still surfaces.
+#
+# One sync at a time. Two detached children would race on the index and on the
+# push, so the child takes an exclusive non-blocking lock and a second one exits
+# rather than queueing. Whatever it would have committed is still dirty in the
+# tree, so the next turn's sync picks it up.
+
+def _bg_child():
+    return os.environ.get('LEDGER_SYNC_BG_CHILD') == '1'
+
+
+@contextlib.contextmanager
+def bg_lock():
+    """Exclusive, non-blocking. Yields False when another sync already holds it."""
+    try:
+        os.makedirs(os.path.dirname(BG_LOCK), exist_ok=True)
+        fh = open(BG_LOCK, 'w')
+    except OSError:
+        yield True          # cannot lock: better to sync than to skip silently
+        return
+    try:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+            except OSError:
+                pass
+    finally:
+        fh.close()
+
+
+def bg_last_result():
+    """The last detached sync's final line, so the next turn can see a failure."""
+    try:
+        with open(BG_LOG, encoding='utf-8') as fh:
+            lines = [ln.strip() for ln in fh if ln.strip()]
+        return lines[-1] if lines else None
+    except OSError:
+        return None
+
+
+def spawn_background_sync(ledger, reason):
+    """Re-exec this script detached and return immediately.
+
+    `start_new_session=True` is what makes it outlive the hook: without its own
+    session the child is in the hook's process group and dies with it, which
+    would turn every sync into a half-written one.
+    """
+    env = dict(os.environ, LEDGER_SYNC_BG_CHILD='1')
+    cmd = [sys.executable, os.path.abspath(__file__), 'sync',
+           '--ledger', ledger, '--reason', reason]
+    try:
+        os.makedirs(os.path.dirname(BG_LOG), exist_ok=True)
+        log = open(BG_LOG, 'w')
+    except OSError:
+        log = subprocess.DEVNULL
+    try:
+        subprocess.Popen(cmd, cwd=BASE_DIR, env=env, stdin=subprocess.DEVNULL,
+                         stdout=log, stderr=subprocess.STDOUT,
+                         start_new_session=True)
+        return True
+    except OSError:
+        return False
+    finally:
+        if log is not subprocess.DEVNULL:
+            try:
+                log.close()
+            except OSError:
+                pass
+
+
 def cmd_sync(args):
     if disabled():
         print('[ledger_sync] skipped: LEDGER_SYNC_DISABLE=1')
         return 0
+
+    # Asked to detach, and not already the detached child: hand off and return.
+    if getattr(args, 'background', False) and not _bg_child():
+        previous = bg_last_result()
+        if spawn_background_sync(args.ledger, args.reason):
+            print('[ledger_sync] syncing in the background')
+        else:
+            res = _do_sync(args.ledger, args.reason, verbose=False,
+                           do_push=not args.no_push)
+            print(format_result(args.ledger, args.reason, res))
+            return 1 if res.get('error') else 0
+        if previous and ('error' in previous or 'failed' in previous):
+            print(f'[ledger_sync] previous background sync: {previous}')
+        return 0
+
+    if _bg_child():
+        with bg_lock() as got:
+            if not got:
+                print('[ledger_sync] another sync is already running; skipped')
+                return 0
+            res = _do_sync(args.ledger, args.reason, verbose=False,
+                           do_push=not args.no_push)
+            print(format_result(args.ledger, args.reason, res))
+            return 1 if res.get('error') else 0
+
     res = _do_sync(args.ledger, args.reason, verbose=False,
                    do_push=not args.no_push)
     print(format_result(args.ledger, args.reason, res))
@@ -1016,6 +1137,8 @@ def main():
                     choices=list(LEDGERS) + ['all'])
     sp.add_argument('--reason', default='', help='one line: what changed')
     sp.add_argument('--no-push', action='store_true')
+    sp.add_argument('--background', action='store_true',
+                    help='detach and sync in a separate process; returns at once')
 
     cp = sub.add_parser('check', help='report drift, change nothing')
     cp.add_argument('--no-fetch', action='store_true')
