@@ -72,10 +72,32 @@ def main():
     if not gitdir.is_absolute():
         gitdir = repo / gitdir
     if (gitdir / "rebase-merge").is_dir() or (gitdir / "rebase-apply").is_dir() or (gitdir / "MERGE_HEAD").is_file():
-        emit(
-            "⚠ A rebase/merge is in progress — auto-sync skipped. Resolve it first.",
-            "Git sync: rebase/merge in progress, not synced",
-        )
+        # A rebase state dir older than 5 minutes belongs to a process that is
+        # gone (2 Sep 2026: a hook was killed mid `rebase --autostash` and every
+        # sync for the next hour declined with "not on main"). Abort it and
+        # carry on; a LIVE rebase is younger than that and still gets the skip.
+        import time as _time
+        stale = False
+        for d in (gitdir / "rebase-merge", gitdir / "rebase-apply"):
+            try:
+                if d.is_dir() and _time.time() - d.stat().st_mtime > 300:
+                    stale = True
+            except OSError:
+                pass
+        if stale and not (gitdir / "MERGE_HEAD").is_file():
+            rc, _, _ = run_git(["rebase", "--abort"], repo, timeout=15)
+            if rc == 0:
+                print("Cleared a stuck rebase left by an earlier run; continuing sync.")
+            else:
+                emit(
+                    "⚠ A stuck rebase could not be aborted — auto-sync skipped. Run: git rebase --abort",
+                    "Git sync: stuck rebase, not synced",
+                )
+        else:
+            emit(
+                "⚠ A rebase/merge is in progress — auto-sync skipped. Resolve it first.",
+                "Git sync: rebase/merge in progress, not synced",
+            )
 
     rc, _, _ = run_git(["fetch", "origin", "main", "--quiet"], repo, timeout=20)
     if rc is None or rc != 0:

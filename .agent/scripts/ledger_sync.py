@@ -483,6 +483,74 @@ def rebase_in_progress():
             return True
     return False
 
+
+# A rebase state dir older than this is abandoned, not live. A live rebase run
+# by this module finishes or aborts within its git timeouts (30s); five minutes
+# is two orders of magnitude past that.
+STUCK_REBASE_MAX_AGE = 300.0
+
+
+def recover_stuck_rebase(max_age=STUCK_REBASE_MAX_AGE):
+    """Abort a rebase that some earlier, killed process left behind.
+
+    On 2 Sep 2026 a `rebase --autostash` was killed mid-flight (its parent hook
+    hit the harness timeout), leaving `.git/rebase-merge` behind and HEAD
+    detached at origin/main. For the next hour every sync path declined to act:
+    `commit_and_push` said "not on main; left uncommitted" and
+    `refresh_before_read` bailed on `not on_main()` -- and the one function that
+    knows how to clear a stuck rebase (`_rebase_onto_origin_locked`) sits BEHIND
+    those bail-outs, so nothing ever reached it. Ledger writes piled up
+    uncommitted until an unrelated `cmd_refresh` happened to run.
+
+    Aborting is safe here: whatever the dead rebase was replaying still exists
+    on origin (it had just been fetched) and in this repo's reflog, and abort
+    restores the pre-rebase branch and autostash. The age check keeps this from
+    shooting down a rebase another process is actively running; the ledger lock
+    covers the ones this module runs itself.
+
+    Returns True when a stuck rebase was found and cleared.
+    """
+    stale = False
+    now = time.time()
+    for marker in ('rebase-merge', 'rebase-apply'):
+        path = os.path.join(BASE_DIR, '.git', marker)
+        try:
+            if os.path.isdir(path) and (now - os.path.getmtime(path)) > max_age:
+                stale = True
+        except OSError:
+            pass
+    if not stale:
+        return False
+    with all_ledger_locks(timeout=5.0) as got:
+        if not got:
+            return False          # someone is mid-write; let them deal with it
+        if not rebase_in_progress():
+            return False          # cleared while we waited for the lock
+        rc, _, err = git(['rebase', '--abort'], timeout=GIT_LOCAL_TIMEOUT)
+        if rc == 0:
+            sys.stderr.write('[ledger_sync] aborted a stuck rebase left by an '
+                             'earlier run; back on the branch.\n')
+            return True
+        # A rebase dir with no head-name is not a rebase git can abort (the
+        # process died before writing its state); git's own hint for this is to
+        # remove the directory. Only that truncated case is removed by hand.
+        cleared = False
+        for marker in ('rebase-merge', 'rebase-apply'):
+            path = os.path.join(BASE_DIR, '.git', marker)
+            if (os.path.isdir(path)
+                    and not os.path.exists(os.path.join(path, 'head-name'))):
+                import shutil
+                shutil.rmtree(path, ignore_errors=True)
+                cleared = True
+        if cleared and not rebase_in_progress():
+            sys.stderr.write('[ledger_sync] removed a truncated rebase state '
+                             'dir left by a killed process.\n')
+            return True
+        sys.stderr.write(f'[ledger_sync] found a stuck rebase but could not '
+                         f'abort it: {(err or "")[:120]}\n')
+        return False
+
+
 def resolve_regenerated_conflicts():
     """Take upstream's side of the two files this script rewrites anyway.
 
@@ -604,8 +672,12 @@ def commit_and_push(reason, do_push=True):
         return result
 
     if not on_main():
-        result['note'] = 'not on main; left uncommitted'
-        return result
+        # A dead rebase leaves HEAD detached; clear it rather than skipping
+        # every sync until a human notices (2 Sep 2026: one hour of
+        # "not on main; left uncommitted" from a rebase whose process was gone).
+        if not (recover_stuck_rebase() and on_main()):
+            result['note'] = 'not on main; left uncommitted'
+            return result
 
     if not dirty_sync_paths():
         result['note'] = 'nothing to commit'
@@ -758,6 +830,8 @@ def refresh_before_read(ledger):
     if disabled() or offline() or ledger not in LEDGERS:
         return
     try:
+        if not on_main() and recover_stuck_rebase():
+            pass                  # cleared a dead rebase; re-check below
         if not on_main() or dirty_sync_paths():
             # Uncommitted ledger changes mean a rebase could conflict. Leave it
             # alone: this run's own sync will deal with it on the way out.
