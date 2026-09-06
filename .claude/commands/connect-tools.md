@@ -13,7 +13,7 @@ themselves, and nothing leaves this machine without them doing it.
 
 2. **Explain what each one unlocks, then let the user pick.** For any tool
    not yet connected:
-   - **Gmail**: `/inbox-sweep` can find emails that need a reply and pull
+   - **Gmail**: `/sweep` can find emails that need a reply and pull
      them into `inbox/` as notes.
    - **Google Calendar**: `/meeting-prep` can look up a meeting by name and
      time on its own instead of being told the details by hand.
@@ -57,7 +57,7 @@ themselves, and nothing leaves this machine without them doing it.
    troubleshoot rather than leaving it half-set-up.
 
 6. **Close the loop.** Once at least one tool is connected, mention that
-   `/inbox-sweep`, `/follow-ups`, and `/meeting-prep` will now use it
+   `/sweep`, `/follow-ups`, and `/meeting-prep` will now use it
    automatically, and that `/connect-tools` can be run again any time to
    add more.
 
