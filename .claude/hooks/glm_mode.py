@@ -2,7 +2,7 @@
 """SessionStart hook: surface the offload-mode toggle so the Router knows whether to
 offload heavy generation/research/draft to agy-bridge (flat-rate subscription, zero Claude
 quota). Backend is Gemini via the agy CLI since z.ai/GLM was retired 2026-07-27; the flag
-file and /glm command keep their historical names.
+file keeps its historical name.
 
 Cross-platform replacement for glm_mode.sh.
 
@@ -39,10 +39,10 @@ def main():
         print("(python3 .agent/skills/agy-bridge/run.py --task draft|research|harvest ...). Claude")
         print("orchestrates + reviews + applies; do NOT burn Claude tokens on bulk generation.")
         print("Backend: Gemini via agy. z.ai/GLM retired 2026-07-27, do not pin --backend zai.")
-        print("Toggle off with: /glm off")
+        print("Turn it off by asking: offload off")
     else:
         print("=== OFFLOAD MODE: OFF (normal routing) ===")
-        print("Default harness routing. Turn on with /glm on to offload heavy work to Gemini via agy-bridge.")
+        print('Default harness routing. Ask "offload on" to route heavy work to Gemini via agy-bridge.')
 
     sys.exit(0)
 

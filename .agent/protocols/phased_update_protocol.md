@@ -37,13 +37,13 @@ The agent MUST NOT perform all steps in a single turn. Instead, proceed step-by-
 
 ## 🌅 Mode-Specific Guidance
 
-### Morning Mode (`/morning-update`)
+### Morning Mode (`/daily-update morning`)
 - **Step 1 (Context Harvest)**: Fast harvest only -- Calendar, Jira, Slack (all channels, 5 messages per channel), **email sweep (gmail-connector, mandatory)**, and current todo.md state. Skip Fathom, Document Indexer, and file scans.
 - **Step 2 (Summarize)**: Brief overnight activity summary. Keep concise.
 - **Step 3 (Prioritize)**: This is the CORE output. Propose exactly 5 concrete priorities for the day, ranked by strategic weight (P0 first). Write them to `_temp/daily_plan_[date].md` for evening cross-check.
 - **Step 4 (Plan & Execute)**: Update Dashboard.md with the `(Pagi)` section only. Do NOT update todo.md completion status in morning mode.
 
-### Evening Mode (`/evening-update`)
+### Evening Mode (`/daily-update evening`)
 - **Step 1 (Context Harvest)**: Full harvest -- all Slack channels (10 messages per channel), **email sweep (gmail-connector, mandatory)**, Fathom sync, file change scan, Document Indexer, and GitHub sync.
 - **Step 2 (Summarize)**: This is the CORE output. Compare today's accomplishments against the morning plan from `_temp/daily_plan_[date].md`. Report what was completed, what was missed, and what carries over.
 - **Step 3 (Prioritize)**: Identify carryover items and flag any that need escalation. Enforce Anti-Recency Guardrail.

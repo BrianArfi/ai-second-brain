@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import re
 import signal
 import sys
 import urllib.request
@@ -104,13 +105,97 @@ def get_meeting(token, meeting_id, action="get"):
             return make_fathom_request(endpoint, token)
         return res
 
+# --------------------------------------------------------------- share links --
+# A fathom.video/calls/<id> URL is the INTERNAL one. It needs a Fathom account and
+# a manual approval from the recording owner, which is how Teammate Meer sat blocked
+# on the OTO fulfillment demo for a day on 1 Sep 2026 while the owner was asked for
+# access in a Slack thread. Every meeting the API returns already carries a
+# share_url, a public link that opens with no account and no approval. So the fix
+# is to look the share link up before the call URL ever leaves the machine.
+#
+# There is no per-recording endpoint (both /meetings/<id> and /recordings/<id>
+# return 404), so the lookup pages /meetings until it matches. Results are cached
+# so the send guard can resolve a link with no network call at all.
+
+SHARE_CACHE = os.path.join(
+    os.path.dirname(__file__), "..", "..", "..", "..",
+    "journal", "state", "fathom_share_links.json")
+
+def load_share_cache():
+    try:
+        with open(os.path.abspath(SHARE_CACHE)) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_share_cache(cache):
+    path = os.path.abspath(SHARE_CACHE)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(cache, f, indent=1, sort_keys=True)
+        os.replace(tmp, path)
+    except OSError as e:
+        print(f"[WARN] could not write share cache: {e}", file=sys.stderr)
+
+def normalize_ident(ident):
+    """A call URL, a call id or a recording id, all reduced to the digits."""
+    m = re.search(r"(?:calls|share)/([A-Za-z0-9_-]+)", str(ident))
+    if m:
+        return m.group(1)
+    return str(ident).strip()
+
+def share_link(token, ident, max_pages=20, page_size=50, refresh=False):
+    """(share_url, meeting) for a call id, recording id or fathom.video URL."""
+    key = normalize_ident(ident)
+    cache = load_share_cache()
+    if not refresh and key in cache and cache[key].get("share_url"):
+        hit = dict(cache[key])
+        hit["from_cache"] = True
+        return hit["share_url"], hit
+
+    cursor = None
+    for _ in range(max_pages):
+        params = {"limit": page_size}
+        if cursor:
+            params["cursor"] = cursor
+        res = make_fathom_request("/meetings", token, params=params)
+        if "error" in res:
+            return None, {"error": res}
+        for m in res.get("items", []):
+            call_id = normalize_ident(m.get("url") or "")
+            rec_id = str(m.get("recording_id") or "")
+            if key not in (call_id, rec_id):
+                continue
+            entry = {
+                "share_url": m.get("share_url"),
+                "call_url": m.get("url"),
+                "recording_id": m.get("recording_id"),
+                "title": m.get("meeting_title") or m.get("title"),
+                "recorded_at": m.get("recording_start_time"),
+            }
+            for k in (call_id, rec_id):        # findable by either id
+                if k:
+                    cache[k] = entry
+            save_share_cache(cache)
+            return entry["share_url"], entry
+        cursor = res.get("next_cursor")
+        if not cursor:
+            break
+    return None, {"error": "not_found",
+                  "message": f"no meeting matched {ident} in the last "
+                             f"{max_pages * page_size} recordings"}
+
 def main():
     parser = argparse.ArgumentParser(description="Fathom API Connector")
-    parser.add_argument("--action", required=True, choices=["list", "get", "transcript"], help="Action to perform")
+    parser.add_argument("--action", required=True, choices=["list", "get", "transcript", "share-link"], help="Action to perform")
     parser.add_argument("--id", help="Meeting ID for 'get' or 'transcript' action")
     parser.add_argument("--limit", type=int, default=20, help="Limit for listing meetings")
     parser.add_argument("--after", help="Filter meetings created after (ISO 8601)")
     parser.add_argument("--full", action="store_true", help="Include transcript/summary/action items in list")
+    parser.add_argument("--refresh", action="store_true", help="share-link: ignore the cache and re-query Fathom")
+    parser.add_argument("--max-pages", type=int, default=20, help="share-link: how far back to page (50 recordings per page)")
     
     args = parser.parse_args()
     
@@ -122,6 +207,17 @@ def main():
     if args.action == "list":
         meetings = list_meetings(token, args.limit, args.after, include_all=args.full)
         print(json.dumps(meetings, indent=2))
+    elif args.action == "share-link":
+        if not args.id:
+            print("Error: --id is required for share-link (call id, recording id, or a fathom.video URL).", file=sys.stderr)
+            sys.exit(1)
+        url, meta = share_link(token, args.id, max_pages=args.max_pages, refresh=args.refresh)
+        if not url:
+            print(json.dumps(meta, indent=2), file=sys.stderr)
+            sys.exit(1)
+        src = "cache" if meta.get("from_cache") else "api"
+        print(f"[{src}] {meta.get('title')} ({meta.get('recorded_at')})", file=sys.stderr)
+        print(url)
     elif args.action in ["get", "transcript"]:
         if not args.id:
             print("Error: --id is required for get/transcript action.", file=sys.stderr)

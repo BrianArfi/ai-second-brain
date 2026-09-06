@@ -1,5 +1,5 @@
 ---
-description: Connect Gmail, Calendar, Slack, or Jira so sweeps can see them
+description: Setup - Connect Gmail, Calendar, Slack, or Jira so sweeps can see them
 ---
 
 Walk the user through connecting their work tools, one at a time, so this

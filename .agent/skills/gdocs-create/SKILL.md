@@ -14,7 +14,9 @@ Supports `work` (you@yourcompany.com) and `personal` (you@example.com) accounts.
 
 ---
 
-## Formatting pass (required for docs with tables)
+## Formatting pass (automatic since 2 Sep 2026)
+
+`create-doc` runs it for you, and so does any `gdrive_manager.py` upload/update with `--convert` that produces a Doc. You only run it by hand on a doc created before this, or after a surgical edit that changed how much text sits in a table. Skip it on one call with `--no-format-pass` (gdocs-create) or `GDOC_FORMAT_PASS_DISABLE=1` (the Drive connectors).
 
 `create-doc`/`update --convert` create PAGES/letter docs, leave tables at the legacy ~468pt total (cramped), and pass literal `--`/`->` straight through. `format_pass.py` switches the doc to **pageless**, widens columns to fill the width, AND lint-fails if any literal `--`/`->` survived (those are AI tells — rephrase the source per feedback_no_emdash_rephrase, never leave dashes):
 

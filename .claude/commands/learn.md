@@ -1,5 +1,5 @@
 ---
-description: Extract durable lessons from this session into harness memory - the owner confirms before anything is saved
+description: Harness - Extract durable lessons from this session into harness memory - the owner confirms before anything is saved
 argument-hint: "[optional: the specific lesson, or 'promote' to graduate a recurring memory into CLAUDE.md]"
 ---
 

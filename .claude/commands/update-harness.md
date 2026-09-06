@@ -1,5 +1,5 @@
 ---
-description: Pull the latest AI Second Brain template updates from upstream into this fork - merge, resolve, and surface any new setup steps
+description: Setup - Pull the latest AI Second Brain template updates from upstream into this fork - merge, resolve, and surface any new setup steps
 ---
 
 Update this harness from the upstream template repo. Do each phase in order and report what changed at the end.

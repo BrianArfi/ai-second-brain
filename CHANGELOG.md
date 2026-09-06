@@ -11,6 +11,68 @@ version, and the rule is in [`docs/VERSIONING.md`](docs/VERSIONING.md).
 
 ## Unreleased
 
+### Seven new commands, six retired, and the list says what each group is for
+
+The command set had grown to 32 with flat descriptions, which reads as one long
+alphabetical list. Every description now leads with a group, so the picker reads
+in blocks: Daily, Weekly, Product, Artifact, Comms, Notes, Tracking, Thinking,
+Setup, Harness.
+
+Seven commands are new, wrapping skills that already shipped with nothing in
+front of them. `/user-story` turns a feature into stories and holds the line that
+every `Then` has to be objectively measurable, because "the user sees a friendly
+message" cannot be tested and will be argued about. `/ticket` drafts a tracker
+issue, resolves its work-tree node first, and waits for explicit approval before
+filing. `/rca` runs the incident protocol under one rule: no root cause, no
+"resolved". On the artifact side, `/artifact` builds a self-contained HTML
+explainer or report, `/mockup` a clickable prototype with presenter keys, `/deck`
+a keyboard-driven slide deck, and `/diagram` a Mermaid diagram validated by an
+actual render before anyone sees it. The three HTML commands end with the same
+self-containment grep, because a page that pulls in a font or an image stops
+working the moment it is sent to someone.
+
+Six commands were retired, and none of their procedures were deleted. Each moved
+to a permanent home first and every reference was repointed: the Slack send
+playbook to `.agent/protocols/slack_send.md`, the offload-mode toggle to
+`.agent/skills/agy-bridge/OFFLOAD_MODE.md`, and the morning and evening updates
+into a now self-contained `/daily-update`, which takes `morning` or `evening` to
+force a mode. `/sync-fathom` and `/no-ai-slop` were pure wrappers over SOPs that
+already lived in `.agent/`.
+
+Two wirings would have broken silently and were repointed in the same pass:
+`journal/state/routines.json` scheduled `/morning-update` and `/evening-update`
+as daily routines, and the SessionStart hook printed `/glm on` as the way to
+toggle offload mode.
+
+### Fixed
+
+- **A public sync could delete the public template's own onboarding.**
+  `sync.py` copies `.claude/commands/` with an `rmtree` first, so a command
+  retired from the private repo vanishes from the public one on the next run.
+  That is right for a real restructuring and wrong for the generic starter
+  commands, which the private repo drops because it has richer replacements
+  while a fresh fork has nothing. `/setup` and `/update-harness` would both have
+  gone, and `README.md` names `/update-harness` in its own text.
+  `PRESERVE_PUBLIC_COMMANDS` now restores those ten from the public repo's git
+  HEAD after the tree copy.
+
+- **A synced command could point at a skill that deliberately does not ship.**
+  Scrubbing renames client strings; it cannot remove a whole section, so the
+  public `/artifact` would have told a reader to publish through `artifact-host`,
+  which is excluded. `PUBLIC_OVERRIDES` copies a public-specific version from
+  `.agent/skills/sync-public/public_overrides/` after the tree copy. Two related
+  gaps closed the same way round: `reply-router` and `linear-connector` now ship,
+  because `/autodraft` and `/ticket` named them and they were absent, with
+  `linear-connector/teams.json` held back for its real workspace and team ids.
+
+- **The leak audit caught a home path with the real username in it, on a file
+  type nothing blocked.** `meeting-recorder/logs/watcher.err` synced because
+  `*.log` was a blocked pattern and `*.err` was not. The audit refused the push,
+  which is the guard working, but the file had already been written into the
+  public tree. Log directories are now blocked by directory name as well as by
+  suffix, so the next runtime file does not have to be discovered by the audit
+  first.
+
 ### Fixed
 
 - **The Hours tab froze for three weeks and said nothing.** Four defects, one
@@ -21,12 +83,12 @@ version, and the rule is in [`docs/VERSIONING.md`](docs/VERSIONING.md).
   frozen `work_hours.json` and rendered it in the same muted grey as fresh
   data. The same `flock` prefix broke the dashboard's manual run-job buttons on
   macOS. `work_hours.py` counted every `sdk-cli` session as cron automation,
-  which drops every session of anyone running Claude through the desktop app or
-  the SDK (0 sessions, leverage 1.0x); an app session is now recognised by the
-  chat UI's own line types plus more than one human-typed minute. And
-  `gcal_manager.py list` never followed `nextPageToken`, so a window wider than
-  250 events came back truncated at the old end and the sweep cached the recent
-  days as "no meetings".
+  which drops every session run through the desktop app or the SDK (0 sessions,
+  leverage 1.0x); an app session is now recognised by the chat UI's own line
+  types plus more than one human-typed minute. And `gcal_manager.py list` never
+  followed `nextPageToken`, so a window wider than 250 events came back
+  truncated at the old end and the sweep cached the recent days as "no
+  meetings". Data from 10 Aug to 3 Sep 2026 was rebuilt by backfill.
 - **Guards, so the next variant of this is loud.** A calendar fetch that
   returns nothing for a day that had events keeps the cached events and warns
   instead of blanking them. A sweep that finds session transcripts but counts
@@ -35,38 +97,6 @@ version, and the rule is in [`docs/VERSIONING.md`](docs/VERSIONING.md).
   table at 6 hours, next to the four ledgers. The refresh spawn logs both its
   attempts and its failures, and the failure reaches the Hours tab, which now
   turns the "updated Xh ago" label into a warning past 6 hours.
-
-### Added
-- **The `no-ai-slop` skill, which the template shipped a command for and never
-  shipped.** `/no-ai-slop` pointed at `.agent/skills/no-ai-slop/SKILL.md`, and that
-  folder did not exist here, so the command was dead in every clone. The skill is
-  now in the template with its eval and its Simplified Technical English rules.
-- **`answer_budget.md`, a new gate that runs before every wording rule.** The
-  wordlists fix how a sentence reads. They cannot say whether the paragraph should
-  exist, and the loudest AI tell is explanation nobody asked for: reasoning shown to
-  a reader who wanted the answer, process narration, closing recaps. The budget
-  answers first and stops, with a word ceiling per channel that triggers a cut
-  rather than a justification. It covers replies to the owner as well as outbound
-  drafts, because the owner is a named human too.
-- **A real Quality Gates block in `CLAUDE.md.template`.** It was four checklist
-  ticks, one of which asked for no em-dash and used one in the asking. It is now the
-  four gates in order: budget, slop, STE, review, with what the machine checks and
-  what it cannot. A command runs when somebody types it. A standing instruction runs
-  every time.
-- **`packs/voice`**, so a workspace that was set up before this can take the whole
-  gate with `python3 tools/pack.py install packs/voice` instead of forking.
-- **`tools/test_voice_pack.py`**, which fails when the pack copies drift from the
-  workspace files they ship.
-
-### Changed
-- **`send_slop_guard.py` reads more than Slack.** It now covers
-  `gmail_manager.py` (`--body`, `--body-file`) and `gdoc_comment.py` (the `text`
-  fields inside `--items`), and it warns when outbound text goes over its channel
-  budget or carries a rationale section the reader did not ask for. Quotes, code
-  blocks and tables are excluded from the count, so a message that is mostly a
-  quoted thread does not trip it. Em-dash still denies the send.
-- **Every em-dash removed from `CLAUDE.md.template`.** Twelve of them, in the file
-  that bans them.
 
 ## v0.1.0 - 2026-08-23
 

@@ -57,7 +57,7 @@ incremental ≈ 0.1 s. `sweep` prints a one-line summary and writes a heartbeat
 | :-- | :-- |
 | path contains `/subagents/workflows/` | `workflow-agent` |
 | path contains `/subagents/` | `subagent` |
-| first ~20 rows contain `<command-name>X</command-name>` or a user message starting `/X ` | `X` (local CLI toggles like `/model`, `/glm` are ignored) |
+| first ~20 rows contain `<command-name>X</command-name>` or a user message starting `/X ` | `X` (local CLI toggles like `/model` are ignored) |
 | top-level file starting inside a `journal/ai_runs/*.json` run window ±3 min, not a VS Code session | `ai-<kind>` |
 | everything else | `interactive` |
 

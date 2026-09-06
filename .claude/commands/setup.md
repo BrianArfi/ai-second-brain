@@ -1,5 +1,5 @@
 ---
-description: Guided first-run onboarding - interview me about my work, context, and track record, request access to my tools, then write my CLAUDE.md and connect everything
+description: Setup - Guided first-run onboarding - interview me about my work, context, and track record, request access to my tools, then write my CLAUDE.md and connect everything
 argument-hint: "[optional: 'resume' to continue a partial setup, or a specific area like 'slack']"
 ---
 

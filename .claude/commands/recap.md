@@ -1,5 +1,5 @@
 ---
-description: "Previously on... - recap the last 1-2 Claude Code sessions: tasks, documents produced, decisions, unfinished work"
+description: "Daily - Previously on... - recap the last 1-2 Claude Code sessions: tasks, documents produced, decisions, unfinished work"
 argument-hint: "[optional: how many sessions back]"
 ---
 

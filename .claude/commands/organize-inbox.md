@@ -1,5 +1,5 @@
 ---
-description: Process and file everything in the inbox/ folder to its proper home
+description: Notes - Process and file everything in the inbox/ folder to its proper home
 argument-hint: "[optional: specific file to process]"
 ---
 

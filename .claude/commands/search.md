@@ -1,5 +1,5 @@
 ---
-description: Find anything in your workspace — a note, a decision, a name you half-remember
+description: Notes - Find anything in your workspace — a note, a decision, a name you half-remember
 argument-hint: "what you're looking for"
 ---
 

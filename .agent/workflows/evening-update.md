@@ -5,7 +5,7 @@ description: Evening closing update - full day recap, accomplishments vs morning
 
 # Evening Update Workflow
 
-This workflow should be triggered each evening at ~21:30 WIB (or on-demand with `/evening-update`) to close the day with a full recap and completion tracking.
+This workflow should be triggered each evening at ~21:30 WIB (or on-demand with `/daily-update evening`) to close the day with a full recap and completion tracking.
 
 ## Run Automated Script (Evening Mode)
 
@@ -29,6 +29,7 @@ the owner acts off email too, so sweep it every evening (the runner does NOT pul
 ## Closing Recap & Completion Tracking
 
 0. **Mention Ledger pass (mandatory)**: `python3 .agent/skills/slack-tracker/scripts/mention_ledger.py report` → embed "🔴 Waiting on your reply" in the recap (anything still open at end of day is a carryover candidate for tomorrow's plan); run `... classify` to GLM-triage the day's channel digest. The ledger is the source of truth for unanswered mentions/DMs/threads — never re-derive from raw dumps.
+0a. **Access requests**: embed the 🔑 block from the same report, plus the Drive share requests in `journal/state/access_requests.json`. Anything still there at end of day is a person who could not work today, so it carries into tomorrow's top items, not into the general carryover list.
 1. The script writes two outputs: `daily_update_evening.md` (human-readable) and `_temp/harvest_evening_[date].json` (structured sidecar).
 2. **For synthesis, read `_temp/harvest_evening_[date].json` first** -- it is a compact structured JSON (sections: slack, jira, calendar, files_modified, files_created, backlogs, fathom, morning_plan, portfolio) and avoids re-reading the full 150-180 KB markdown dump. Fall back to `daily_update_evening.md` only if the JSON is missing or a section is empty. The markdown remains the user-facing deliverable and is NOT deleted.
 3. Cross-reference the morning's proposed priorities from `_temp/daily_plan_[date].md`:

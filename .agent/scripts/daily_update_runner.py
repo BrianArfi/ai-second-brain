@@ -588,6 +588,14 @@ def _main_logic(mode, dry_run=False):
     sections.append(f"## Slack: Work (Married)\n```\n{out}\n```\n")
     write_output(sections, output_file)
 
+    # Keep the name -> handle index current, so a draft written today can mention a
+    # person who joined this week. Weekly, read-only, and never fatal to the sweep.
+    if not dry_run:
+        run_step("Slack person index", [
+            sys.executable, os.path.join(BASE_DIR, '.agent', 'scripts', 'slack_mentions.py'),
+            'refresh', '--if-stale', '7'
+        ], timeout=120)
+
     # Fetch Work history
     work_channels = []
     for line in out.split('\n'):

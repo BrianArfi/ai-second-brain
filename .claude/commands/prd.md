@@ -1,5 +1,5 @@
 ---
-description: Draft or revise a Work PRD - Drive-first dedupe, English, quality-gated, registered in Master Product List
+description: Product - Draft or revise a Work PRD - Drive-first dedupe, English, quality-gated, registered in Master Product List
 argument-hint: "<feature/product name or brief>"
 ---
 

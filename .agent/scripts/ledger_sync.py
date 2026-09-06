@@ -106,12 +106,31 @@ RENDERERS = [
 def now_wib():
     return datetime.now(WIB).strftime('%Y-%m-%d %H:%M:%S WIB')
 
+# Nothing here runs at a terminal: cron, Claude Code hooks and headless workers
+# all call in with no TTY. A git subcommand that decides it needs a commit
+# message editor therefore has nothing to open, and instead of failing fast it
+# either blocks until the timeout or dies with an editor error that names no
+# file, which is what a Stop hook reported on 24 Aug 2026 while `rebase
+# --autostash` was replaying a commit. `rebase --continue` was already guarded
+# with `-c core.editor=true`, one call at a time, and every other git call was
+# not.
+#
+# Forcing it in the environment covers every invocation from this module and
+# from worktree_sync.py, which reuses this helper. `true` accepts whatever
+# message git already prepared, which for a rebase replay is the original
+# message: exactly the intended behaviour, and never a prompt.
+GIT_ENV = dict(os.environ, GIT_EDITOR='true', GIT_SEQUENCE_EDITOR='true',
+               GIT_TERMINAL_PROMPT='0')
+
 def git(args, timeout=GIT_LOCAL_TIMEOUT):
     """Run git with an arg list. Returns (rc, stdout, stderr); rc None on failure
-    to even run git (missing binary, timeout)."""
+    to even run git (missing binary, timeout).
+
+    Always non-interactive: see GIT_ENV above.
+    """
     try:
         p = subprocess.run(['git', *args], cwd=BASE_DIR, capture_output=True,
-                           text=True, timeout=timeout)
+                           text=True, timeout=timeout, env=GIT_ENV)
         return p.returncode, p.stdout.strip(), p.stderr.strip()
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
         return None, '', str(exc)
@@ -483,12 +502,10 @@ def rebase_in_progress():
             return True
     return False
 
-
 # A rebase state dir older than this is abandoned, not live. A live rebase run
 # by this module finishes or aborts within its git timeouts (30s); five minutes
 # is two orders of magnitude past that.
 STUCK_REBASE_MAX_AGE = 300.0
-
 
 def recover_stuck_rebase(max_age=STUCK_REBASE_MAX_AGE):
     """Abort a rebase that some earlier, killed process left behind.
@@ -549,7 +566,6 @@ def recover_stuck_rebase(max_age=STUCK_REBASE_MAX_AGE):
         sys.stderr.write(f'[ledger_sync] found a stuck rebase but could not '
                          f'abort it: {(err or "")[:120]}\n')
         return False
-
 
 def resolve_regenerated_conflicts():
     """Take upstream's side of the two files this script rewrites anyway.
@@ -1080,12 +1096,11 @@ def cmd_status(args):
 # --------------------------------------------------------------------------
 #
 # A sync is propagation, and nothing in the turn that triggered it reads the
-# result. Run in the foreground from the Stop hook it cost 6.7 seconds of wall
-# clock on every single turn on an idle machine, and far more on a slow link or
-# a loaded one: roughly half in the renderers (`render_followup_tracker.py`
-# shells out to three ledger CLIs) and half in `git fetch` plus `push`. The
-# person who triggered the turn waited for all of it before they could read the
-# reply, for work whose result they never see.
+# result. Run in the foreground from the Stop hook it cost 30 to 72 seconds of
+# wall clock on every single turn on the macOS checkout: roughly half in the
+# renderers (`render_followup_tracker.py` shells out to three ledger CLIs) and
+# half in `git fetch` plus `push` over a link from Indonesia to GitHub. the owner
+# waited for all of it before he could read the reply.
 #
 # So the Stop hook now detaches it. Correctness is unchanged, because every
 # guarantee this module makes is enforced inside the child: the ledger locks,
@@ -1100,7 +1115,6 @@ def cmd_status(args):
 
 def _bg_child():
     return os.environ.get('LEDGER_SYNC_BG_CHILD') == '1'
-
 
 @contextlib.contextmanager
 def bg_lock():
@@ -1127,7 +1141,6 @@ def bg_lock():
     finally:
         fh.close()
 
-
 def bg_last_result():
     """The last detached sync's final line, so the next turn can see a failure."""
     try:
@@ -1136,7 +1149,6 @@ def bg_last_result():
         return lines[-1] if lines else None
     except OSError:
         return None
-
 
 def spawn_background_sync(ledger, reason):
     """Re-exec this script detached and return immediately.
@@ -1166,7 +1178,6 @@ def spawn_background_sync(ledger, reason):
                 log.close()
             except OSError:
                 pass
-
 
 def cmd_sync(args):
     if disabled():

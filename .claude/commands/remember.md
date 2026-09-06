@@ -1,5 +1,5 @@
 ---
-description: Teach me something durable — a preference, a correction, a fact worth keeping
+description: Notes - Teach me something durable — a preference, a correction, a fact worth keeping
 argument-hint: "[optional: the specific thing to remember]"
 ---
 

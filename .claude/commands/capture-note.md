@@ -1,5 +1,5 @@
 ---
-description: Capture a thought into a well-filed note
+description: Notes - Capture a thought into a well-filed note
 argument-hint: what to capture
 ---
 

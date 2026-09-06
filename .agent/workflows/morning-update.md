@@ -5,7 +5,7 @@ description: Morning prep update - sweep overnight signals, set today's prioriti
 
 # Morning Update Workflow
 
-This workflow should be triggered each morning at ~09:30 WIB (or on-demand with `/morning-update`) to prepare the owner's daily priorities and review overnight signals.
+This workflow should be triggered each morning at ~09:30 WIB (or on-demand with `/daily-update morning`) to prepare the owner's daily priorities and review overnight signals.
 
 ## Run Automated Script (Morning Mode)
 
@@ -39,6 +39,10 @@ the owner acts off email too, so sweep it every morning.
 The channel skim (5 msgs/channel) misses DM threads and old-thread replies. The **Mention Ledger** (`.agent/skills/slack-tracker/scripts/mention_ledger.py`, cron `*/30`) is the mechanical safety net for both. Every morning:
 
 0. **Run the ledger first**: `python3 .agent/skills/slack-tracker/scripts/mention_ledger.py report` → embed the "🔴 Waiting on your reply" list in the briefing verbatim (priority/YourManager items on top, with age + permalink). Then `... classify` to GLM-triage the channel digest and fold `needs_reply`/`action_item` results into the day's signal. The ledger is the source of truth for unanswered mentions — do NOT re-derive them from raw channel dumps.
+0a. **Access requests are their own pass, and they are not optional.** `mention_ledger.py report` now prints a 🔑 block above everything else; embed it verbatim, oldest first. Then read `journal/state/access_requests.json` (hourly cron snapshot) for the **Google Drive share requests**, which arrive by email and never appear in Slack at all. Refresh it by hand with `python3 .agent/skills/access-watch/scripts/access_watch.py report --days 90 --out journal/state/access_requests.json` if the snapshot is stale.
+
+   Anybody in that list is blocked on the owner and cannot work. It goes in the briefing above sprint numbers. Never bury an access ask inside the long "waiting on your reply" list: on 1 Sep 2026 four of them sat there for a day, and the 39-day-old Drive ones had never been surfaced anywhere. Granting stays approval-gated, so present the grant command, do not run it.
+
 1. Deep-read open DMs, especially **YourManager** (`<SLACK_ID>`) and other leadership. **ANY message from YourManager is high priority by default** and must surface in the day's signal.
 2. If **NO evening update ran the prior day**, also pull yesterday's **Fathom** meeting outcomes (registry + MCP) so closed-meeting decisions are not lost, since Fathom is otherwise an evening-only harvest step.
 3. If **NO evening update ran the prior day**, also run the **tracker reconcile** from `.agent/workflows/evening-update.md` step 5b (verify long-overdue tickets against sent DMs/MOMs/email, update status with evidence) so the dashboard Today tab does not accumulate stale items.
@@ -66,7 +70,7 @@ Each ledger below is the **SOURCE OF TRUTH** for its domain — embed its `repor
 3. **Waiting-on watchdog (others owe the owner)**: `python3 .agent/skills/waiting-watchdog/scripts/waiting_watchdog.py sweep --check-slack` (the Slack-thread close check is SOP-only, never cron'd), then `... report` → embed verbatim. Every 🚨 BREACHED line becomes an **explicit escalation action in today's Top-5** (who to ping, on which channel, per the item's `escalate_to`/`escalation_path`).
 4. **Decision log**: `python3 .agent/skills/decision-log/scripts/decision_log.py report` → embed verbatim (overdue-open decisions on top). Surface any decision whose deadline is today/past as a today-action.
 5. **Work-tree coverage**: `python3 .agent/scripts/work_tree.py coverage` → if any OPEN record is unfiled, surface the count as one line in the briefing with the top 3 items from `journal/state/work_tree_triage.json`, and ask the owner which node each belongs to. An unfiled open record is work the tree cannot see, so it keeps appearing here until it is filed (CLAUDE.md, "Every Ticket Belongs To A Work-Tree Node"). File the answers with `<ledger>.py refile <ID> --node <node>`.
-6. **Reply queue (drafts only)**: `python3 .agent/skills/reply-queue/scripts/reply_queue.py draft --limit 15`, then `... report` → embed, and link today's draft file `journal/reply_drafts_<date>.md` in the briefing. If the file contains a `## FALLBACK_TO_CLAUDE` section, Claude drafts those replies itself in the owner's voice: plain flowing prose, no emoji, no numbered-bold lists. Drafts are never sent from here — sending stays approval-gated via `/slack-draft`.
+6. **Reply queue (drafts only)**: `python3 .agent/skills/reply-queue/scripts/reply_queue.py draft --limit 15`, then `... report` → embed, and link today's draft file `journal/reply_drafts_<date>.md` in the briefing. If the file contains a `## FALLBACK_TO_CLAUDE` section, Claude drafts those replies itself in the owner's voice: plain flowing prose, no emoji, no numbered-bold lists. Drafts are never sent from here — sending stays approval-gated via [`slack_send.md`](../protocols/slack_send.md).
 
 ## Priority Setting & Summary
 

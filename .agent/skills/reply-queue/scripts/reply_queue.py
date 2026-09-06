@@ -9,7 +9,7 @@ Design (Component 7, per the bangun-aja-semuanya-barengan-wiggly-noodle plan):
   Layer 2 (this script): batches open items -> agy-bridge --task harvest (GLM) to
     draft replies in the owner's voice. GLM never sends anything - drafts only.
   Layer 3 (SOP): morning/evening update embeds `report` verbatim. Actually sending
-    a reply still goes through /slack-draft with explicit approval.
+    a reply still goes through .agent/protocols/slack_send.md with explicit approval.
 
 ABSOLUTELY NO SEND PATH: this script contains zero Slack write calls. It only reads
 the ledger state file and calls agy-bridge to generate text. Nothing here can post
@@ -40,6 +40,12 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
+
+# Slack sends `<@<SLACK_ID>>`, not `@Teammate`. Without this, every "Original:" line below quotes a
+# message that names nobody, which is what the owner was reading on 25 Aug 2026. Shared with the rest
+# of the harness, and behaviourally identical to the Rust half in the ASB app's slackpush.rs.
+sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'scripts'))
+from slack_text import render as slack_render  # noqa: E402
 STATE_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'reply_queue.json')
 LEDGER_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'slack_mention_ledger.json')
 TOKEN_ENV = os.path.join(BASE_DIR, '.agent', 'skills', 'slack-connector', 'token.env')
@@ -101,13 +107,15 @@ def open_items_sorted(ledger):
 def context_str(it):
     parts = []
     for uid, ctx in it.get('context', []) or []:
-        ctx1 = re.sub(r'\s+', ' ', ctx or '')[:200]
+        ctx1 = slack_render(ctx or '', collapse=True)[:200]
         parts.append(f'(re: {ctx1})')
     return ' '.join(parts)
 
 def item_prompt_block(iid, it):
     chan = it.get('channel_name', '?')
-    text = re.sub(r'\s+', ' ', it.get('text', ''))[:400]
+    # Decoded for the MODEL too, not only for the owner. A drafter handed `<@<SLACK_ID>>` cannot tell
+    # who is being asked for what, and writes a reply that answers nobody in particular.
+    text = slack_render(it.get('text', ''), collapse=True)[:400]
     ctx = context_str(it)
     priority = ' [PRIORITY]' if it.get('priority') else ''
     lines = [f'item_id: {iid}{priority}', f'channel: {chan}', f'message: {text}']
@@ -174,7 +182,7 @@ def render_markdown(state, ledger, fallback_ids=None, all_items=False):
     ledger_items = ledger.get('items', {})
     lines = []
     lines.append('> DRAFTS ONLY -- never send from here. Slack sends are '
-                  'approval-gated via /slack-draft.')
+                  'approval-gated via .agent/protocols/slack_send.md.')
     lines.append('')
     lines.append(f'# Reply Queue ({datetime.now(WIB).strftime("%Y-%m-%d %H:%M")} WIB)')
     lines.append('')
@@ -200,7 +208,7 @@ def render_markdown(state, ledger, fallback_ids=None, all_items=False):
         chan = it.get('channel_name', '?')
         link = it.get('permalink') or ''
         link_md = f' [thread]({link})' if link else ''
-        orig = re.sub(r'\s+', ' ', it.get('text', ''))[:160]
+        orig = slack_render(it.get('text', ''), collapse=True)[:160]
         ctx = context_str(it)
         draft = entry.get('draft_text', '')
         lines.append(f'- {flag}**{chan}**{link_md} `{iid}`')

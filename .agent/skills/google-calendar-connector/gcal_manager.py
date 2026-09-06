@@ -285,7 +285,7 @@ def list_events(days_back=7, days_forward=7, profile='default', as_json=False):
     print(f"Fetching events from {time_min} to {time_max}...", file=sys.stderr if as_json else sys.stdout)
 
     # The API returns 250 events per page and stops there. A wide window (a
-    # month of a busy calendar is ~400 events) therefore came back truncated
+    # month of the owner's calendar is ~400 events) therefore came back truncated
     # at the OLD end of the range, so the most recent days looked empty and the
     # work-hours sweep cached them as "no meetings". Follow every page.
     events = []
@@ -555,7 +555,7 @@ def run_mcp_server(profile='default'):
 
     server.run(transport="stdio")
 
-def create_event(summary, start_time, end_time, description=None, profile='default', attendees=None, add_meet=True):
+def create_event(summary, start_time, end_time, description=None, profile='default', attendees=None, add_meet=True, tz='Asia/Jakarta'):
     """Create a new calendar event. By default attaches a Google Meet link."""
     creds = authenticate(profile)
     if not creds:
@@ -568,11 +568,11 @@ def create_event(summary, start_time, end_time, description=None, profile='defau
         'description': description,
         'start': {
             'dateTime': start_time,
-            'timeZone': 'Asia/Jakarta', # Default to Jakarta
+            'timeZone': tz,
         },
         'end': {
             'dateTime': end_time,
-            'timeZone': 'Asia/Jakarta',
+            'timeZone': tz,
         },
     }
 
@@ -607,7 +607,8 @@ def create_event(summary, start_time, end_time, description=None, profile='defau
         return None
 
 def update_event(event_id, profile='default', summary=None, start_time=None,
-                 end_time=None, description=None, attendees=None, notify=True):
+                 end_time=None, description=None, attendees=None, notify=True,
+                 tz='Asia/Jakarta'):
     """Patch an existing event in place. Only the fields passed are touched.
 
     Kept separate from create_event so that fixing a typo or adding a pre-read
@@ -626,9 +627,9 @@ def update_event(event_id, profile='default', summary=None, start_time=None,
     if description is not None:
         body['description'] = description
     if start_time:
-        body['start'] = {'dateTime': start_time, 'timeZone': 'Asia/Jakarta'}
+        body['start'] = {'dateTime': start_time, 'timeZone': tz}
     if end_time:
-        body['end'] = {'dateTime': end_time, 'timeZone': 'Asia/Jakarta'}
+        body['end'] = {'dateTime': end_time, 'timeZone': tz}
     if attendees:
         body['attendees'] = [{'email': e.strip()} for e in attendees.split(',')]
 
@@ -760,8 +761,9 @@ def main():
     # Create command
     create_parser = subparsers.add_parser('create', help='Create a new event')
     create_parser.add_argument('--summary', required=True, help='Event title')
-    create_parser.add_argument('--start', required=True, help='Start time (ISO format: YYYY-MM-DDTHH:MM:SS)')
-    create_parser.add_argument('--end', required=True, help='End time (ISO format: YYYY-MM-DDTHH:MM:SS)')
+    create_parser.add_argument('--start', required=True, help='Start time (ISO format: YYYY-MM-DDTHH:MM:SS), read in --tz')
+    create_parser.add_argument('--end', required=True, help='End time (ISO format: YYYY-MM-DDTHH:MM:SS), read in --tz')
+    create_parser.add_argument('--tz', default='Asia/Jakarta', help='--tz names the timezone the --start and --end wall-clock times are IN. Default Asia/Jakarta. Set it when the owner is travelling: on-site in Amman, --tz Asia/Amman lets you pass local room times instead of converting by hand.')
     create_parser.add_argument('--attendees', help='Comma-separated emails of attendees')
     create_parser.add_argument('--desc', help='Description')
     create_parser.add_argument('--no-meet', action='store_true', help='Do NOT attach a Google Meet link (default: attach)')
@@ -771,8 +773,9 @@ def main():
     update_parser = subparsers.add_parser('update', help='Patch an existing event in place')
     update_parser.add_argument('--event-id', required=True, help='Event ID (decode it from the calendar eid if needed)')
     update_parser.add_argument('--summary', help='New title')
-    update_parser.add_argument('--start', help='New start (ISO: YYYY-MM-DDTHH:MM:SS)')
-    update_parser.add_argument('--end', help='New end (ISO: YYYY-MM-DDTHH:MM:SS)')
+    update_parser.add_argument('--start', help='New start (ISO: YYYY-MM-DDTHH:MM:SS), read in --tz')
+    update_parser.add_argument('--end', help='New end (ISO: YYYY-MM-DDTHH:MM:SS), read in --tz')
+    update_parser.add_argument('--tz', default='Asia/Jakarta', help='--tz names the timezone the --start and --end wall-clock times are IN. Default Asia/Jakarta. Set it when the owner is travelling: on-site in Amman, --tz Asia/Amman lets you pass local room times instead of converting by hand.')
     update_parser.add_argument('--attendees', help='Comma-separated emails, REPLACES the current list')
     update_parser.add_argument('--desc', help='New description')
     update_parser.add_argument('--no-notify', action='store_true', help='Do NOT email attendees about the change')
@@ -814,10 +817,11 @@ def main():
     elif args.command == 'mcp':
         run_mcp_server(args.profile)
     elif args.command == 'create':
-        create_event(args.summary, args.start, args.end, args.desc, args.profile, args.attendees, add_meet=not args.no_meet)
+        create_event(args.summary, args.start, args.end, args.desc, args.profile, args.attendees, add_meet=not args.no_meet, tz=args.tz)
     elif args.command == 'update':
         update_event(args.event_id, args.profile, args.summary, args.start,
-                     args.end, args.desc, args.attendees, notify=not args.no_notify)
+                     args.end, args.desc, args.attendees, notify=not args.no_notify,
+                     tz=args.tz)
     elif args.command == 'rsvp':
         rsvp_event(args.event_id, args.response, args.profile, args.find)
     else:

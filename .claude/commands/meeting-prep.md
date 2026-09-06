@@ -1,5 +1,5 @@
 ---
-description: Gather notes and open items into a one-page meeting brief
+description: Product - Gather notes and open items into a one-page meeting brief
 argument-hint: meeting name or time
 ---
 

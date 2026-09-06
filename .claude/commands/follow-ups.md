@@ -1,5 +1,5 @@
 ---
-description: Find open loops and promises, draft messages for your approval
+description: Comms - Find open loops and promises, draft messages for your approval
 ---
 
 Scan this workspace for things that are still open, such as promises made,

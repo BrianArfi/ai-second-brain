@@ -1,5 +1,5 @@
 ---
-description: Work Weekly Progress Report for YourManager - harvest first via subagent, audit against rubric, update existing Drive doc in place
+description: Weekly - Work Weekly Progress Report for YourManager - harvest first via subagent, audit against rubric, update existing Drive doc in place
 argument-hint: "[week-ending date, defaults to this Friday WIB]"
 ---
 

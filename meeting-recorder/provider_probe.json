@@ -1,7 +1,7 @@
 {
   "gemini|http://127.0.0.1:20128|ag/gemini-3.6-flash-high": {
     "ok": false,
-    "detail": "probe FAILED: expected \"The violet kangaroo audits seventeen bridges in Lisbon.\", got \"**[00:00]** Speaker 1: Good morning, everyone. Thanks for joining today's strategy sync. Today, we'll review our Q3 targ\". This endpoint accepts audio and returns text that does not match it, so it would invent meeting minutes. Disabled.",
-    "checked_utc": "2026-08-21T19:55:54+00:00"
+    "detail": "probe FAILED: expected \"The violet kangaroo audits seventeen bridges in Lisbon.\", got \"**[00:00]** Sarah: Hi everyone, thanks for joining today's sprint review. We've got a lot to cover, especially around th\". This endpoint accepts audio and returns text that does not match it, so it would invent meeting minutes. Disabled.",
+    "checked_utc": "2026-08-25T04:34:59+00:00"
   }
 }

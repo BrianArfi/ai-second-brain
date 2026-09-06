@@ -1591,6 +1591,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     _wh_spawned_at = 0.0
 
+    _wh_refresh_error = None   # last failure of the sweep spawn, served on /api/work-hours
+
     def _handle_get_work_hours(self):
         """Work-hours tracker state (written by .agent/skills/work-hours). The
         gcal_cache key is sweep-internal — strip it so the payload stays lean.
@@ -2602,7 +2604,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             cmd = list(entry['argv'])
             # macOS ships no flock, so the prefix turned every manual run into a
             # FileNotFoundError instead of running the job. Cron only runs on the
-            # Linux/WSL host, where flock exists and the race it guards is real.
+            # WSL host, where flock exists and the race it guards is real.
             if shutil.which('flock'):
                 cmd = ['flock', '-n', '-E', str(LOCK_CONFLICT_CODE), entry['lock']] + cmd
             t0 = time.time()

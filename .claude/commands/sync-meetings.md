@@ -1,5 +1,5 @@
 ---
-description: Pull recent meetings out of whichever note-taker you connected and file them as notes
+description: Product - Pull recent meetings out of whichever note-taker you connected and file them as notes
 argument-hint: "[how far back, or the name of one meeting]"
 ---
 

@@ -26,6 +26,13 @@ import sys
 from datetime import timezone, timedelta, datetime
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
+
+# The three ledger CLIs below quote Slack text verbatim, codes and all, so the tracker carried
+# `<@U8VMF9CPQ>` where a name belongs. `mentions_only`, not `render`: this file is markdown with
+# placeholders of its own (`<YYMMDD>`, `<SELLER_PREFIX>`, `<NNNN>` are all in it today) and the
+# full decoder would strip the brackets off each of them.
+sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'scripts'))
+from slack_text import mentions_only  # noqa: E402
 OUT_PATH = os.path.join(BASE_DIR, 'journal', 'master_followup_tracker.md')
 
 # Every COM-/WAIT-/DEC- id in the rendered view becomes a click through to that
@@ -149,7 +156,7 @@ def render():
         '',
     ]
 
-    atomic_write(OUT_PATH, '\n'.join(parts))
+    atomic_write(OUT_PATH, mentions_only('\n'.join(parts)))
     print(f'rendered {os.path.relpath(OUT_PATH, BASE_DIR)}')
     for e in errors:
         print(e, file=sys.stderr)
