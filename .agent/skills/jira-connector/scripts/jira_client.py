@@ -606,8 +606,11 @@ def create_issue(project_key, summary, issue_type="Story", priority="High", desc
     if parent:
         # MP is company-managed: an Epic child needs BOTH the parent link and
         # the Epic Link custom field, otherwise the board renders it orphaned.
+        # ExampleVendor (MSP, MBA, STOR) is team-managed and REJECTS customfield_10014
+        # outright: "cannot be set. It is not on the appropriate screen".
+        # So the Epic Link field is sent only on the Work site.
         fields["parent"] = {"key": parent}
-        if epic_link_field:
+        if epic_link_field and domain == "yourcompany.atlassian.net":
             fields[epic_link_field] = parent
     if labels:
         fields["labels"] = list(labels)
