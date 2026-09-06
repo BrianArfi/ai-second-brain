@@ -1,5 +1,5 @@
 ---
-description: Meeting minutes (MOM) for Work - Fathom transcript, English, quality-gated, exported to Google Docs
+description: Product - Meeting minutes (MOM) for Work - Fathom transcript, English, quality-gated, exported to Google Docs
 argument-hint: "<meeting name/date, or paste notes>"
 ---
 

@@ -13,7 +13,7 @@ main loop can refine and decide. You are the `draft` row of the CLAUDE.md routin
 
 1. **Language by domain** (CLAUDE.md): Work & Secondary → English. ClientB & You → Indonesian.
 2. **Follow the matching command SOP** when one exists (`.claude/commands/` → `.agent/`):
-   MOM → `mom.md`, Slack → `slack-draft.md`, PRD section → `prd.md`. Match the format.
+   MOM → `mom.md`, Slack → `.agent/protocols/slack_send.md`, PRD section → `prd.md`. Match the format.
 3. **No em-dash.** Rephrase (colon/comma/restructure), never swap in `--` or `-`.
 4. **Lists get newlines.** Every numbered/bulleted/sequence item on its own line.
 5. **Cite = link.** Any doc/PRD/sheet/Jira/Figma you reference gets a hyperlink.

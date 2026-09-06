@@ -101,6 +101,11 @@ def check_text(text, doc_path, project):
                                           path_part.lstrip("/"))),
             os.path.normpath(os.path.join(project, path_part.lstrip("/"))),
         ]
+        # A real absolute filesystem path. CLAUDE.md asks for these on any link
+        # the owner clicks himself, so the guard has to try the path as written too,
+        # not only as a repo-root-relative one.
+        if path_part.startswith("/"):
+            candidates.append(os.path.normpath(path_part))
         if not any(os.path.exists(c) for c in candidates):
             broken.append((label or target, target))
 

@@ -47,12 +47,12 @@ drafted reply verbatim, and what you recommend. The sub-session starts blank and
 this queue.
 
 **No send path here either.** Branching creates sessions, it never posts. Approving and
-sending still goes through `/slack-draft` with the owner's explicit approval inside the
+sending still goes through [`slack_send.md`](../../protocols/slack_send.md) with the owner's explicit approval inside the
 sub-session.
 
 ## Notes
 
-- **No send path.** This script contains zero Slack write calls (no `chat.postMessage`, no `--action post`, no MCP send tools). Approving and actually sending a reply always goes through `/slack-draft` with the owner's explicit approval - this queue only prepares the draft text for review.
+- **No send path.** This script contains zero Slack write calls (no `chat.postMessage`, no `--action post`, no MCP send tools). Approving and actually sending a reply always goes through [`slack_send.md`](../../protocols/slack_send.md) with the owner's explicit approval - this queue only prepares the draft text for review.
 - Ledger is source of truth for open/answered state; this skill never mutates the ledger. It only reads `slack_mention_ledger.json`.
 - `draft` skips re-calling the LLM for items whose `text_hash` hasn't changed since the last draft (cheap re-runs); it only spends tokens on new or changed items.
 - On agy-bridge rc 3 (`fallback_to_claude`) or a non-zero/parse failure, the batch's items are NOT written into the drafted state - they show up in `## FALLBACK_TO_CLAUDE` in the output file every run until a human (Claude, in the SOP) drafts them or the underlying ledger item closes.

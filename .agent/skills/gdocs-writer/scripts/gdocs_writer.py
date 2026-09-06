@@ -236,6 +236,26 @@ def md_to_docx(md_path, title=None):
     return out_path
 
 # ─── Drive upload / update ────────────────────────────────────────────────────
+def _format_pass(file_id, cred_dir, label):
+    """Pageless plus content-aware column widths, on the Doc this writer just made.
+
+    A .docx upload converts with Word's table widths, which is the cramped look the owner keeps
+    seeing. Never raises: the doc already exists by the time this runs.
+    """
+    if os.environ.get('GDOC_FORMAT_PASS_DISABLE') == '1':
+        return
+    account = 'work'
+    for name in ('personal-drive-connector', 'secondary-drive-connector'):
+        if cred_dir and name in str(cred_dir):
+            account = 'personal' if name.startswith('google') else 'secondary'
+    try:
+        repo = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
+        sys.path.insert(0, os.path.join(repo, '.agent', 'skills', 'gdocs-create'))
+        from format_pass import auto_format
+        auto_format(file_id, account, label=label)
+    except Exception as e:
+        print(f"[format_pass] skipped ({type(e).__name__}: {e})")
+
 def drive_upload(docx_path, title, share=True, cred_dir=None, parent_id=None):
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
@@ -255,6 +275,7 @@ def drive_upload(docx_path, title, share=True, cred_dir=None, parent_id=None):
     ).execute()
     file_id = assert_drive_result(file, 'gdocs_writer upload')
     link    = file.get('webViewLink')
+    _format_pass(file_id, cred_dir, 'upload')
 
     if share:
         service.permissions().create(
@@ -265,12 +286,53 @@ def drive_upload(docx_path, title, share=True, cred_dir=None, parent_id=None):
 
     return file_id, link
 
-def drive_update(file_id, docx_path, cred_dir=None):
+def assert_doc_not_ahead(service, file_id, md_path):
+    """Refuse a whole-file overwrite when the Doc changed after the local mirror.
+
+    `update` replaces the entire document. If somebody edited the Doc since the
+    mirror was last written, that edit is destroyed with no warning. On 4 Sep
+    2026 this silently deleted the owner's own additions to the Digital Seller
+    Portal PRD; they were only recoverable because Drive kept revision 188.
+    The version guard does not catch it: that reads the revision table, not the
+    body, so a Doc edited without bumping its version looks untouched.
+
+    Override with GDOCS_ALLOW_STALE_OVERWRITE=1 once the Doc has been read.
+    """
+    import datetime, os
+    if os.environ.get('GDOCS_ALLOW_STALE_OVERWRITE') == '1':
+        return
+    try:
+        meta = service.files().get(
+            fileId=file_id,
+            fields='modifiedTime,lastModifyingUser(displayName)').execute()
+    except Exception:
+        return  # never block a write on a failed preflight
+    doc_ts = datetime.datetime.strptime(
+        meta['modifiedTime'], '%Y-%m-%dT%H:%M:%S.%fZ').replace(
+        tzinfo=datetime.timezone.utc).timestamp()
+    mirror_ts = os.path.getmtime(md_path)
+    if doc_ts <= mirror_ts:
+        return
+    who = (meta.get('lastModifyingUser') or {}).get('displayName', 'someone')
+    raise SystemExit(
+        "\n[gdocs-writer] REFUSED: the Doc is newer than the local file.\n"
+        f"  Doc last edited : {meta['modifiedTime']} by {who}\n"
+        f"  Local mirror    : {datetime.datetime.utcfromtimestamp(mirror_ts).isoformat()}Z\n"
+        f"  File            : {md_path}\n\n"
+        "  `update` replaces the whole document, so those edits would be lost.\n"
+        "  Read the Doc first and fold anything new into the local file, then\n"
+        "  re-run. Recover a lost edit from Drive revision history.\n\n"
+        "  Override once the Doc has been read: GDOCS_ALLOW_STALE_OVERWRITE=1\n")
+
+def drive_update(file_id, docx_path, cred_dir=None, md_path=None):
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
 
     creds   = authenticate(cred_dir)
     service = build('drive', 'v3', credentials=creds)
+
+    if md_path:
+        assert_doc_not_ahead(service, file_id, md_path)
 
     mime_docx = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     media     = MediaFileUpload(docx_path, mimetype=mime_docx)
@@ -281,6 +343,7 @@ def drive_update(file_id, docx_path, cred_dir=None):
         fields='id, webViewLink'
     ).execute()
     updated_id = assert_drive_result(file, 'gdocs_writer update')
+    _format_pass(updated_id, cred_dir, 'update')
 
     return updated_id, file.get('webViewLink')
 
@@ -331,7 +394,7 @@ def main():
         print(f"Link: {link}")
 
     elif args.command == 'update':
-        file_id, link = drive_update(args.id, docx_path, cred_dir=cred_dir)
+        file_id, link = drive_update(args.id, docx_path, cred_dir=cred_dir, md_path=md_path)
         print(f"[gdocs-writer] Updated: {args.id}")
         print(f"File ID: {file_id}")
         print(f"Link: {link}")

@@ -1,4 +1,4 @@
-# CLAUDE.md - AI Partner Operating Manual
+# CLAUDE.md — AI Partner Operating Manual
 
 > This file is your AI's job description. The more specific you are, the more
 > autonomously and accurately it can work. Start with the sections marked REQUIRED,
@@ -13,11 +13,11 @@
 
 **Name**: [Your name / what the AI should call you]
 **Role**: [e.g., Product Manager, Consultant, Operations Lead]
-**Based in**: [City, Country. This sets the timezone for every date reference]
+**Based in**: [City, Country — affects timezone references]
 **Languages**: [e.g., English for work docs, Indonesian for personal content]
 
 Brief context:
-[2 or 3 sentences about what you do day-to-day. Example: "I manage product for two B2B SaaS clients simultaneously. I run sprints, write PRDs, attend 5 to 8 meetings per week, and produce a weekly report for each client."]
+[2–3 sentences about what you do day-to-day. Example: "I manage product for two B2B SaaS clients simultaneously. I run sprints, write PRDs, attend 5–8 meetings per week, and produce a weekly report for each client."]
 
 ---
 
@@ -54,7 +54,7 @@ For each recurring task, define the exact steps. The AI follows these in order.
 
 ### PRD / Product Spec
 1. Read Dashboard.md + journal/todo.md for active context
-2. Search Drive for an existing doc by title. If it is there, note the revision number
+2. Search Drive for existing doc by title — if found, note revision number
 3. Draft in [language], show as markdown for review
 4. Wait for approval
 5. Create Google Doc: `gdocs-create --account [work|personal]`
@@ -70,7 +70,7 @@ For each recurring task, define the exact steps. The AI follows these in order.
 ### Slack Message
 1. Draft message in full
 2. Show draft + target channel + reason for sending
-3. **Wait for explicit approval. Never send speculatively**
+3. **Wait for explicit approval — never send speculatively**
 4. Send after approval
 
 ### Weekly Report
@@ -192,7 +192,7 @@ My role: [e.g., sole PM, embedded PM, advisor]
 Drive folder: [Google Drive folder name or ID]
 Slack channels: [list of relevant channels]
 Key contacts: [names and roles]
-Current priorities: [top 2 or 3 things in focus]
+Current priorities: [top 2–3 things in focus]
 Known blockers: [anything waiting on external parties]
 ```
 
@@ -212,7 +212,7 @@ Writing style: [e.g., conversational, pyramid structure, short paragraphs]
 Topics / pillars: [e.g., AI, Career, Startup life]
 Tone: [e.g., practical, direct, personal]
 
-Do NOT post on my behalf. I post manually.
+Do NOT post on my behalf — I post manually.
 ```
 
 ---
@@ -236,67 +236,11 @@ Check which integrations you've set up (see docs/SETUP.md):
 
 ## Quality Gates
 
-These run on every draft, in this order. Each one changes the draft. None of them send
-anything: Slack, WhatsApp, email, Drive, and anything client-facing still wait for my
-explicit approval.
-
-### 1. Answer budget, before anything else
-
-`.agent/skills/no-ai-slop/answer_budget.md` decides what belongs in the draft at all.
-
-**Answer first. Stop at the answer. Reasoning is a reply to "why", not a part of every
-reply.** No process narration, no closing recap, no explanation of a thing I did not ask
-about. Ceilings that trigger a cut: chat reply to me 120 words, Slack or WhatsApp 80,
-email 150, comment 60, chase note 40. The ceiling lifts only when I ask for depth.
-
-**This applies to replies to me too.** I am a named human. Plain language, stop at the
-answer, no justification of the answer I just read.
-
-### 2. No AI slop, on anything a named human reads
-
-`.agent/skills/no-ai-slop/SKILL.md` runs on every Slack message, DM, thread reply, email,
-document comment, ticket comment, chase note, and reply draft, before the draft reaches
-me. Edit in the main loop, self-check against `eval.md` in the same folder, then show me
-the finished version. No before-and-after unless I ask.
-
-Two rules from that skill are absolute:
-
-- **The em-dash character is banned outright.** Reframe the sentence. Do not swap in a
-  hyphen where the sentence reads better restructured.
-- **Never claim an action that has not happened.** "I've sent it" and "I'm chasing him"
-  are banned until the send actually ran. Say the true state plus a commitment with a time
-  and a venue.
-
-### 3. Simplified Technical English
-
-`.agent/skills/no-ai-slop/ste.md` is on by default, on every communication including chat
-replies to me. Instruction sentences at 20 words or fewer, other sentences at 25, one
-instruction per sentence, active voice, present tense, articles kept, noun clusters of
-three words maximum, one word per meaning, simplest exact word, no idiom or metaphor,
-paragraphs of six sentences or fewer, warnings before the action.
-
-The STE approved dictionary is not applied verbatim, because it has no vocabulary for
-product work. Client and product terms stay. Quotes are exempt. Non-English drafts get the
-structural rules only.
-
-To turn STE off, delete this subsection. The rest of the gate keeps working.
-
-### 4. Draft review
-
-Then spawn the `draft-reviewer` subagent to verify the result: language, required
-sections, tone, channel fit, em-dash, sourcing. PASS means show me. Issues mean fix first.
-Running the reviewer before the edit wastes the pass.
-
-### What the machine checks, and what it does not
-
-`.claude/hooks/emdash_guard.py` warns on an em-dash written into a repo file.
-`.claude/hooks/send_slop_guard.py` reads outbound text before a send: an em-dash blocks
-the send, and banned words, slop phrases, an over-budget length, or an unrequested
-rationale section raise a warning.
-
-**A chat reply to me has no machine check.** No hook sees assistant text on its way to a
-human. That half runs on these rules alone, so tell me when I go over and I will save the
-correction.
+Before showing me any draft:
+- Correct language for the context? ✓
+- All required sections present? ✓
+- Tone appropriate (professional for work, conversational for personal)? ✓
+- No em-dashes (—) — use hyphens (-) instead ✓
 
 ---
 
@@ -305,8 +249,8 @@ correction.
 [Optional: list people the AI will encounter in context]
 
 ```
-[Name] / [Role] / [What they own, why relevant]
-[Name] / [Role] / [What they own, why relevant]
+[Name] — [Role] — [What they own / why relevant]
+[Name] — [Role] — [What they own / why relevant]
 ```
 
 ---

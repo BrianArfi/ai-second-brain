@@ -1,0 +1,9 @@
+{
+ "pid": 1761,
+ "at": 1788685113.301,
+ "interval_s": 30,
+ "tick_s": 10,
+ "device": "MacBookPro",
+ "recordings_dir": "~/MeetingRecordings",
+ "busy": null
+}

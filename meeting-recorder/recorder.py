@@ -38,10 +38,10 @@ def now_stamp():
     return datetime.datetime.now().strftime("%Y-%m-%d_%H%M")
 
 def write_sidecar(base, title, start, parts, plat, ad_hoc=False, attendees=None):
-    """ad_hoc=True marks a meeting the owner created himself (Slack huddle, phone
-    call, anything not on the calendar). The watcher then skips the calendar
-    match entirely, so the recording cannot inherit the title, attendees, or
-    MOM dedupe key of whatever calendar event happened to overlap it."""
+    """ad_hoc=True marks a meeting you started yourself (a huddle, a phone call,
+    anything not on the calendar). The watcher then skips the calendar match
+    entirely, so the recording cannot inherit the title, attendees, or dedupe
+    key of whatever calendar event happened to overlap it."""
     end = datetime.datetime.now(datetime.timezone.utc)
     meta = {
         "title": title,
@@ -181,50 +181,11 @@ class ScreenRecorder:
 
 # ---------- macos / linux (ffmpeg) ----------
 
-def ensure_macos_capture_device():
-    """Make sure the system-audio capture device exists, and say whether it does.
-
-    macOS exposes no system-audio input of its own, so a plain avfoundation capture records the
-    microphone and nothing else -- your half of the meeting. `macos/asb-systemaudio` builds a Core
-    Audio process tap (macOS 14.2+, no driver, no admin) wrapped in an aggregate device alongside
-    the mic, which is the device `config.json` points at.
-
-    Called before every macOS capture rather than once at setup: an aggregate device does not
-    survive every OS update, and discovering that at the top of a meeting is too late. `create` is
-    idempotent, so the usual case costs one fast subprocess.
-
-    Returns True when the device is there. A False return is NOT fatal on purpose -- the caller
-    falls back to the microphone, because half a meeting on disk beats none.
-    """
-    helper = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                          "macos", "asb-systemaudio")
-    if not os.path.isfile(helper):
-        return False
-    try:
-        r = subprocess.run([helper, "create"], capture_output=True, text=True, timeout=15)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    if r.returncode != 0:
-        # The helper's own message names the cause (permission, OS too old), and it is the only
-        # thing here that knows which -- so pass it through rather than inventing a summary.
-        sys.stderr.write(r.stderr or "could not create the system-audio capture device\n")
-        return False
-    return True
-
 def record_ffmpeg(base, plat, machine, mic_only, system_only):
     ffmpeg = machine.get("ffmpeg", "ffmpeg")
     out = base + ".wav"
     if plat == "macos":
         dev = machine.get("avfoundation_audio_device", ":0")
-        # --mic-only asked for the microphone, so do not quietly hand back a device that also
-        # carries the room's audio.
-        if not mic_only and not ensure_macos_capture_device():
-            fallback = machine.get("avfoundation_mic_fallback", ":0")
-            if dev != fallback:
-                sys.stderr.write(
-                    "WARNING: system audio is unavailable, recording the microphone only. "
-                    "This captures your voice but not the other people in the call.\n")
-                dev = fallback
         cmd = [ffmpeg, "-hide_banner", "-f", "avfoundation", "-i", dev,
                "-ac", "1", "-ar", "48000", out]
     else:  # linux

@@ -1,5 +1,5 @@
 ---
-description: Split this conversation into focused sub-sessions, one per thing needing a decision
+description: Thinking - Split this conversation into focused sub-sessions, one per thing needing a decision
 argument-hint: "[optional: what to split on]"
 ---
 

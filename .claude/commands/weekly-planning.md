@@ -1,5 +1,5 @@
 ---
-description: Weekly review + planning - synthesize last week across all clients, set next week's priorities. Phase-gated.
+description: Weekly - Weekly review + planning - synthesize last week across all clients, set next week's priorities. Phase-gated.
 argument-hint: "[optional focus]"
 ---
 

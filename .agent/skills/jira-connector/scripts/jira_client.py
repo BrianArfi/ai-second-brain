@@ -88,6 +88,62 @@ def standardize_status(status_name):
         return "IN PROGRESS"
     return "TO DO"
 
+_KANBAN_CACHE = {}
+
+def project_runs_sprints(domain, project_key):
+    """True when the project still runs sprints, False when it is Kanban.
+
+    MSP, MBA and STOR moved off sprints onto Kanban. Their legacy issues still
+    carry a stale `sprint` field naming "MSP Sprint 18" with state `active`,
+    which nobody closed, so `sprint in openSprints()` keeps resolving and
+    _active_sprint_via_jql reported a phantom sprint that ended 27 Aug 2026.
+    The briefing then read that as a sprint four days overrun, which is not a
+    thing that exists on a Kanban board.
+
+    The reliable signal is the project feature list: a team-managed project
+    that runs sprints exposes a `backlog` feature in the ENABLED state. MSP
+    exposes no backlog feature at all. Board type does not work here, because
+    both the sprint boards and the Kanban boards report `type: simple`.
+    """
+    cache_key = (domain, project_key)
+    if cache_key in _KANBAN_CACHE:
+        return _KANBAN_CACHE[cache_key]
+    runs = True
+    try:
+        r = requests.get(f"https://{domain}/rest/api/3/project/{project_key}/features",
+                         headers=HEADERS, auth=AUTH, timeout=20)
+        if r.status_code == 200:
+            feats = r.json().get("features", [])
+            runs = any("backlog" in (f.get("feature") or "").lower()
+                       and (f.get("state") or "").upper() == "ENABLED"
+                       for f in feats)
+    except Exception:
+        pass
+    _KANBAN_CACHE[cache_key] = runs
+    return runs
+
+def _kanban_snapshot(domain, project_key):
+    """Flow snapshot for a Kanban board: every issue, no sprint."""
+    fields = "summary,status,assignee,issuetype,parent,updated"
+    issues, token = [], None
+    while True:
+        params = {"jql": f"project = {project_key} ORDER BY updated DESC",
+                  "maxResults": 100, "fields": fields}
+        if token:
+            params["nextPageToken"] = token
+        r = requests.get(f"https://{domain}/rest/api/3/search/jql",
+                         headers=HEADERS, auth=AUTH, params=params, timeout=30)
+        if r.status_code != 200:
+            return {"error": f"Kanban snapshot error {r.status_code}: {r.text[:200]}"}
+        data = r.json()
+        page = data.get("issues", [])
+        issues.extend(page)
+        token = data.get("nextPageToken")
+        if not token or not page or len(issues) >= 600:
+            break
+    return {"sprint_name": None, "board_mode": "kanban", "end_date": None,
+            "issues": issues, "total_count": len(issues)}
+
 def _active_sprint_via_jql(domain, project_key):
     """Active-sprint snapshot for a board the agile sprint sub-resource refuses.
 
@@ -158,6 +214,11 @@ def fetch_board_active_sprint_and_issues(board_id, info):
     """Fetches details for active sprint and issues from a board."""
     domain = info["domain"]
     url = f"https://{domain}/rest/agile/1.0/board/{board_id}/sprint?state=active"
+
+    # A Kanban board has no sprint. Ask before falling back to the sprint field,
+    # which on MSP/MBA/STOR still names a sprint nobody closed.
+    if not project_runs_sprints(domain, info["project_key"]):
+        return _kanban_snapshot(domain, info["project_key"])
 
     try:
         resp = requests.get(url, headers=HEADERS, auth=AUTH, timeout=15)
@@ -251,6 +312,7 @@ def sprint_status(portfolio, stale_before=None):
             "name": info["name"],
             "project_key": info["project_key"],
             "domain": info["domain"],
+            "board_mode": data.get("board_mode", "sprint"),
             "sprint_name": data.get("sprint_name"),
             "end_date": data.get("end_date"),
             "total": total,
@@ -392,6 +454,7 @@ _INLINE_RE = re.compile(
     r"(\*\*.+?\*\*)"      # bold
     r"|(`[^`]+?`)"        # inline code
     r"|(\[[^\]]+?\]\([^)]+?\))"   # link
+    r"|(https?://[^\s<>()\[\]]+)"  # bare URL, before italic so underscores in a URL stay literal
     r"|(_[^_]+?_)"        # italic
 )
 
@@ -413,7 +476,7 @@ def _adf_inline(text):
     pos = 0
     for m in _INLINE_RE.finditer(text):
         emit(text[pos:m.start()])
-        bold, code, link, italic = m.groups()
+        bold, code, link, bare_url, italic = m.groups()
         if bold:
             emit(bold[2:-2], [{"type": "strong"}])
         elif code:
@@ -421,6 +484,8 @@ def _adf_inline(text):
         elif link:
             label, href = link[1:].split("](", 1)
             emit(label, link=href[:-1])
+        elif bare_url:
+            emit(bare_url, link=bare_url)
         elif italic:
             emit(italic[1:-1], [{"type": "em"}])
         pos = m.end()
@@ -430,10 +495,14 @@ def _adf_inline(text):
 def markdown_to_adf(md):
     """Convert a small markdown subset to an ADF document.
 
-    Supported: blank-line paragraphs, `* ` bullet lists with one level of
-    two-space nesting, and the inline marks bold, italic, code and link.
+    Supported: ATX headings (`#` to `######`), blank-line paragraphs,
+    `* ` bullet lists and `1. ` ordered lists with one level of two-space
+    nesting, `---` rules, and the inline marks bold, italic, code and link.
     This is the subset the Work ticket house style uses; anything else
     passes through as plain paragraph text.
+
+    Headings and ordered lists were literal text until 31 Aug 2026, so a
+    body written with `##` rendered a raw hash in Jira.
     """
     content = []
     lines = md.replace("\r\n", "\n").split("\n")
@@ -442,6 +511,43 @@ def markdown_to_adf(md):
         line = lines[i]
         if not line.strip():
             i += 1
+            continue
+        heading = re.match(r"^(#{1,6})\s+(.*)$", line)
+        if heading:
+            content.append({
+                "type": "heading",
+                "attrs": {"level": len(heading.group(1))},
+                "content": _adf_inline(heading.group(2).strip()),
+            })
+            i += 1
+            continue
+        if re.match(r"^\s*(---+|\*\*\*+|___+)\s*$", line):
+            content.append({"type": "rule"})
+            i += 1
+            continue
+        ordered = re.match(r"^\s*\d+[.)]\s+", line)
+        if ordered:
+            top = {"type": "orderedList", "attrs": {"order": 1}, "content": []}
+            while i < len(lines) and re.match(r"^\s*\d+[.)]\s+", lines[i]):
+                indent = len(lines[i]) - len(lines[i].lstrip())
+                item_text = re.sub(r"^\s*\d+[.)]\s+", "", lines[i]).strip()
+                item = {
+                    "type": "listItem",
+                    "content": [{"type": "paragraph", "content": _adf_inline(item_text)}],
+                }
+                if indent >= 2 and top["content"]:
+                    parent = top["content"][-1]
+                    nested = next(
+                        (c for c in parent["content"] if c["type"] == "orderedList"), None
+                    )
+                    if nested is None:
+                        nested = {"type": "orderedList", "attrs": {"order": 1}, "content": []}
+                        parent["content"].append(nested)
+                    nested["content"].append(item)
+                else:
+                    top["content"].append(item)
+                i += 1
+            content.append(top)
             continue
         if re.match(r"^\s*\* ", line):
             top = {"type": "bulletList", "content": []}
@@ -467,7 +573,14 @@ def markdown_to_adf(md):
             content.append(top)
             continue
         para = []
-        while i < len(lines) and lines[i].strip() and not re.match(r"^\s*\* ", lines[i]):
+        while (
+            i < len(lines)
+            and lines[i].strip()
+            and not re.match(r"^\s*\* ", lines[i])
+            and not re.match(r"^#{1,6}\s+", lines[i])
+            and not re.match(r"^\s*\d+[.)]\s+", lines[i])
+            and not re.match(r"^\s*(---+|\*\*\*+|___+)\s*$", lines[i])
+        ):
             para.append(lines[i].strip())
             i += 1
         content.append({"type": "paragraph", "content": _adf_inline(" ".join(para))})
@@ -506,6 +619,211 @@ def create_issue(project_key, summary, issue_type="Story", priority="High", desc
         raise RuntimeError(f"Create issue failed ({resp.status_code}): {resp.text[:600]}")
     key = resp.json()["key"]
     return key, f"https://{domain}/browse/{key}"
+
+# ── Ticket read / edit ────────────────────────────────────────────────────────
+#
+# Domain is derived from the issue key prefix, because getting it wrong is the
+# single easiest way to waste a round trip: MP and MPS live on Work's own site,
+# MSP, MBA and STOR live on ExampleVendor's.
+
+KEY_DOMAINS = {
+    "MP": "yourcompany.atlassian.net",
+    "MPS": "yourcompany.atlassian.net",
+    "MSP": "examplevendor.atlassian.net",
+    "MBA": "examplevendor.atlassian.net",
+    "STOR": "examplevendor.atlassian.net",
+}
+
+def domain_for_key(issue_key, override=None):
+    """Site that hosts this issue. Explicit --domain always wins."""
+    if override:
+        return override
+    prefix = issue_key.split("-")[0].upper()
+    if prefix not in KEY_DOMAINS:
+        raise SystemExit(
+            f"Unknown project prefix '{prefix}'. Known: {', '.join(sorted(KEY_DOMAINS))}. "
+            f"Pass --domain to override.")
+    return KEY_DOMAINS[prefix]
+
+def _adf_to_text(node):
+    """Flatten an ADF document back to readable plain text."""
+    if isinstance(node, str):
+        return node
+    if isinstance(node, list):
+        return "".join(_adf_to_text(n) for n in node)
+    if not isinstance(node, dict):
+        return ""
+    kind = node.get("type")
+    if kind == "text":
+        return node.get("text", "")
+    if kind == "hardBreak":
+        return "\n"
+    inner = _adf_to_text(node.get("content", []))
+    if kind in ("paragraph", "heading", "listItem", "blockquote", "codeBlock"):
+        return inner + "\n"
+    return inner
+
+def get_issue(issue_key, domain=None, raw=False):
+    """Fetch one issue. Returns the parsed JSON; prints a readable summary."""
+    domain = domain_for_key(issue_key, domain)
+    url = f"https://{domain}/rest/api/3/issue/{issue_key}"
+    resp = requests.get(url, headers=HEADERS, auth=AUTH, timeout=20)
+    if resp.status_code != 200:
+        raise RuntimeError(f"Get issue failed ({resp.status_code}): {resp.text[:400]}")
+    data = resp.json()
+    if raw:
+        print(json.dumps(data, indent=2))
+        return data
+    f = data.get("fields", {})
+    def name(obj, key="displayName"):
+        return (obj or {}).get(key) or (obj or {}).get("name") or "-"
+    print(f"{data['key']}  {f.get('summary','')}")
+    print(f"  url        https://{domain}/browse/{data['key']}")
+    print(f"  status     {name(f.get('status'), 'name')}")
+    print(f"  type       {name(f.get('issuetype'), 'name')}")
+    print(f"  priority   {name(f.get('priority'), 'name')}")
+    print(f"  assignee   {name(f.get('assignee'))}")
+    print(f"  reporter   {name(f.get('reporter'))}")
+    print(f"  labels     {', '.join(f.get('labels') or []) or '-'}")
+    print(f"  components {', '.join(c['name'] for c in (f.get('components') or [])) or '-'}")
+    parent = f.get("parent")
+    print(f"  parent     {parent['key'] if parent else '-'}")
+    print("  description")
+    body = _adf_to_text(f.get("description") or {}).rstrip()
+    for line in (body.splitlines() or ["    (empty)"]):
+        print(f"    {line}")
+    return data
+
+def edit_issue(issue_key, domain=None, summary=None, description_text=None,
+               priority=None, assignee_account_id=None, labels=None,
+               add_labels=None, components=None, dry_run=False):
+    """Update fields on an existing issue. Only the fields passed are touched."""
+    domain = domain_for_key(issue_key, domain)
+    fields = {}
+    if summary:
+        fields["summary"] = summary
+    if description_text:
+        fields["description"] = markdown_to_adf(description_text)
+    if priority:
+        fields["priority"] = {"name": priority}
+    if assignee_account_id:
+        fields["assignee"] = {"accountId": assignee_account_id}
+    if labels is not None:
+        fields["labels"] = list(labels)
+    if components is not None:
+        fields["components"] = [{"name": c} for c in components]
+    update = {}
+    if add_labels:
+        update["labels"] = [{"add": l} for l in add_labels]
+    if not fields and not update:
+        raise SystemExit("edit-issue: nothing to change. Pass at least one field.")
+    payload = {}
+    if fields:
+        payload["fields"] = fields
+    if update:
+        payload["update"] = update
+    if dry_run:
+        print(json.dumps(payload, indent=2))
+        return None
+    url = f"https://{domain}/rest/api/3/issue/{issue_key}"
+    resp = requests.put(url, json=payload, headers=HEADERS, auth=AUTH, timeout=20)
+    if resp.status_code not in (200, 204):
+        raise RuntimeError(f"Edit issue failed ({resp.status_code}): {resp.text[:600]}")
+    return f"https://{domain}/browse/{issue_key}"
+
+def comment_issue(issue_key, body_text, domain=None, comment_id=None, dry_run=False):
+    """Add a comment, or replace one that is already there.
+
+    Replacing matters: a comment that stated a spec which later turned out to be
+    wrong is worse than no comment, because the ticket then contradicts itself.
+    """
+    domain = domain_for_key(issue_key, domain)
+    payload = {"body": markdown_to_adf(body_text)}
+    if dry_run:
+        print(json.dumps(payload, indent=2))
+        return None
+    base = f"https://{domain}/rest/api/3/issue/{issue_key}/comment"
+    if comment_id:
+        resp = requests.put(f"{base}/{comment_id}", json=payload, headers=HEADERS,
+                            auth=AUTH, timeout=20)
+    else:
+        resp = requests.post(base, json=payload, headers=HEADERS, auth=AUTH, timeout=20)
+    if resp.status_code not in (200, 201):
+        raise RuntimeError(f"Comment failed ({resp.status_code}): {resp.text[:600]}")
+    cid = resp.json().get("id")
+    return cid, f"https://{domain}/browse/{issue_key}?focusedCommentId={cid}"
+
+def list_comments(issue_key, domain=None):
+    domain = domain_for_key(issue_key, domain)
+    url = f"https://{domain}/rest/api/3/issue/{issue_key}/comment"
+    resp = requests.get(url, headers=HEADERS, auth=AUTH, timeout=20)
+    if resp.status_code != 200:
+        raise RuntimeError(f"List comments failed ({resp.status_code}): {resp.text[:400]}")
+    for c in resp.json().get("comments", []):
+        who = (c.get("author") or {}).get("displayName", "-")
+        print(f"[{c['id']}] {who}  {c.get('updated','')[:19]}")
+        for line in _adf_to_text(c.get("body") or {}).rstrip().splitlines():
+            print(f"    {line}")
+
+def transition_issue(issue_key, to_status=None, domain=None, list_only=False):
+    domain = domain_for_key(issue_key, domain)
+    url = f"https://{domain}/rest/api/3/issue/{issue_key}/transitions"
+    resp = requests.get(url, headers=HEADERS, auth=AUTH, timeout=20)
+    if resp.status_code != 200:
+        raise RuntimeError(f"Transitions failed ({resp.status_code}): {resp.text[:400]}")
+    options = resp.json().get("transitions", [])
+    if list_only or not to_status:
+        for t in options:
+            print(f"{t['id']:>5}  {t['to']['name']}")
+        return None
+    match = [t for t in options if t["to"]["name"].lower() == to_status.lower()
+             or t["name"].lower() == to_status.lower()]
+    if not match:
+        raise SystemExit(f"No transition to '{to_status}'. Available: "
+                         + ", ".join(t["to"]["name"] for t in options))
+    resp = requests.post(url, json={"transition": {"id": match[0]["id"]}},
+                         headers=HEADERS, auth=AUTH, timeout=20)
+    if resp.status_code != 204:
+        raise RuntimeError(f"Transition failed ({resp.status_code}): {resp.text[:400]}")
+    return f"https://{domain}/browse/{issue_key}"
+
+def _board_for_key(issue_key):
+    """Board that owns this project key, from the BOARDS map."""
+    prefix = issue_key.split("-")[0].upper()
+    for bid, info in BOARDS.items():
+        if info["project_key"] == prefix:
+            return bid, info["domain"]
+    raise SystemExit(f"No board mapped for project '{prefix}'.")
+
+def sprint_issue(issue_key, to_sprint=None, list_only=False):
+    """Move an issue into a sprint, or list the sprints it could go to.
+
+    Sprint membership lives on the agile API, not on the issue fields, which is
+    why this cannot be done through edit-issue.
+    """
+    board_id, domain = _board_for_key(issue_key)
+    url = f"https://{domain}/rest/agile/1.0/board/{board_id}/sprint"
+    resp = requests.get(url, params={"state": "active,future", "maxResults": 50},
+                        headers=HEADERS, auth=AUTH, timeout=20)
+    if resp.status_code != 200:
+        raise RuntimeError(f"List sprints failed ({resp.status_code}): {resp.text[:400]}")
+    sprints = resp.json().get("values", [])
+    if list_only or not to_sprint:
+        for sp in sprints:
+            print(f"{sp['id']:>6}  {sp['state']:<7} {sp['name']}  "
+                  f"{(sp.get('startDate') or '')[:10]} -> {(sp.get('endDate') or '')[:10]}")
+        return None
+    match = [sp for sp in sprints
+             if str(sp["id"]) == str(to_sprint) or sp["name"].lower() == to_sprint.lower()]
+    if not match:
+        raise SystemExit(f"No active or future sprint '{to_sprint}'. Available: "
+                         + ", ".join(sp["name"] for sp in sprints))
+    sprint = match[0]
+    move = requests.post(f"https://{domain}/rest/agile/1.0/sprint/{sprint['id']}/issue",
+                         json={"issues": [issue_key]}, headers=HEADERS, auth=AUTH, timeout=20)
+    if move.status_code != 204:
+        raise RuntimeError(f"Sprint move failed ({move.status_code}): {move.text[:400]}")
+    return sprint["name"], f"https://{domain}/browse/{issue_key}"
 
 def main():
     if len(sys.argv) > 1:
@@ -561,8 +879,119 @@ def main():
                                 description, args.assignee, args.domain,
                                 parent=args.parent, labels=args.label, components=args.component)
         print(f"Created: {key} -> {url}")
+    elif action in ("get-issue", "show"):
+        import argparse
+        parser = argparse.ArgumentParser(prog="jira_client.py get-issue")
+        parser.add_argument("issue")
+        parser.add_argument("--domain", default=None)
+        parser.add_argument("--raw", action="store_true", help="print the full JSON")
+        args = parser.parse_args(sys.argv[2:])
+        get_issue(args.issue, args.domain, raw=args.raw)
+    elif action == "edit-issue":
+        import argparse
+        parser = argparse.ArgumentParser(prog="jira_client.py edit-issue")
+        parser.add_argument("issue")
+        parser.add_argument("--domain", default=None)
+        parser.add_argument("--summary", default=None)
+        parser.add_argument("--description", default=None)
+        parser.add_argument("--description-file", default=None,
+                            help="markdown file; avoids shell escaping on long specs")
+        parser.add_argument("--priority", default=None)
+        parser.add_argument("--assignee", default=None, help="accountId")
+        parser.add_argument("--label", action="append", default=None,
+                            help="REPLACES all labels; repeat per label")
+        parser.add_argument("--add-label", action="append", default=None,
+                            help="adds a label, keeps the rest")
+        parser.add_argument("--component", action="append", default=None,
+                            help="REPLACES all components")
+        parser.add_argument("--dry-run", action="store_true",
+                            help="print the payload and exit without writing")
+        parser.add_argument("--approved", action="store_true",
+                            help="required to actually write; a Jira edit is team-facing")
+        args = parser.parse_args(sys.argv[2:])
+        description = args.description
+        if args.description_file:
+            with open(args.description_file, encoding="utf-8") as fh:
+                description = fh.read()
+        if not args.dry_run and not args.approved:
+            sys.exit("edit-issue: refusing to write without --approved "
+                     "(the owner must sign off on the specific edit). Use --dry-run to preview.")
+        url = edit_issue(args.issue, args.domain, args.summary, description,
+                         args.priority, args.assignee, args.label, args.add_label,
+                         args.component, dry_run=args.dry_run)
+        if url:
+            print(f"Updated: {args.issue} -> {url}")
+    elif action == "comment":
+        import argparse
+        parser = argparse.ArgumentParser(prog="jira_client.py comment")
+        parser.add_argument("issue")
+        parser.add_argument("--domain", default=None)
+        parser.add_argument("--text", default=None)
+        parser.add_argument("--text-file", default=None,
+                            help="markdown file; avoids shell escaping")
+        parser.add_argument("--comment-id", default=None,
+                            help="replace this comment instead of adding a new one")
+        parser.add_argument("--list", action="store_true",
+                            help="print existing comments with their ids, then exit")
+        parser.add_argument("--dry-run", action="store_true")
+        parser.add_argument("--approved", action="store_true",
+                            help="required to actually post; a Jira comment is team-facing")
+        args = parser.parse_args(sys.argv[2:])
+        if args.list:
+            list_comments(args.issue, args.domain)
+            sys.exit(0)
+        body = args.text
+        if args.text_file:
+            with open(args.text_file, encoding="utf-8") as fh:
+                body = fh.read()
+        if not body:
+            sys.exit("comment: pass --text or --text-file")
+        if not args.dry_run and not args.approved:
+            sys.exit("comment: refusing to post without --approved "
+                     "(the owner must sign off on the specific comment). Use --dry-run to preview.")
+        result = comment_issue(args.issue, body, args.domain, args.comment_id,
+                               dry_run=args.dry_run)
+        if result:
+            cid, url = result
+            verb = "Updated" if args.comment_id else "Posted"
+            print(f"{verb} comment {cid} -> {url}")
+    elif action == "transition":
+        import argparse
+        parser = argparse.ArgumentParser(prog="jira_client.py transition")
+        parser.add_argument("issue")
+        parser.add_argument("--domain", default=None)
+        parser.add_argument("--to", default=None, help="target status name")
+        parser.add_argument("--list", action="store_true",
+                            help="print the transitions available from here")
+        parser.add_argument("--approved", action="store_true")
+        args = parser.parse_args(sys.argv[2:])
+        if args.list or not args.to:
+            transition_issue(args.issue, None, args.domain, list_only=True)
+            sys.exit(0)
+        if not args.approved:
+            sys.exit("transition: refusing to move the ticket without --approved.")
+        url = transition_issue(args.issue, args.to, args.domain)
+        print(f"Transitioned: {args.issue} to {args.to} -> {url}")
+    elif action == "sprint":
+        import argparse
+        parser = argparse.ArgumentParser(prog="jira_client.py sprint")
+        parser.add_argument("issue")
+        parser.add_argument("--to", default=None, help="sprint name or id")
+        parser.add_argument("--list", action="store_true",
+                            help="print the active and future sprints on this board")
+        parser.add_argument("--approved", action="store_true")
+        args = parser.parse_args(sys.argv[2:])
+        if args.list or not args.to:
+            sprint_issue(args.issue, None, list_only=True)
+            sys.exit(0)
+        if not args.approved:
+            sys.exit("sprint: refusing to move the ticket into a sprint without --approved.")
+        name, url = sprint_issue(args.issue, args.to)
+        print(f"Moved: {args.issue} into {name} -> {url}")
     else:
         print(f"Unknown action: {action}")
+        print("Actions: verify-connections, daily-digest, sprint-status, "
+              "create-issue, get-issue, edit-issue, comment, transition, sprint")
         sys.exit(1)
 
 if __name__ == "__main__":

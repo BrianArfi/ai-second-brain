@@ -687,6 +687,62 @@ def check_length(text, allow_split=False, label="message"):
     print("", file=sys.stderr)
     return False
 
+def find_dm(token, user_ids):
+    """
+    Finds an EXISTING direct message or group DM that holds exactly the given
+    user ids, and prints its channel id. Feed that id to `--action post`.
+
+    This reads conversations.list rather than calling conversations.open,
+    because the owner's user token carries im:read / mpim:read but not im:write or
+    mpim:write. So a conversation that has never been opened in the Slack app
+    cannot be created from here: open it once by hand, then this finds it.
+    """
+    wanted = {u.strip() for u in user_ids.split(",") if u.strip()}
+    if not wanted:
+        print("Error: --users must name at least one user id.", file=sys.stderr)
+        return False
+
+    me = make_slack_request("auth.test", token, {})
+    my_id = me.get("user_id") if me.get("ok") else None
+
+    cursor = None
+    while True:
+        params = {"types": "im,mpim", "limit": 1000}
+        if cursor:
+            params["cursor"] = cursor
+        response = make_slack_request("conversations.list", token, params)
+        if not response.get("ok"):
+            print(f"Error listing conversations: {response.get('error')}", file=sys.stderr)
+            return False
+        for conv in response.get("channels", []):
+            if conv.get("is_im"):
+                if wanted == {conv.get("user")}:
+                    print(f"DM channel: {conv['id']}")
+                    return conv["id"]
+                continue
+            # A group DM only exposes its members through its generated name.
+            members = set()
+            member_page = make_slack_request(
+                "conversations.members", token, {"channel": conv["id"], "limit": 100}
+            )
+            if member_page.get("ok"):
+                members = set(member_page.get("members", []))
+            if my_id:
+                members.discard(my_id)
+            if members == wanted:
+                print(f"Group DM channel: {conv['id']}")
+                return conv["id"]
+        cursor = (response.get("response_metadata") or {}).get("next_cursor")
+        if not cursor:
+            break
+
+    print(
+        "No existing conversation holds exactly those users. Open it once in the "
+        "Slack app, then run this again.",
+        file=sys.stderr,
+    )
+    return False
+
 def post_message(token, channel_id, text, thread_ts=None, unfurl=False, allow_split=False):
     """
     Posts a message to a channel (or as a thread reply when thread_ts is set),
@@ -877,11 +933,11 @@ def leave_channel(token, channel_id):
 
 def main():
     parser = argparse.ArgumentParser(description="Slack Connector Helper")
-    parser.add_argument("--action", required=True, choices=["list_channels", "list_joined_channels", "history", "list_users", "user_info", "channel_members", "search", "channel_info", "file_info", "download", "upload", "post", "update", "delete", "lookup", "invite", "join", "leave", "create_channel", "set_purpose"], help="Action to perform")
+    parser.add_argument("--action", required=True, choices=["list_channels", "list_joined_channels", "history", "list_users", "user_info", "channel_members", "search", "channel_info", "file_info", "download", "upload", "post", "update", "delete", "lookup", "find_dm", "invite", "join", "leave", "create_channel", "set_purpose"], help="Action to perform")
     parser.add_argument("--token", help="Explicit Slack token. Default for all actions is SLACK_USER_TOKEN (xoxp, the owner's), falling back to SLACK_BOT_TOKEN. Use --bot to force the bot token.")
     parser.add_argument("--channel", help="Channel ID for history, channel_members, upload, post, lookup, invite, join, and leave actions")
     parser.add_argument("--user", help="User ID/Name for user_info or lookup action")
-    parser.add_argument("--users", help="User IDs (comma-separated) for invite action")
+    parser.add_argument("--users", help="User IDs (comma-separated) for invite and find_dm actions")
     parser.add_argument("--name", help="Channel name for create_channel action")
     parser.add_argument("--private", action="store_true", help="Create a private channel instead of a public one (create_channel)")
     parser.add_argument("--purpose", help="Channel purpose (create_channel, set_purpose)")
@@ -979,6 +1035,12 @@ def main():
             print(f"User ID for {args.user}: {uid}")
         else:
             print(f"User {args.user} not found.")
+    elif args.action == "find_dm":
+        if not args.users:
+            print("Error: --users (comma-separated user IDs) is required for find_dm.", file=sys.stderr)
+            sys.exit(1)
+        if not find_dm(token, args.users):
+            sys.exit(1)
     elif args.action == "channel_members":
         if not args.channel:
             print("Error: --channel is required for channel_members action.", file=sys.stderr)

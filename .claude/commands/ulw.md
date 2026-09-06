@@ -1,5 +1,5 @@
 ---
-description: Ultrawork mode - plan, fan out parallel subagents, self-verify, drive to a definition of done
+description: Thinking - Ultrawork mode - plan, fan out parallel subagents, self-verify, drive to a definition of done
 argument-hint: "<the task to ultrawork>"
 ---
 

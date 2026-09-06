@@ -31,6 +31,18 @@ if [ -z "$CHROME_PATH" ]; then
                || which google-chrome-stable 2>/dev/null)
 fi
 
+# 2c. macOS app bundles. None of the paths above match a Mac, so a machine with
+# Chrome installed still reported "No Chromium/Chrome binary found" until this
+# was added on 24 Aug 2026.
+if [ -z "$CHROME_PATH" ]; then
+    for candidate in \
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+        "/Applications/Chromium.app/Contents/MacOS/Chromium" \
+        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"; do
+        if [ -x "$candidate" ]; then CHROME_PATH="$candidate"; break; fi
+    done
+fi
+
 if [ -z "$CHROME_PATH" ]; then
     echo "❌ No Chromium/Chrome binary found."
     exit 1

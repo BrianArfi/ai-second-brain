@@ -21,8 +21,10 @@ import argparse
 import datetime
 import json
 import os
+import platform
 import subprocess
 import sys
+import threading
 import time
 
 from common import REPO_ROOT, load_config, parse_json_tail, slugify
@@ -421,6 +423,8 @@ def process(audio_path, cfg, state):
     meta = read_sidecar(base)
     title = meta.get("title") or os.path.splitext(name)[0]
     print(f"[watcher] processing: {name} ({title})")
+    # Named in the heartbeat so a reader can tell "working on this one" from "queue not moving".
+    set_busy(title)
 
     os.makedirs(TRANSCRIPTS_DIR, exist_ok=True)
     slug = slugify(title)
@@ -504,7 +508,7 @@ def scan_once(cfg, state):
     for path in find_candidates(rec_dir, state, ffmpeg):
         try:
             process(path, cfg, state)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 -- one bad file must not end the watch
             prev = state["processed"].get(path)
             attempts = (prev.get("attempts", 0) if isinstance(prev, dict) else 0) + 1
             quarantined = attempts >= MAX_ATTEMPTS
@@ -526,6 +530,70 @@ def scan_once(cfg, state):
                 heartbeat("fail", f"{name}: QUARANTINED after {attempts} attempts, "
                                   f"no further retries -- recover with "
                                   f"'watcher.py --file <path>'. Last error: {e}")
+        finally:
+            set_busy(None)
+
+# ---------- liveness ----------
+#
+# The ASB app's corner feed used to label every un-transcribed recording "transcription
+# running", because the only fact it had was "audio on disk, not yet in state.json". That is
+# true whether this watcher is working through the file or has not been started at all, and on
+# 24 Aug 2026 four meetings sat there for ten hours reading as work in progress while nothing
+# was running. A count of hours is not a symptom anyone can act on; "the transcriber is not
+# running" is.
+#
+# So the watcher says it is alive, every poll, in one small file. Absent or stale means not
+# running, and the app says exactly that instead of guessing.
+
+HEARTBEAT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "watcher_heartbeat.json")
+
+# The beat runs on its own thread, NOT on the poll loop. `scan_once` transcribes synchronously and
+# one meeting can hold it for an hour, so a beat written by the loop would go stale during exactly
+# the work it is meant to prove -- and the app would report "the transcriber is not running" about
+# a machine that was busy transcribing.
+HEARTBEAT_TICK_S = 10
+
+# What the beat says it is working on, set by `process` and read by the beat thread.
+_busy = None
+_busy_lock = threading.Lock()
+
+def set_busy(name):
+    global _busy
+    with _busy_lock:
+        _busy = name
+
+def write_heartbeat(cfg, interval):
+    """One line of proof that this process is alive. Atomic: the reader polls it every few
+    seconds and a half-written file would read as a dead watcher."""
+    with _busy_lock:
+        busy = _busy
+    row = {
+        "pid": os.getpid(),
+        "at": round(time.time(), 3),
+        "interval_s": interval,
+        "tick_s": HEARTBEAT_TICK_S,
+        "device": cfg.get("machine", {}).get("name") or platform.node(),
+        "recordings_dir": cfg.get("machine", {}).get("recordings_dir"),
+        "busy": busy,
+    }
+    tmp = HEARTBEAT_PATH + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(row, f, indent=1)
+        os.replace(tmp, HEARTBEAT_PATH)
+    except OSError:
+        pass            # a missed beat is a stale reading, never a reason to stop working
+
+def start_heartbeat(cfg, interval):
+    """Beats until the process exits. Daemon, so Ctrl-C still ends the watcher at once."""
+    def beat():
+        while True:
+            write_heartbeat(cfg, interval)
+            time.sleep(HEARTBEAT_TICK_S)
+
+    write_heartbeat(cfg, interval)
+    threading.Thread(target=beat, daemon=True, name="watcher-heartbeat").start()
 
 def report_status(state):
     now = time.time()
@@ -569,6 +637,7 @@ def main():
         return
     print(f"[watcher] polling {cfg['machine'].get('recordings_dir')} "
           f"every {args.interval}s (Ctrl-C to stop)")
+    start_heartbeat(cfg, args.interval)
     while True:
         scan_once(cfg, state)
         time.sleep(args.interval)

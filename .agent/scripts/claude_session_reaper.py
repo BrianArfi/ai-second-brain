@@ -34,7 +34,11 @@ from pathlib import Path
 STATE_PATH = Path.home() / ".cache" / "claude_session_reaper.json"
 RESUME_HINTS = Path.home() / ".cache" / "claude_reaped_sessions.md"
 
-PROC_PATTERN = "native-binary/claude"
+# WSL: VS Code panels spawn native-binary/claude. macOS: the ASB desktop app and
+# terminals spawn ~/.local/bin/claude; the same idle logic applies, but /proc does
+# not exist there, so every read falls back to ps/lsof on darwin.
+IS_DARWIN = sys.platform == "darwin"
+PROC_PATTERN = ".local/bin/claude" if IS_DARWIN else "native-binary/claude"
 
 # CPU seconds a process may burn between two samples and still count as "quiet".
 #
@@ -52,8 +56,43 @@ QUIET_CPU_SECONDS = 15.0
 
 CLK_TCK = os.sysconf("SC_CLK_TCK")
 
+def _parse_clock(text):
+    """Parse ps [[dd-]hh:]mm:ss[.ff] into seconds, or None."""
+    text = text.strip()
+    if not text:
+        return None
+    days = 0
+    if "-" in text:
+        d, text = text.split("-", 1)
+        try:
+            days = int(d)
+        except ValueError:
+            return None
+    parts = text.split(":")
+    try:
+        parts = [float(p) for p in parts]
+    except ValueError:
+        return None
+    secs = 0.0
+    for p in parts:
+        secs = secs * 60 + p
+    return days * 86400 + secs
+
+def _ps_field(pid, field):
+    try:
+        out = subprocess.run(
+            ["ps", "-o", f"{field}=", "-p", str(pid)],
+            capture_output=True, text=True, timeout=10,
+        )
+        return out.stdout.strip()
+    except subprocess.SubprocessError:
+        return ""
+
 def read_proc_cpu(pid):
     """Return (utime + stime) in seconds, or None if the process is gone."""
+    if IS_DARWIN:
+        val = _parse_clock(_ps_field(pid, "cputime"))
+        return val
     try:
         stat = Path(f"/proc/{pid}/stat").read_text()
     except (FileNotFoundError, ProcessLookupError, PermissionError):
@@ -67,6 +106,9 @@ def read_proc_cpu(pid):
     return (utime + stime) / CLK_TCK
 
 def read_proc_age(pid):
+    if IS_DARWIN:
+        val = _parse_clock(_ps_field(pid, "etime"))
+        return int(val) if val is not None else 0
     try:
         out = subprocess.run(
             ["ps", "-o", "etimes=", "-p", str(pid)],
@@ -77,6 +119,11 @@ def read_proc_age(pid):
         return 0
 
 def read_proc_rss_mb(pid):
+    if IS_DARWIN:
+        try:
+            return int(_ps_field(pid, "rss")) // 1024
+        except ValueError:
+            return 0
     try:
         for line in Path(f"/proc/{pid}/status").read_text().splitlines():
             if line.startswith("VmRSS:"):
@@ -86,11 +133,33 @@ def read_proc_rss_mb(pid):
     return 0
 
 def read_cmdline(pid):
+    if IS_DARWIN:
+        # Whitespace-split loses quoting, but the fields we match on
+        # (the binary path and --resume=<uuid>) never contain spaces.
+        return _ps_field(pid, "command").split()
     try:
         raw = Path(f"/proc/{pid}/cmdline").read_bytes()
     except (FileNotFoundError, ProcessLookupError, PermissionError):
         return []
     return raw.decode("utf-8", "replace").split("\0")
+
+def read_cwd(pid):
+    if IS_DARWIN:
+        try:
+            out = subprocess.run(
+                ["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+                capture_output=True, text=True, timeout=10,
+            )
+            for line in out.stdout.splitlines():
+                if line.startswith("n"):
+                    return line[1:]
+        except subprocess.SubprocessError:
+            pass
+        return "?"
+    try:
+        return os.readlink(f"/proc/{pid}/cwd")
+    except OSError:
+        return "?"
 
 def find_sessions():
     """Every live Claude CLI process, with the detail needed to judge and restore it."""
@@ -123,10 +192,7 @@ def find_sessions():
         if cpu is None:
             continue
 
-        try:
-            cwd = os.readlink(f"/proc/{pid}/cwd")
-        except OSError:
-            cwd = "?"
+        cwd = read_cwd(pid)
 
         sessions.append({
             "pid": pid,

@@ -38,6 +38,20 @@ Two severities, matching how the skill itself is written
                          A warning rather than a block, because a long message is
                          sometimes right and no regex can tell which one this is.
 
+  a named person with  -> permissionDecision "deny", on Slack sends only. Slack posts
+  no Slack handle         a bare "Teammate" as text: no ping, no badge, no notification, so
+                          the message sits in the channel until somebody scrolls past it.
+                          The connector already converts a typed `@Teammate`, but a draft that
+                          writes the plain name never reaches that code, and the plain name
+                          is what drafts carry. The refusal prints the exact `<@ID>` to
+                          paste, resolved by `.agent/scripts/slack_mentions.py`. Deny for
+                          the same reason as the em-dash: an "ask" never reaches a prompt
+                          under bypassPermissions. Override when the person is being talked
+                          ABOUT rather than addressed: SLOP_GUARD_ALLOW_PLAIN_NAMES=1.
+                          A name that resolves to two live accounts only warns, because
+                          the guard cannot pick between them and a block with no correct
+                          fix is a dead end.
+
 Scope: `slack_client.py` in either connector, `gmail_manager.py`, and
 `gdoc_comment.py`. Flags read: `--text`, `--text-file`, `--body`, `--body-file`,
 and the `text` fields inside `--items` JSON. Paths that never touch Bash (a
@@ -56,7 +70,42 @@ import re
 import shlex
 import sys
 
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 MAX_FILE_BYTES = 200_000
+
+# A fathom.video/calls/<id> link is the INTERNAL one: it needs a Fathom account
+# and a manual approval from the owner before anybody can watch. On 31 Aug 2026
+# one went into a Slack thread with ExampleVendor, and the next morning Teammate Meer was
+# asking the owner for access instead of watching the demo. Fathom already gives every
+# recording a public share_url that opens with no account. So this is a link that
+# is simply the wrong one, always, in any message leaving the machine, which makes
+# it a deny rather than a warning.
+FATHOM_CALL_RE = re.compile(r'https?://(?:www\.)?fathom\.video/calls/([A-Za-z0-9_-]+)')
+FATHOM_CACHE = os.path.join(
+    os.path.dirname(__file__), '..', '..', 'journal', 'state', 'fathom_share_links.json')
+
+def fathom_share_hint(call_ids):
+    """The share link for each call id, when share-link has already cached it.
+
+    Read-only and local by design. A PreToolUse hook must not make a network call
+    on the way to a send, so an uncached id gets the command to run instead of a
+    silent stall.
+    """
+    try:
+        with open(os.path.abspath(FATHOM_CACHE)) as f:
+            cache = json.load(f)
+    except Exception:
+        cache = {}
+    lines = []
+    for cid in call_ids:
+        hit = (cache.get(cid) or {}).get('share_url')
+        if hit:
+            lines.append(f'{cid} -> {hit}')
+        else:
+            lines.append(
+                f'{cid} -> not cached, run: python3 .agent/skills/fathom-connector/'
+                f'scripts/fathom_client.py --action share-link --id {cid}')
+    return lines
 
 # Banned outright (SKILL.md "Words to cut"). `harness` is deliberately omitted:
 # this repo calls the Claude setup "the harness" in almost every message, so
@@ -108,7 +157,6 @@ RATIONALE_LEADINS = [
     'to walk you through', 'the reason for this is', 'by way of background',
 ]
 
-
 def payload_words(text):
     """Words the reader has to read, with the payload excluded.
 
@@ -126,7 +174,6 @@ def payload_words(text):
             continue
         out.append(line)
     return len(' '.join(out).split())
-
 
 def find_rationale(text):
     low = ' '.join(text.lower().split())
@@ -150,16 +197,29 @@ INLINE_FLAGS = ('--text', '--body')
 FILE_FLAGS = ('--text-file', '--text_file', '--body-file', '--body_file')
 JSON_FLAGS = ('--items',)
 
+UNREADABLE = object()   # sentinel: a send file this hook could not read
 
 def read_send_file(path, label):
+    """The text of a --text-file/--body-file send.
+
+    Returns UNREADABLE rather than None when the path is not there. This hook is
+    PreToolUse, so it runs BEFORE the Bash command does. A command that writes the
+    draft and sends it in one call therefore reaches this function with the file
+    not yet created, and returning None here made main() exit 0 and wave the send
+    through: no em-dash block, no Fathom link block, no handle gate, nothing.
+
+    That is the default shape of a send in this repo (heredoc the draft, then post),
+    so the gate was open far more often than it was shut. Caught 4 Sep 2026 after a
+    message went out on the third attempt with content two earlier attempts had been
+    refused for.
+    """
     try:
         if os.path.getsize(path) > MAX_FILE_BYTES:
             return None, None
         with open(path, encoding='utf-8', errors='replace') as f:
             return f.read(), f'{label} {os.path.basename(path)}'
     except OSError:
-        return None, None
-
+        return UNREADABLE, f'{label} {os.path.basename(path)}'
 
 def comment_text(path):
     """Every `text` field in a gdoc_comment items file, joined.
@@ -183,7 +243,6 @@ def comment_text(path):
     if not joined:
         return None, None
     return joined, f'--items {os.path.basename(path)} ({len(texts)} comment(s))'
-
 
 def outbound_text(command):
     """The text this command would send. Returns (text, origin) or (None, None)."""
@@ -212,6 +271,19 @@ def outbound_text(command):
                 return comment_text(tok.split('=', 1)[1])
     return None, None
 
+def missing_handles(text):
+    """People named in an outbound Slack message with no `<@ID>` behind the name.
+
+    Returns (resolvable, ambiguous). Never raises: a broken index must not stop a send.
+    """
+    try:
+        sys.path.insert(0, os.path.join(REPO_ROOT, '.agent', 'scripts'))
+        from slack_mentions import unmentioned
+        people = unmentioned(text)
+    except Exception:
+        return [], []
+    return ([p for p in people if len(p['ids']) == 1],
+            [p for p in people if len(p['ids']) > 1])
 
 def send_target(command):
     """(channel, word ceiling) for the first marker this command matches."""
@@ -242,10 +314,83 @@ def main():
         sys.exit(0)
 
     text, origin = outbound_text(command)
+
+    # The send file does not exist yet, because this hook runs before the command
+    # that creates it. Refuse rather than pass: an unchecked send is the failure
+    # this whole hook exists to prevent, and it is silent.
+    if text is UNREADABLE:
+        print(json.dumps({
+            'hookSpecificOutput': {
+                'hookEventName': 'PreToolUse',
+                'permissionDecision': 'deny',
+                'permissionDecisionReason': (
+                    'SEND FILE NOT READABLE YET (%s) - this hook runs BEFORE the '
+                    'command, so a draft written and sent in the same Bash call '
+                    'cannot be checked, and the send would go out with no em-dash '
+                    'gate, no Fathom link gate and no handle gate behind it. '
+                    'Write the draft in one Bash call, then send it in a separate '
+                    'call. If the path is simply wrong, fix the path.'
+                ) % (origin,),
+            }
+        }))
+        sys.exit(0)
+
     if not text or not text.strip():
         sys.exit(0)
 
     channel, ceiling = send_target(command)
+
+    fathom_calls = list(dict.fromkeys(FATHOM_CALL_RE.findall(text)))
+    if fathom_calls and not re.search(
+            r'(?<![\w-])SLOP_GUARD_ALLOW_FATHOM_CALLS=1(?![\w-])', command):
+        print(json.dumps({
+            'hookSpecificOutput': {
+                'hookEventName': 'PreToolUse',
+                'permissionDecision': 'deny',
+                'permissionDecisionReason': (
+                    'FATHOM LINK GATE - the text about to be sent ({}) carries an '
+                    'internal fathom.video/calls/ link. That link needs a Fathom '
+                    'account and a manual approval from the owner, so the recipient '
+                    'cannot open it and will ask for access instead. Send the '
+                    'public share link: {}. Then re-run the send. Override with '
+                    'SLOP_GUARD_ALLOW_FATHOM_CALLS=1 only when the recipient is '
+                    'already on the owner\'s Fathom team.'
+                ).format(origin, '; '.join(fathom_share_hint(fathom_calls))),
+            }
+        }))
+        sys.exit(0)
+
+    ambiguous_names = []
+    # Slack only: a person named without a handle gets no ping. Runs before the dash
+    # gate so one refusal can carry both fixes rather than costing two round trips.
+    if 'slack_client.py' in command and not re.search(
+            r'(?<![\w-])SLOP_GUARD_ALLOW_PLAIN_NAMES=1(?![\w-])', command):
+        resolvable, ambiguous = missing_handles(text)
+        ambiguous_names = ambiguous
+        if resolvable:
+            fixes = '; '.join('%s -> <@%s>' % (p['name'], p['ids'][0]) for p in resolvable[:8])
+            reason = (
+                'SLACK HANDLE GATE - the message about to be sent (%s) names %s '
+                'without a Slack handle, so Slack posts the name as plain text and '
+                'nobody gets a ping. Replace the first mention of each with: %s. '
+                'Then re-run the send. Override with SLOP_GUARD_ALLOW_PLAIN_NAMES=1 '
+                'when the person is being talked about rather than addressed. '
+                'Resolve any other name with: python3 .agent/scripts/slack_mentions.py '
+                'check --file <draft>'
+            ) % (origin, ', '.join(p['name'] for p in resolvable), fixes)
+            if ambiguous:
+                reason += '. Ambiguous, pick by hand: ' + '; '.join(
+                    '%s (%s)' % (p['name'], ', '.join('<@%s>' % i for i in p['ids']))
+                    for p in ambiguous[:4])
+            print(json.dumps({
+                'hookSpecificOutput': {
+                    'hookEventName': 'PreToolUse',
+                    'permissionDecision': 'deny',
+                    'permissionDecisionReason': reason,
+                }
+            }))
+            sys.exit(0)
+
     dashes = [c for c in ('—', '–') if c in text]
     words = find_words(text)
     phrases = find_phrases(text)
@@ -286,8 +431,28 @@ def main():
         }))
         sys.exit(0)
 
-    if words or phrases or over or rationale:
+    if ambiguous_names and not (words or phrases or over or rationale):
+        print(json.dumps({
+            'hookSpecificOutput': {
+                'hookEventName': 'PreToolUse',
+                'additionalContext': (
+                    'slack handles: %s match more than one live Slack account, so no '
+                    'handle was added and nobody gets a ping. Pick one by hand: %s. '
+                    'The People page for that person is the place to record the answer.'
+                ) % (', '.join(p['name'] for p in ambiguous_names),
+                     '; '.join('%s (%s)' % (p['name'], ', '.join('<@%s>' % i for i in p['ids']))
+                               for p in ambiguous_names[:4])),
+            }
+        }))
+        sys.exit(0)
+
+    if words or phrases or over or rationale or ambiguous_names:
         bits = []
+        if ambiguous_names:
+            bits.append('names matching two live Slack accounts, so no handle was '
+                        'added: ' + '; '.join(
+                            '%s (%s)' % (p['name'], ', '.join('<@%s>' % i for i in p['ids']))
+                            for p in ambiguous_names[:4]))
         if words:
             bits.append('banned words: ' + ', '.join(words[:6]))
         if phrases:

@@ -173,6 +173,35 @@ def widen_and_lint(docs, doc_id, total, legacy_weights=False, cap=CAP, min_col_p
         docs.documents().batchUpdate(documentId=doc_id, body={'requests': reqs}).execute()
     return len(reqs), bad
 
+def auto_format(doc_id, account='work', total=700.0, label=''):
+    """Run the pass from inside a writer, right after a doc is created or converted.
+
+    Every caller here has just made a doc the owner is about to share, so the widths
+    matter and the caller must not die when the pass cannot run. Auth failures,
+    a Sheet instead of a Doc, a missing token: all are printed and swallowed.
+    The dash lint reports as a warning, because refusing to return the doc id
+    would leave the writer looking like it failed after it already wrote.
+
+    Returns (columns_widened, lint_hits) or (0, []) when the pass could not run.
+    """
+    tag = f'[format_pass{(" " + label) if label else ""}]'
+    if account not in ACCOUNTS:
+        account = 'work'
+    try:
+        docs = svc(account)
+        set_pageless(docs, doc_id)
+        n, bad = widen_and_lint(docs, doc_id, total)
+        print(f'{tag} pageless, widened {n} columns')
+        if bad:
+            print(f'{tag} [LINT] {len(bad)} paragraph(s) still contain "--" or "->": rephrase the source and re-convert')
+            for b in bad[:5]:
+                print(f'{tag}   - {b}')
+        return n, bad
+    except Exception as e:
+        print(f'{tag} skipped ({type(e).__name__}: {e}). Run it by hand: '
+              f'python3 .agent/skills/gdocs-create/format_pass.py {doc_id} --account {account}')
+        return 0, []
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('ids', nargs='+')

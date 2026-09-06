@@ -55,9 +55,27 @@ PRICING_PATH = os.path.join(SKILL_DIR, 'pricing.json')
 STATE_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'token_usage.json')
 AI_RUNS_DIR = os.path.join(BASE_DIR, 'journal', 'ai_runs')
 HEARTBEAT = os.path.join(BASE_DIR, '.agent', 'scripts', 'heartbeat.py')
-TRANSCRIPTS_DIR = os.path.join(
-    os.path.expanduser('~'), '.claude', 'projects',
-    '-home-you-antigravity-projects-product-second-brain')
+# Claude Code names a project directory after the checkout path with every separator turned
+# into a dash. This repo lives at a different absolute path on each machine, so the slug is
+# derived rather than written down -- the hardcoded WSL one below stayed correct on the
+# automation host and made the sweep a no-op on the Mac, where it printed "transcripts dir
+# missing" and the dashboard's Usage tab has been empty ever since macOS became a daily driver.
+TRANSCRIPT_ROOT = os.path.join(os.path.expanduser('~'), '.claude', 'projects')
+LEGACY_WSL_SLUG = '-home-you-antigravity-projects-product-second-brain'
+
+def transcript_dirs():
+    """Every project directory on THIS machine that holds this repo's sessions.
+
+    A list, not one path: a machine can legitimately carry both its own slug and a copy of
+    another machine's history, and both are this repo's usage.
+    """
+    slugs = [BASE_DIR.replace(os.sep, '-'), LEGACY_WSL_SLUG]
+    out = []
+    for slug in slugs:
+        path = os.path.join(TRANSCRIPT_ROOT, slug)
+        if os.path.isdir(path) and path not in out:
+            out.append(path)
+    return out
 
 WIB = timezone(timedelta(hours=7))
 WINDOW_DAYS = 30
@@ -485,10 +503,19 @@ def build_aggregate(files, now, start_date=None, end_date=None):
 
 # ── subcommands ──────────────────────────────────────────────────────────────
 
+def _jsonl_under(dirs):
+    """Every transcript file under every project dir, including the subagent trees."""
+    for base in dirs:
+        for root, _dirs, names in os.walk(base):
+            for name in sorted(names):
+                if name.endswith('.jsonl'):
+                    yield os.path.join(root, name)
+
 def cmd_sweep(args):
     t0 = time.time()
-    if not os.path.isdir(TRANSCRIPTS_DIR):
-        print(f'transcripts dir missing: {TRANSCRIPTS_DIR}', file=sys.stderr)
+    dirs = transcript_dirs()
+    if not dirs:
+        print(f'no transcript dir for {BASE_DIR} under {TRANSCRIPT_ROOT}', file=sys.stderr)
         heartbeat('token-tracker', 'fail', 'transcripts dir missing')
         return 1
 
@@ -503,12 +530,10 @@ def cmd_sweep(args):
 
     files = {}
     scanned = reparsed = errors = 0
-    for root, _dirs, names in os.walk(TRANSCRIPTS_DIR):
-        for name in names:
-            if not name.endswith('.jsonl'):
-                continue
-            path = os.path.join(root, name)
-            rel = os.path.relpath(path, TRANSCRIPTS_DIR)
+    for path in _jsonl_under(dirs):
+            # Keys are relative to ~/.claude/projects, not to one project dir, so two dirs
+            # holding a file of the same name cannot collide in the state file.
+            rel = os.path.relpath(path, TRANSCRIPT_ROOT)
             try:
                 st = os.stat(path)
             except OSError:

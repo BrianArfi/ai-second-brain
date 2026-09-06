@@ -1,5 +1,5 @@
 ---
-description: Reflect on the week - wins, open loops, themes
+description: Weekly - Reflect on the week - wins, open loops, themes
 ---
 
 Look back over the last 7 days of activity in this workspace and write a

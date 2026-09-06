@@ -42,6 +42,18 @@ DIGEST_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'slack_sweep_digest.jso
 TOKEN_ENV = os.path.join(BASE_DIR, '.agent', 'skills', 'slack-connector', 'token.env')
 AGY_BRIDGE = os.path.join(BASE_DIR, '.agent', 'skills', 'agy-bridge', 'run.py')
 
+# Access asks ("we don't have access to the doc", "can you provide access") are
+# the one category that reads as small talk in a flat list and blocks a whole
+# vendor team while it sits. Detector is shared with access-watch so there is one
+# definition, not two that drift. Added 1 Sep 2026, after four of these sat
+# unanswered in #work-seller-portal.
+sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'skills', 'access-watch', 'scripts'))
+try:
+    from access_watch import is_access_request           # type: ignore
+except Exception:                                        # never break the sweep
+    def is_access_request(text):
+        return False
+
 BRIAN_ID_DEFAULT = '<SLACK_ID>'          # verified via auth.test 2026-07-09
 FRED_ID = '<SLACK_ID>'                    # any YourManager message = high priority
 PRIORITY_AUTHORS = {FRED_ID}
@@ -53,6 +65,10 @@ FIRST_RUN_MENTION_LOOKBACK_DAYS = 3        # don't flood the ledger on first run
 FIRST_RUN_CHANNEL_LOOKBACK_HOURS = 24
 ANSWERED_RETENTION_DAYS = 14               # prune answered/dismissed after this
 API_PAUSE = 0.15                           # pacing between Slack calls
+THREAD_REPLY_MAX_CALLS = 220               # ceiling on conversations.replies per sweep
+THREAD_IDLE_DAYS = 21                      # forget a thread with no activity this long
+THREAD_SEED_LOOKBACK_DAYS = 14             # first-run backfill of the owner's own threads
+THREAD_STALE_DAYS = 7                      # a thread reply older than this is dead on arrival
 
 # Auto-dismiss noise so the queue only holds real "waiting on the owner" items.
 # CONSERVATIVE by design: a false-dismiss (hiding a real ask) is worse than a
@@ -207,14 +223,174 @@ def new_item(state, channel_id, channel_name, ts, author, text, permalink, kind,
         'thread_ts': thread_ts, 'author': author, 'text': text[:600],
         'permalink': permalink, 'kind': kind,          # mention | dm | thread_followup
         'status': 'dismissed' if noise else 'open',
-        'priority': author in PRIORITY_AUTHORS,
+        'access_request': (not noise) and is_access_request(text),
+        'priority': author in PRIORITY_AUTHORS or ((not noise) and is_access_request(text)),
         'first_seen': time.time(),
         'answered_at': time.time() if noise else None,
         'answered_by': 'auto_noise' if noise else None,
     }
     if thread_ts:
-        state['threads'].setdefault(f'{channel_id}:{thread_ts}',
-                                    {'channel': channel_id, 'last_seen_reply': 0.0})
+        register_thread(state, channel_id, thread_ts, float(ts))
+
+def _as_ts(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+def register_thread(state, channel_id, root_ts, activity_ts=0.0):
+    tid = f'{channel_id}:{root_ts}'
+    t = state['threads'].setdefault(
+        tid, {'channel': channel_id, 'last_seen_reply': 0.0, 'last_activity': 0.0})
+    t['channel'] = channel_id
+    t.setdefault('last_seen_reply', 0.0)
+    t['last_activity'] = max(float(t.get('last_activity') or 0), float(activity_ts or 0))
+    return tid
+
+def workspace_permalink(state, channel_id, ts, thread_ts=None):
+    """Build a permalink without spending a chat.getPermalink call per reply.
+    The host is lifted from any permalink already in the ledger."""
+    host = state.get('workspace_host')
+    if not host:
+        for it in state['items'].values():
+            pl = it.get('permalink') or ''
+            m = re.match(r'https://([^/]+)/archives/', pl)
+            if m:
+                host = m.group(1)
+                state['workspace_host'] = host
+                break
+    if not host:
+        return ''
+    p = 'p' + str(ts).replace('.', '')
+    url = f'https://{host}/archives/{channel_id}/{p}'
+    if thread_ts:
+        url += f'?thread_ts={thread_ts}&cid={channel_id}'
+    return url
+
+def seed_participating_threads(token, state, brian_id):
+    """One-time backfill. The thread registry only ever grew from messages seen
+    in conversations.history since the last watermark, so threads the owner was
+    already in before the pass existed would never be registered and never
+    checked. Walk his own recent messages once and register their threads."""
+    since = time.time() - THREAD_SEED_LOOKBACK_DAYS * 86400
+    seeded, page = 0, 1
+    while page <= 5:
+        resp = slack('search.messages', token, {
+            'query': 'from:me', 'sort': 'timestamp', 'sort_dir': 'desc',
+            'count': 100, 'page': page})
+        if not resp.get('ok'):
+            print(f'  ! seed search.messages: {resp.get("error")}', file=sys.stderr)
+            break
+        matches = resp.get('messages', {}).get('matches', [])
+        if not matches:
+            break
+        stop = False
+        for m in matches:
+            ts = float(m.get('ts', 0))
+            if ts < since:
+                stop = True
+                break
+            ch = m.get('channel', {}).get('id')
+            if not ch:
+                continue
+            root = thread_ts_from_permalink(m.get('permalink', '')) or m.get('ts')
+            register_thread(state, ch, root, ts)
+            seeded += 1
+        if stop or page >= resp.get('messages', {}).get('paging', {}).get('pages', 1):
+            break
+        page += 1
+        time.sleep(API_PAUSE)
+    state['thread_pass_seeded'] = time.time()
+    return seeded
+
+def sweep_thread_replies(token, state, brian_id):
+    """conversations.history returns thread ROOTS ONLY, never replies. So a reply
+    inside a thread the owner is in, written by someone who did not type his handle,
+    was invisible to both other passes: not a mention, not a DM, not in history.
+
+    Rohit Salaria answered a question of the owner's on 2 Sep 2026 this way and no
+    sweep saw it for two days. This pass is what sees it.
+
+    Scope is deliberately narrow: only threads the owner has actually posted in, and
+    only replies landing after his last message there. Anything wider is somebody
+    else's conversation and floods the ledger."""
+    found, calls, skipped = 0, 0, 0
+    # Two buckets, because a single "newest activity first" sort starves the tail:
+    # a thread that IS checked gets its last_activity refreshed and stays at the
+    # top, so anything below the call cap would never be reached again.
+    # Never-checked threads go first (newest activity wins among them), then the
+    # rest by how long ago they were last looked at. Every thread is reached
+    # within a few runs.
+    items = list(state['threads'].items())
+    fresh = [kv for kv in items if not kv[1].get('last_checked')]
+    seen = [kv for kv in items if kv[1].get('last_checked')]
+    fresh.sort(key=lambda kv: -(float(kv[1].get('last_activity') or 0)))
+    seen.sort(key=lambda kv: float(kv[1].get('last_checked') or 0))
+    ordered = fresh + seen
+    for tid, meta in ordered:
+        if calls >= THREAD_REPLY_MAX_CALLS:
+            skipped = len(ordered) - calls
+            break
+        try:
+            cid, root_ts = tid.rsplit(':', 1)
+        except ValueError:
+            continue
+        if meta.get('participating') is False and float(meta.get('last_seen_reply') or 0) > 0:
+            continue                      # settled: the owner is not in this one
+        resp = slack('conversations.replies', token,
+                     {'channel': cid, 'ts': root_ts, 'limit': 200})
+        calls += 1
+        time.sleep(API_PAUSE)
+        if not resp.get('ok'):
+            continue
+        meta['last_checked'] = time.time()
+        msgs = resp.get('messages', [])
+        if len(msgs) < 2:
+            # No replies yet. Do not parse root_ts as a float here: one malformed
+            # thread id used to raise straight out of the sweep and abort every
+            # remaining pass.
+            meta['last_seen_reply'] = max(float(meta.get('last_seen_reply') or 0),
+                                          _as_ts(root_ts))
+            continue
+        brian_ts = [float(m['ts']) for m in msgs if m.get('user') == brian_id]
+        if not brian_ts:
+            meta['participating'] = False
+            meta['last_seen_reply'] = max(float(m['ts']) for m in msgs)
+            continue
+        meta['participating'] = True
+        last_brian = max(brian_ts)
+        since = float(meta.get('last_seen_reply') or 0)
+        newest = since
+        cname = state['channel_names'].get(cid, cid)
+        for m in msgs[1:]:
+            ts = float(m['ts'])
+            newest = max(newest, ts)
+            if ts <= since or m.get('user') == brian_id:
+                continue
+            if ts < last_brian:
+                continue              # the owner already answered past this point
+            new_item(state, cid, cname, m['ts'],
+                     m.get('user', m.get('bot_id', '?')), m.get('text', ''),
+                     workspace_permalink(state, cid, m['ts'], root_ts),
+                     'thread_followup', thread_ts=root_ts,
+                     is_bot=bool(m.get('bot_id')))
+            # A thread reply this pass is seeing for the FIRST time, that is
+            # already a week old, is history rather than a queue item. Nobody is
+            # waiting on an answer they stopped expecting. Dismissed on arrival
+            # so the backfill does not dump a month of dead threads on the owner.
+            iid = f'{cid}:{m["ts"]}'
+            if iid in state['items'] and state['items'][iid]['status'] == 'open' \
+                    and (time.time() - ts) > THREAD_STALE_DAYS * 86400:
+                state['items'][iid].update(status='dismissed',
+                                           answered_by='stale_thread_reply',
+                                           answered_at=time.time())
+            found += 1
+        meta['last_seen_reply'] = newest
+        meta['last_activity'] = max(float(meta.get('last_activity') or 0), newest)
+    if skipped:
+        print(f'  ! thread pass hit the {THREAD_REPLY_MAX_CALLS}-call cap, '
+              f'{skipped} thread(s) not checked this run', file=sys.stderr)
+    return found
 
 def sweep_mentions(token, state, brian_id):
     """search.messages catches mentions ANYWHERE: channels, thread replies, DMs."""
@@ -303,6 +479,11 @@ def sweep_channels(token, state, brian_id):
             is_bot = bool(m.get('bot_id')) or m.get('subtype') == 'bot_message'
             if author == brian_id:
                 brian_acted.append((cid, float(m['ts'])))
+                # the owner's OWN thread roots have to be registered too. They were not,
+                # which is why a reply to a question he asked was invisible: the
+                # registration below sat after this `continue`.
+                if m.get('reply_count', 0) > 0 or m.get('thread_ts') == m['ts']:
+                    register_thread(state, cid, m['ts'], float(m['ts']))
                 continue
             # every DM message not from the owner is a candidate "needs response"
             if is_im:
@@ -311,8 +492,7 @@ def sweep_channels(token, state, brian_id):
                 dm_items += 1
             # register threads with new activity so old-thread replies are seen
             if m.get('reply_count', 0) > 0:
-                state['threads'].setdefault(f'{cid}:{m["ts"]}',
-                                            {'channel': cid, 'last_seen_reply': 0.0})
+                register_thread(state, cid, m['ts'], float(m['ts']))
             digest_rows.append({'channel': cid, 'name': name, 'ts': m['ts'],
                                 'user': author, 'text': text[:400],
                                 'is_dm': is_im, 'swept_at': time.time()})
@@ -446,10 +626,19 @@ def prune(state):
             and (it.get('answered_at') or it['first_seen']) < cutoff]
     for iid in dead:
         del state['items'][iid]
-    # drop thread registry entries with no open item and no activity for 14d
+    # Thread registry. This used to drop every thread with no OPEN item, which
+    # deleted exactly the threads the reply pass needs to keep watching: a thread
+    # the owner answered has no open item, and the next reply to it would be missed
+    # all over again. Keep anything the owner is in until it goes quiet.
     live_threads = {f"{it['channel']}:{it['thread_ts']}" for it in state['items'].values()
                     if it['thread_ts'] and it['status'] == 'open'}
-    for tid in [t for t in state['threads'] if t not in live_threads]:
+    idle_cutoff = time.time() - THREAD_IDLE_DAYS * 86400
+    for tid, meta in list(state['threads'].items()):
+        if tid in live_threads:
+            continue
+        activity = float(meta.get('last_activity') or meta.get('last_seen_reply') or 0)
+        if meta.get('participating') and activity >= idle_cutoff:
+            continue
         state['threads'].pop(tid, None)
     return len(dead)
 
@@ -484,6 +673,10 @@ def _sweep(args):
     t0 = time.time()
     n_mentions = sweep_mentions(token, state, brian_id)
     n_digest, n_dm, _ = sweep_channels(token, state, brian_id)
+    n_seed = 0
+    if args.reseed_threads or not state.get('thread_pass_seeded'):
+        n_seed = seed_participating_threads(token, state, brian_id)
+    n_thread = sweep_thread_replies(token, state, brian_id)
     n_answered = resolve_open_items(token, state, brian_id)
     n_noise = sweep_noise_backlog(state)
     n_ctx = enrich_pointers(token, state)
@@ -492,9 +685,12 @@ def _sweep(args):
     save_state(state)
     open_items = [i for i in state['items'].values() if i['status'] == 'open']
     print(f'sweep done in {time.time()-t0:.0f}s: +{n_mentions} mentions, '
+          f'+{n_thread} thread replies, '
           f'+{n_dm} DM items, {n_digest} digest msgs, {n_answered} auto-answered, '
           f'{n_noise} auto-noise, {n_ctx} enriched, {n_pruned} pruned -> {len(open_items)} OPEN '
-          f'({sum(1 for i in open_items if i["priority"])} priority)')
+          f'({sum(1 for i in open_items if i["priority"])} priority, '
+          f'{sum(1 for i in open_items if i.get("access_request"))} access)'
+          + (f' [seeded {n_seed} threads]' if n_seed else ''))
 
 # ------------------------------------------------------------------ report --
 
@@ -532,10 +728,23 @@ def cmd_report(args):
             if re.fullmatch(r'U[A-Z0-9]+', it['channel_name'])}
     ids |= {uid for _, it in items for uid, _ in it.get('context', [])}
     names = resolve_names(state, ids, token)
+    for _, it in items:                       # backfill items filed before the flag
+        if 'access_request' not in it:
+            it['access_request'] = is_access_request(it.get('text'))
+    access = [(i, it) for i, it in items if it.get('access_request')]
+    if access:
+        access.sort(key=lambda x: float(x[1]['ts']))          # oldest first: it is a queue
+        print(f'## 🔑 Access requests ({len(access)}) — somebody is blocked\n')
+        for iid, it in access:
+            link = f' [thread]({it["permalink"]})' if it['permalink'] else ''
+            who = names.get(it['author'], it['author'])
+            txt = re.sub(r'\s+', ' ', it['text'])[:160]
+            print(f'- **{it["channel_name"]}** · {who} · {age_str(it["ts"])} ago{link} — {txt}  `{iid}`')
+        print()
     items.sort(key=lambda x: (not x[1]['priority'], -float(x[1]['ts'])))
     print(f'## 🔴 Waiting on your reply ({len(items)})\n')
     for iid, it in items:
-        flag = '🔥 ' if it['priority'] else ''
+        flag = '🔑 ' if it.get('access_request') else '🔥 ' if it['priority'] else ''
         link = f' [thread]({it["permalink"]})' if it['permalink'] else ''
         author = names.get(it['author'], it['author'])
         chan = it['channel_name']
@@ -609,7 +818,10 @@ def cmd_classify(args):
 def main():
     p = argparse.ArgumentParser(description='Stateful Slack mention ledger')
     sub = p.add_subparsers(dest='cmd')
-    sub.add_parser('sweep')
+    sp = sub.add_parser('sweep')
+    sp.add_argument('--reseed-threads', action='store_true',
+                    help='re-run the one-time backfill that registers every thread '
+                         'the owner posted in recently, so the reply pass can watch them')
     rp = sub.add_parser('report')
     rp.add_argument('--all', action='store_true')
     dp = sub.add_parser('dismiss')

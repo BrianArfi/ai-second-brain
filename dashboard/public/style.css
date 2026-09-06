@@ -2396,3 +2396,68 @@ a.ticket-chip:hover { border-color: var(--border-active); color: var(--text-acce
 .wt-f-progress { color: var(--st-good); }
 .wt-f-next     { color: var(--text-accent); }
 .wt-empty { font-size: var(--fs-sm); color: var(--text-muted); font-style: italic; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Ledger hover popover (ledger-hover.js)
+   A preview card for a COM-/WAIT-/DEC- link, shown on hover. It sits
+   above the drawer (z 41) so it still works on ids inside an open
+   panel. Not interactive beyond being readable: the click opens the
+   full record in the drawer instead.
+   ═══════════════════════════════════════════════════════════════════ */
+.lh-pop {
+  position: fixed;
+  z-index: 70;
+  width: min(420px, calc(100vw - 20px));
+  max-height: min(60vh, 560px);
+  overflow-y: auto;
+  padding: 14px 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-active);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(8px);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  line-height: 1.5;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity .13s ease, transform .13s ease;
+}
+.lh-pop.is-open { opacity: 1; pointer-events: auto; transform: translateY(0); }
+
+.lh-head { display: flex; align-items: center; gap: 7px; margin-bottom: 3px; }
+.lh-icon { font-size: 13px; }
+.lh-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px; font-weight: 600; letter-spacing: .02em;
+  color: var(--text-accent);
+}
+.lh-kind { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); }
+.lh-title { margin: 6px 0 0; font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
+.lh-body {
+  margin-top: 7px; padding-top: 7px;
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.lh-rows { margin-top: 9px; display: flex; flex-direction: column; gap: 3px; }
+.lh-row { display: flex; gap: 10px; align-items: baseline; }
+.lh-k {
+  flex: 0 0 92px; font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--text-muted);
+}
+.lh-v { flex: 1 1 auto; min-width: 0; color: var(--text-secondary); word-break: break-word; }
+.lh-row.lh-warn .lh-v { color: var(--p1); }
+
+.lh-foot {
+  margin-top: 10px; padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 10.5px; color: var(--text-muted);
+}
+.lh-loading, .lh-empty { color: var(--text-secondary); }
+.lh-empty strong { color: var(--text-primary); }
+
+/* the links themselves read as references, not as navigation away */
+a[href*="#find/"] { text-decoration-style: dotted; text-underline-offset: 2px; cursor: help; }
+a[href*="#find/"]:hover { color: var(--text-accent); }

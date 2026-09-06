@@ -1,5 +1,5 @@
 ---
-description: Adversarial review - 5 hostile critics stress-test a plan/decision/draft in parallel, then keep only what survives
+description: Thinking - Adversarial review - 5 hostile critics stress-test a plan/decision/draft in parallel, then keep only what survives
 argument-hint: "<plan/decision/draft, or path to the doc>"
 ---
 

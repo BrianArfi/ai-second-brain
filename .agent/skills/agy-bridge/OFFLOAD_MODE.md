@@ -1,8 +1,7 @@
----
-description: Turn the GLM offload mode on or off, so heavy mechanical work routes to a non-Claude model through agy-bridge.
----
+# Offload mode
 
-# /glm
+> Toggled by asking in words ("offload on", "offload off", "offload status").
+> There is no slash command; the flag file below is the whole mechanism.
 
 Toggle **offload mode** on/off. When ON, the Router offloads heavy generation / research /
 draft sub-tasks to agy-bridge (local agy CLI, **zero Claude Code quota**); Claude stays the
@@ -13,7 +12,7 @@ The command, the flag file, and the `glm` name are kept as-is so muscle memory a
 entries keep working. Never pass `--backend zai`: it is removed from every chain and live calls
 error out.
 
-**Usage:** `/glm on` · `/glm off` · `/glm status`
+**States:** `on` · `off` · `status` (read only)
 
 **What to do when invoked:**
 1. Resolve the flag file: `.agent/glm_mode.flag`.

@@ -339,7 +339,10 @@ def cmd_coverage(args):
     """
     ledgers = {"commitments": "commitments.json", "decisions": "decisions.json",
                "waiting_on": "waiting_on.json"}
-    live = {"open", "decided", "pending"}
+    # "decided" is a CLOSED state for a decision, the same way "done" closes a
+    # commitment. Counting it as live inflated open+unfiled by every decided
+    # record that never got a node: 23 of 87 on 24 Aug 2026.
+    live = {"open", "pending"}
     tot = unfiled = open_unfiled = 0
     rows = []
     for name, fn in ledgers.items():

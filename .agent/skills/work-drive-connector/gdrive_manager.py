@@ -17,6 +17,26 @@ import io
 import signal
 
 # Global timeout: 180 seconds
+ACCOUNT_NAME = 'work'
+
+def _format_pass(file_id, file_metadata, label):
+    """Pageless + content-aware column widths, on any convert that produced a Doc.
+
+    The pass used to be a manual step after `--convert`, and a skipped step is
+    why table-heavy docs kept landing at the cramped default width. It runs only
+    for Google Docs (a Sheet has no table columns to widen) and never raises.
+    """
+    if file_metadata.get('mimeType') != 'application/vnd.google-apps.document':
+        return
+    if os.environ.get('GDOC_FORMAT_PASS_DISABLE') == '1':
+        return
+    try:
+        sys.path.insert(0, os.path.join(REPO_ROOT, '.agent', 'skills', 'gdocs-create'))
+        from format_pass import auto_format
+        auto_format(file_id, ACCOUNT_NAME, label=label)
+    except Exception as e:
+        print(f"[format_pass] skipped ({type(e).__name__}: {e})")
+
 def timeout_handler(signum, frame):
     print("[ERROR] Google Drive Manager timed out after 180 seconds", file=sys.stderr)
     sys.exit(1)
@@ -184,6 +204,7 @@ def update_file(file_id, file_path, convert_to_docs=False, visibility='domain'):
             fields='id, webViewLink'
         ).execute()
         assert_drive_result(file, 'gdrive_manager (work) update')
+        _format_pass(file.get('id'), file_metadata, 'update')
         print(f"File ID: {file.get('id')}")
         print(f"Link: {file.get('webViewLink')}")
 
@@ -321,6 +342,7 @@ def upload_file(file_path, folder_id=None, convert_to_docs=False, visibility='do
     try:
         file = service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink').execute()
         assert_drive_result(file, 'gdrive_manager (work) upload')
+        _format_pass(file.get('id'), file_metadata, 'upload')
         print(f"File ID: {file.get('id')}")
         print(f"Link: {file.get('webViewLink')}")
 
@@ -386,7 +408,7 @@ def read_file(file_id):
     service = build('drive', 'v3', credentials=creds)
 
     try:
-        file_meta = service.files().get(fileId=file_id, fields='mimeType, name').execute()
+        file_meta = service.files().get(fileId=file_id, fields='mimeType, name', supportsAllDrives=True).execute()
         mime_type = file_meta.get('mimeType')
         file_name = file_meta.get('name')
         print(f"[Work Drive] Reading: {file_name} ({mime_type})")
@@ -399,7 +421,7 @@ def read_file(file_id):
             content = service.files().export(fileId=file_id, mimeType='text/csv').execute()
             print(content.decode('utf-8'))
         else:
-            content = service.files().get_media(fileId=file_id).execute()
+            content = service.files().get_media(fileId=file_id, supportsAllDrives=True).execute()
             try:
                 print(content.decode('utf-8'))
             except:

@@ -6,14 +6,16 @@ description: Daily scan and update of all changes (created, modified, deleted) w
 # Daily Update Workflow
 
 This workflow auto-detects the appropriate mode based on current time:
-- **Before 14:00 WIB**: Runs Morning Prep mode (equivalent to `/morning-update`)
-- **After 14:00 WIB**: Runs Evening Closing mode (equivalent to `/evening-update`)
+- **Before 17:00 WIB, and no morning update has run yet today**: Morning Prep mode
+- **17:00 WIB or later, or morning already ran**: Evening Closing mode
+
+The command that drives this is `/daily-update`. Force a mode with `/daily-update morning` or `/daily-update evening`.
 
 ## Auto-Detect Mode
 
-Check the current local time. If before 14:00, run morning mode. If after 14:00, run evening mode.
+Check the current WIB time. Before 17:00 with no morning run yet, run morning mode. Otherwise run evening mode.
 
-### Morning Mode (before 14:00)
+### Morning Mode
 
 ```bash
 // turbo
@@ -22,7 +24,7 @@ python .agent/scripts/daily_update_runner.py --mode morning
 
 Follow the Morning Update Workflow steps for priority setting and summary generation.
 
-### Evening Mode (after 14:00)
+### Evening Mode
 
 ```bash
 // turbo

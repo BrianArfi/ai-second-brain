@@ -1,5 +1,5 @@
 ---
-description: Turn a transcript or rough notes into clean minutes with owned action items
+description: Product - Turn a transcript or rough notes into clean minutes with owned action items
 argument-hint: "<paste notes, or name the meeting>"
 ---
 

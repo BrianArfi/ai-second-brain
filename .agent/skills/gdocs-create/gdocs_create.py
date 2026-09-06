@@ -284,6 +284,14 @@ def create_doc(args):
     work_domain = os.environ.get('WORK_DOMAIN', 'yourcompany.com')
     apply_visibility(service, file['id'], resolve_visibility(args), domain=work_domain)
 
+    # Column widths and pageless are part of creating the doc, not a step a
+    # caller has to remember. The manual pass was skipped often enough that
+    # table-heavy docs kept reaching the owner at the cramped ~468pt default.
+    if not getattr(args, 'no_format_pass', False):
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from format_pass import auto_format
+        auto_format(file['id'], args.account, label='create-doc')
+
     print(f"[OK] Created Google Doc: {file['name']}")
     print(f"     ID: {file['id']}")
     print(f"     URL: {file.get('webViewLink', 'https://docs.google.com/document/d/' + file['id'] + '/edit')}")
@@ -334,6 +342,8 @@ def main():
     p_doc.add_argument('--account', default='work', choices=list(ACCOUNTS.keys()), help='Drive account to use')
     p_doc.add_argument('--parent-id', help='Drive folder ID (defaults to My Drive root)')
     p_doc.add_argument('--html', action='store_true', help='Input is already HTML (skip MD conversion)')
+    p_doc.add_argument('--no-format-pass', dest='no_format_pass', action='store_true',
+                       help='Skip the automatic pageless + column-width pass (it runs by default)')
     add_visibility_arg(p_doc)
 
     # upload
