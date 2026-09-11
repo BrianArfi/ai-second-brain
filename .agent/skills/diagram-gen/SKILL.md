@@ -28,11 +28,12 @@ A PRD/BRD needs an architecture or flow diagram; you want to visualize a sequenc
    ```bash
    python3 .agent/skills/diagram-gen/render_check.py --file <mermaid.mmd> --out /tmp/diagram_preview.png
    ```
-   Exit 0 + a saved PNG = valid. Non-zero = the renderer rejected the syntax; read the error, fix the Mermaid, re-run. Do not proceed on a failed render.
+   Exit 0 + a saved PNG = valid. **Exit 1** = the renderer read the source and rejected it: fix the Mermaid and re-run. **Exit 3** = every renderer is down, so the diagram is NOT the problem and editing it wastes time. Do not proceed on a failed render either way.
 4. **Deliver:**
    - For a quick answer: show the fenced ```mermaid block + the preview PNG path.
    - For a GDoc (PRD/BRD): put a `[[PLACEHOLDER_NAME]]` in the source markdown where the diagram goes, add the `"[[PLACEHOLDER_NAME]]": """<mermaid>"""` pair to the `DIAGRAMS` dict in [embed_mermaid_in_gdoc.py](../../../scripts/embed_mermaid_in_gdoc.py), run `gdocs-create`/`update --convert`, then run that script to replace the placeholder with the inline PNG. (Per [[feedback_gdoc_formatting_pass]], a re-convert wipes inline images, so re-run the embed after every convert.)
 
 ## Notes
-- Validation uses the same kroki.io renderer the embed script uses, so "renders in render_check" guarantees "renders in the GDoc."
+- Validation uses the same renderer stack the embed script uses (`.agent/skills/diagram-gen/mermaid_render.py`: kroki.io first, then mermaid.ink), so "renders in render_check" guarantees "renders in the GDoc."
+- **There are two renderers because one of them fails on its own.** On 9 Sep 2026 kroki.io's mermaid backend returned HTTP 500 for every diagram, including `flowchart TB / A-->B`, while kroki's graphviz backend on the same host answered 200. The old `render_check.py` printed that as "INVALID Mermaid", so a correct diagram looked like a syntax error and no diagram could be produced at all. A renderer outage and a broken diagram are different failures and no longer share a message.
 - Keep generation in whatever model the session is on; this is small. Under GLM mode the Mermaid drafting MAY be offloaded via `agy-bridge --task draft`, but always run `render_check.py` in the main loop before delivering.

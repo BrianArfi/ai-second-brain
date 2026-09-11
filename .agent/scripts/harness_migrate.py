@@ -17,7 +17,16 @@ of them outside git and none of them synced by `git push`:
      repo at journal/memory/ and symlinks it back, after which it travels with
      git like everything else and stops being machine-local at all.
 
-  3. ASB desktop app state -- sessions.json (titles, models, cost), branches.json
+  3. Credentials -- .env, token_*.json, credentials.json, .agent/skills/*/token.env
+     Gitignored on purpose, so `git push` never carries them and the bundle only
+     carries them when `--with-credentials` is passed AND a passphrase is given.
+     They travel encrypted (see ASBCRED1 below), because a bundle is a plain tar
+     sitting on a Desktop and one misdirected copy of 20 live tokens is every
+     Work system at once. account.json (app auth) and whatsapp/ (a paired QR
+     session) stay out even then: both are bound to one machine, so copying them
+     leaks without restoring anything.
+
+  4. ASB desktop app state -- sessions.json (titles, models, cost), branches.json
      (the sub-session tree), workspace.json (which folder each workspace points
      at, as an absolute path that has to be rewritten on the target).
 
@@ -30,13 +39,18 @@ could ever reach.
 Usage:
     harness_migrate.py check                      # audit, writes nothing
     harness_migrate.py link-memory [--dry-run]    # memory -> repo, then symlink
-    harness_migrate.py export  --out ~/Desktop [--no-transcripts]
+    harness_migrate.py creds                      # list the credential files, no values
+    harness_migrate.py export  --out ~/Desktop [--no-transcripts] [--with-credentials]
     harness_migrate.py import  --bundle <file.tar.gz> [--repo <path>] [--dry-run]
 
 Run `check` on both machines: once here before exporting, once there after
 importing. The numbers should match.
 """
 import argparse
+import fnmatch
+import getpass
+import hashlib
+import io
 import json
 import os
 import platform
@@ -79,6 +93,194 @@ ASB_DIR_CANDIDATES = [
 CLAUDE_SKIP_DIRS = {'shell-snapshots', 'plugins', 'cache', 'session-env',
                     'file-history', 'telemetry', 'downloads', 'ide', 'backups',
                     'sessions'}
+
+# ---------------------------------------------------------------------------
+# credentials
+#
+# Everything here is gitignored by design, so no push carries it and the bundle
+# carries it only on request. The container is deliberately small and written
+# twice, once here and once in the desktop app (src-tauri/src/migrate.rs), so a
+# bundle made by either side opens on the other:
+#
+#   b"ASBCRED1" | salt(16) | nonce(12) | ChaCha20-Poly1305(tar.gz, aad=magic)
+#   key = PBKDF2-HMAC-SHA256(passphrase, salt, 200000 iterations, 32 bytes)
+#
+# Do not change the constants without changing both sides in the same commit.
+# ---------------------------------------------------------------------------
+
+CRED_MAGIC = b'ASBCRED1'
+CRED_KDF_ITERS = 200000
+CRED_ARCNAME = 'credentials.enc'
+CRED_PASS_ENV = 'ASB_MIGRATE_PASSPHRASE'
+
+# Matched against the file NAME, over the repo's gitignored files only. A tracked
+# file already travels with git, so anything git can see is out of scope here.
+# Names that ARE a credential by convention. A file called credentials.json or
+# token.env is never anything else, so the name decides and the content is not
+# read.
+CRED_STRONG_PATTERNS = [
+    '.env', '.env.*', '*.env',
+    'credentials.json', '*credentials.json', 'client_secret*.json',
+    'service_account*.json', '*.pem', '*.key', '*.p12', '*.p8',
+]
+
+# Names that merely CONTAIN a credential word. `token_usage.json` is a usage
+# counter and `token_efficiency.json` is telemetry, both sitting in
+# journal/state/ with the same prefix as a real OAuth token file, so these have
+# to prove themselves against their content before the bundle carries them.
+CRED_WEAK_PATTERNS = ['token.json', 'token_*.json', 'token*.json', '*token*.json']
+
+# A sample file is documentation, not a secret, and restoring one over a real
+# one on the target would be a silent downgrade to placeholder values.
+CRED_EXCLUDE_SUFFIX = ('.example', '.sample', '.template', '.dist', '.pre-import')
+CRED_EXCLUDE_DIRS = {'node_modules', '.venv', 'venv', '.git', 'scratch', '__pycache__'}
+CRED_MAX_BYTES = 2 * 1024 * 1024
+
+# A name match alone is not enough: `journal/state/token_usage.json` is a usage
+# counter, and shipping it as a credential is how a "carry my secrets" flag ends
+# up carrying 318 KB of telemetry while looking like it worked. Key material
+# always says what it is, so the content decides.
+CRED_CONTENT_MARKERS = (
+    'refresh_token', 'access_token', 'client_secret', 'private_key', 'api_key',
+    'api_token', '"token"', '_token=', '_key=', 'apikey', 'password', 'passwd',
+    'secret', 'xoxp-', 'xoxb-', 'xapp-',
+    'begin rsa private key', 'begin private key', 'begin openssh private key',
+)
+
+# Extensions that ARE the secret, whatever bytes they hold. Read as binary keys,
+# so a content scan for words would only ever return false.
+CRED_BINARY_EXT = ('.pem', '.key', '.p12', '.p8')
+
+def looks_like_secret(path):
+    if path.endswith(CRED_BINARY_EXT):
+        return True
+    try:
+        with open(path, 'rb') as fh:
+            head = fh.read(8192).decode('utf-8', errors='replace').lower()
+    except OSError:
+        return False
+    return any(m in head for m in CRED_CONTENT_MARKERS)
+
+def classify_credential_name(name):
+    """'strong' (the name is enough), 'weak' (the content has to agree), or None."""
+    if name.endswith(CRED_EXCLUDE_SUFFIX):
+        return None
+    if any(fnmatch.fnmatch(name, pat) for pat in CRED_STRONG_PATTERNS):
+        return 'strong'
+    if any(fnmatch.fnmatch(name, pat) for pat in CRED_WEAK_PATTERNS):
+        return 'weak'
+    return None
+
+def collect_credentials(root):
+    """Repo-relative paths of every gitignored credential file, sorted.
+
+    Driven by `git check-ignore` rather than by a walk, because the question this
+    answers is exactly "what does git refuse to carry": a credential that IS
+    tracked needs no bundle, and a walk would also have to re-implement
+    .gitignore to tell the two apart.
+    """
+    try:
+        out = subprocess.run(
+            ['git', '-C', root, 'ls-files', '--others', '--ignored', '--exclude-standard'],
+            capture_output=True, text=True, check=True).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+    found = []
+    for rel in out.splitlines():
+        rel = rel.strip()
+        if not rel:
+            continue
+        parts = set(os.path.dirname(rel).split(os.sep))
+        if parts & CRED_EXCLUDE_DIRS:
+            continue
+        kind = classify_credential_name(os.path.basename(rel))
+        if kind is None:
+            continue
+        full = os.path.join(root, rel)
+        try:
+            if not os.path.isfile(full) or os.path.getsize(full) > CRED_MAX_BYTES:
+                continue
+        except OSError:
+            continue
+        if kind == 'weak' and not looks_like_secret(full):
+            continue
+        found.append(rel)
+    return sorted(found)
+
+def _aead(key):
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+    except ImportError:
+        raise SystemExit(
+            'ERROR: credential transfer needs the `cryptography` package.\n'
+            '       python3 -m pip install cryptography\n'
+            '       (or drop --with-credentials and copy the files by hand).')
+    return ChaCha20Poly1305(key)
+
+def _cred_key(passphrase, salt):
+    return hashlib.pbkdf2_hmac('sha256', passphrase.encode('utf-8'), salt,
+                               CRED_KDF_ITERS, 32)
+
+def encrypt_credentials(plain, passphrase):
+    salt, nonce = os.urandom(16), os.urandom(12)
+    ct = _aead(_cred_key(passphrase, salt)).encrypt(nonce, plain, CRED_MAGIC)
+    return CRED_MAGIC + salt + nonce + ct
+
+def decrypt_credentials(blob, passphrase):
+    if not blob.startswith(CRED_MAGIC):
+        raise ValueError('not an ASBCRED1 container')
+    salt, nonce, ct = blob[8:24], blob[24:36], blob[36:]
+    try:
+        return _aead(_cred_key(passphrase, salt)).decrypt(nonce, ct, CRED_MAGIC)
+    except Exception:
+        raise ValueError('wrong passphrase, or the container is damaged')
+
+def ask_passphrase(confirm):
+    """Env var first, so the desktop app and any unattended caller never prompt."""
+    env = os.environ.get(CRED_PASS_ENV)
+    if env:
+        return env
+    if not sys.stdin.isatty():
+        raise SystemExit(
+            f'ERROR: no passphrase. Set {CRED_PASS_ENV} or run this in a terminal.')
+    while True:
+        one = getpass.getpass('Passphrase for the credentials (not stored anywhere): ')
+        if len(one) < 8:
+            print('  too short: 8 characters minimum.')
+            continue
+        if not confirm:
+            return one
+        two = getpass.getpass('Again: ')
+        if one == two:
+            return one
+        print('  they do not match, try again.')
+
+def pack_credentials(root, rels):
+    """tar.gz of the listed files, built in memory. Modes are preserved, so a
+    0600 token restores as 0600 rather than as whatever the umask says."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode='w:gz') as tf:
+        for rel in rels:
+            tf.add(os.path.join(root, rel), arcname=rel)
+    return buf.getvalue()
+
+def cmd_creds(args):
+    root = repo_root(os.path.abspath(os.path.expanduser(args.repo)) if args.repo else None)
+    rels = collect_credentials(root)
+    if not rels:
+        print('No gitignored credential files found in', root)
+        return 0
+    total = 0
+    print(f'{len(rels)} credential file(s) in {root}:')
+    for rel in rels:
+        size = os.path.getsize(os.path.join(root, rel))
+        total += size
+        print(f'  {human(size):>9}  {rel}')
+    print()
+    print(f'Total {human(total)}. `export --with-credentials` carries these, encrypted.')
+    print('Never in the bundle, machine-bound either way: the ASB app login')
+    print('(account.json) and the WhatsApp pairing. Sign in and re-pair on the target.')
+    return 0
 
 def now_wib():
     return datetime.now(WIB).strftime('%Y-%m-%d %H:%M WIB')
@@ -379,7 +581,7 @@ def cmd_link_memory(args):
 # ---------------------------------------------------------------------------
 
 def cmd_export(args):
-    root = repo_root()
+    root = repo_root(os.path.abspath(os.path.expanduser(args.repo)) if args.repo else None)
     slug = slugify_cwd(root)
     stamp = datetime.now(WIB).strftime('%Y-%m-%d-%H%M')
     outdir = os.path.abspath(os.path.expanduser(args.out))
@@ -407,6 +609,7 @@ def cmd_export(args):
                       'stranded': p['repo'] is False,
                       'cwd_missing': p['repo'] is None} for p in include],
         'asb_dir': asb_dir(),
+        'credentials': None,   # filled in below when --with-credentials is on
         'memory_in_repo': os.path.islink(os.path.join(PROJECTS_DIR, slug, 'memory')),
         'notes': [
             'Restore with: harness_migrate.py import --bundle <this file> --repo <target repo path>',
@@ -416,6 +619,29 @@ def cmd_export(args):
             'journal/memory/ and arrives with git pull. Run link-memory on the target.',
         ],
     }
+
+    # Credentials, before anything is written: a missing `cryptography` or a
+    # mistyped passphrase should fail with no bundle on disk, rather than a
+    # bundle that silently carries no tokens.
+    cred_blob, cred_rels = None, []
+    if args.with_credentials:
+        cred_rels = collect_credentials(root)
+        if not cred_rels:
+            print('--with-credentials: nothing to carry, no gitignored credential files found.')
+        else:
+            print(f'--with-credentials: {len(cred_rels)} file(s), encrypted with your passphrase.')
+            for rel in cred_rels:
+                print(f'    {rel}')
+            cred_blob = encrypt_credentials(pack_credentials(root, cred_rels),
+                                            ask_passphrase(confirm=True))
+            manifest['credentials'] = {
+                'format': CRED_MAGIC.decode(),
+                'kdf': f'pbkdf2-hmac-sha256/{CRED_KDF_ITERS}',
+                'files': cred_rels,
+            }
+            manifest['notes'].append(
+                'This bundle carries encrypted credentials. Treat the file itself as a secret, '
+                'and send the passphrase over a different channel than the bundle.')
 
     added = []
 
@@ -471,6 +697,15 @@ def cmd_export(args):
             add(os.path.join(CLAUDE_HOME, f), f'claude/{f}')
         for d in ('plans', 'tasks', 'sessions'):
             add(os.path.join(CLAUDE_HOME, d), f'claude/{d}')
+
+        if cred_blob is not None:
+            with tempfile.NamedTemporaryFile('wb', suffix='.enc', delete=False) as cf:
+                cf.write(cred_blob)
+                cpath = cf.name
+            tf.add(cpath, arcname=CRED_ARCNAME)
+            os.unlink(cpath)
+            added.append(CRED_ARCNAME)
+            print(f'  + {CRED_ARCNAME} ({len(cred_rels)} credential file(s), encrypted)')
 
         ad = asb_dir()
         if ad:
@@ -572,6 +807,63 @@ def restore_asb_state(staging, bundle, ad, src_repo, target_repo, dry):
         if not dry:
             shutil.copytree(bundled, d, dirs_exist_ok=True)
 
+def restore_credentials(staging, target_repo, manifest, args):
+    """Decrypt and lay the credential files back down inside the target repo.
+
+    Restores with the mode the source had (0600 on a token), never overwrites
+    without --force, and keeps a .pre-import copy of anything it does replace.
+    """
+    blob_path = os.path.join(staging, CRED_ARCNAME)
+    if not os.path.isfile(blob_path):
+        return
+    if args.skip_credentials:
+        print(f'  {CRED_ARCNAME} present, skipped (--skip-credentials).')
+        return
+
+    names = (manifest.get('credentials') or {}).get('files') or []
+    print(f'  {CRED_ARCNAME}: {len(names)} credential file(s) in this bundle')
+    if args.dry_run:
+        for n in names:
+            print(f'    would restore {n}')
+        return
+
+    with open(blob_path, 'rb') as fh:
+        blob = fh.read()
+    try:
+        plain = decrypt_credentials(blob, ask_passphrase(confirm=False))
+    except ValueError as exc:
+        print(f'  WARNING: credentials NOT restored ({exc}).')
+        print(f'  Everything else above is in place. Re-run import with the right passphrase,')
+        print(f'  or copy the files by hand.')
+        return
+
+    restored, kept = 0, 0
+    with tarfile.open(fileobj=io.BytesIO(plain), mode='r:gz') as tf:
+        for member in tf.getmembers():
+            if not member.isfile():
+                continue
+            # A bundle is untrusted input the moment it crosses a machine, so a
+            # member named ../../.ssh/id_rsa must not be able to write outside
+            # the repo it was pointed at.
+            dest = os.path.normpath(os.path.join(target_repo, member.name))
+            if not dest.startswith(os.path.join(target_repo, '')):
+                print(f'    REFUSED (path escapes the repo): {member.name}')
+                continue
+            if os.path.exists(dest) and not args.force:
+                kept += 1
+                print(f'    kept existing {member.name} (use --force to overwrite)')
+                continue
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            if os.path.exists(dest):
+                shutil.copy2(dest, dest + '.pre-import')
+            src = tf.extractfile(member)
+            with open(dest, 'wb') as out:
+                shutil.copyfileobj(src, out)
+            os.chmod(dest, member.mode or 0o600)
+            restored += 1
+            print(f'    {member.name}')
+    print(f'  {restored} credential file(s) restored, {kept} left as they were.')
+
 def cmd_import(args):
     bundle = os.path.abspath(os.path.expanduser(args.bundle))
     if not os.path.isfile(bundle):
@@ -672,6 +964,13 @@ def cmd_import(args):
             print(f'  WARNING: ASB app state not restored ({exc}).')
             print('  The session transcripts above are in place; this part is only')
             print('  window titles and the branch tree. Re-run with --asb-dir <path>.')
+        # 4. Credentials, last: they are the only part that can prompt, and a
+        #    prompt in the middle would stall a restore that is otherwise
+        #    unattended.
+        try:
+            restore_credentials(staging, target_repo, manifest, args)
+        except Exception as exc:
+            print(f'  WARNING: credentials not restored ({exc}).')
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
@@ -681,8 +980,13 @@ def cmd_import(args):
     print('  2. python3 .agent/scripts/harness_migrate.py link-memory')
     print('  3. python3 .agent/scripts/harness_migrate.py check   (numbers should match the source)')
     print('  4. Sign in to the ASB app. Re-pair WhatsApp if you use the bridge.')
-    print('  5. Copy the credential files .gitignore keeps out of the repo (.env, token_*.json,')
-    print('     credentials.json) by hand, over a channel you trust.')
+    if manifest.get('credentials') and not args.skip_credentials:
+        print('  5. Credentials came with the bundle. Delete the bundle now: it is a')
+        print('     secret at rest until you do.')
+    else:
+        print('  5. Copy the credential files .gitignore keeps out of the repo (.env, token_*.json,')
+        print('     credentials.json) by hand, over a channel you trust. `export --with-credentials`')
+        print('     carries them encrypted if you would rather not.')
     return 0
 
 def main():
@@ -691,14 +995,21 @@ def main():
     sub = ap.add_subparsers(dest='cmd')
 
     sub.add_parser('check', help='audit what lives outside the repo')
+    p_creds = sub.add_parser('creds', help='list the credential files a bundle would carry')
+    p_creds.add_argument('--repo', default=None, help='repo to inspect (default: this one)')
 
     p_link = sub.add_parser('link-memory', help='move auto-memory into the repo, symlink back')
     p_link.add_argument('--dry-run', action='store_true')
 
     p_exp = sub.add_parser('export', help='write a transfer bundle')
     p_exp.add_argument('--out', default='.', help='directory to write the bundle into')
+    p_exp.add_argument('--repo', default=None,
+                       help='repo to export (default: the one this script lives in)')
     p_exp.add_argument('--no-transcripts', action='store_true',
                        help='memory + app state only, no session history')
+    p_exp.add_argument('--with-credentials', action='store_true',
+                       help='carry .env, tokens and service-account keys, encrypted '
+                            f'with a passphrase (or ${CRED_PASS_ENV})')
 
     p_imp = sub.add_parser('import', help='restore a transfer bundle onto this machine')
     p_imp.add_argument('--bundle', required=True)
@@ -708,12 +1019,14 @@ def main():
     p_imp.add_argument('--force', action='store_true', help='overwrite files already present')
     p_imp.add_argument('--no-rewrite-paths', action='store_true',
                        help='leave the old absolute paths inside transcripts')
+    p_imp.add_argument('--skip-credentials', action='store_true',
+                       help='ignore the encrypted credentials in the bundle')
 
     args = ap.parse_args()
     if not args.cmd:
         ap.print_help()
         return 0
-    return {'check': cmd_check, 'link-memory': cmd_link_memory,
+    return {'check': cmd_check, 'creds': cmd_creds, 'link-memory': cmd_link_memory,
             'export': cmd_export, 'import': cmd_import}[args.cmd](args)
 
 if __name__ == '__main__':

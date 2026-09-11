@@ -39,6 +39,16 @@
         "hooks": [
           {
             "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/retired_commands_guard.py\"",
+            "timeout": 10,
+            "statusMessage": "Checking for re-seeded template commands..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
             "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/dashboard_context.py\"",
             "timeout": 10,
             "statusMessage": "Loading dashboard context (trimmed)..."
