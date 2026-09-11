@@ -1,6 +1,6 @@
 ---
 description: Comms - Toggle or inspect auto reply drafts (reply-router) - on/off, per source, status
-argument-hint: "on | off | status | on --source gmail"
+argument-hint: "on | off | status | list | close --all-answered | on --source gmail"
 ---
 
 Auto reply drafts (reply-router). Full SOP: `.agent/skills/reply-router/SKILL.md`.
@@ -12,6 +12,8 @@ python3 .agent/skills/reply-router/scripts/reply_router.py $ARGUMENTS
 ```
 
 - No argument or `status` -> `status`.
+- `list` shows the open reply conversations, their age and whether each one claimed a session id.
+- `close --conv <key> --summary "..."` finishes one conversation and retires its chat; `close --all-answered` finishes every one Slack already marked answered.
 - `on` / `off` toggles the master switch; add `--source slack|gmail` for one source.
 - The change takes effect on the next cron tick (within 5 minutes, WSL host).
 - This toggles DRAFTING only. Sending stays approval-gated regardless.

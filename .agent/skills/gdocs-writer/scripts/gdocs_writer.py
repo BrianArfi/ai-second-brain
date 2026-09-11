@@ -18,7 +18,7 @@ DEFAULT_CRED_DIR = os.path.join(SKILL_DIR, '..', '..', 'work-drive-connector')
 SCOPES           = ['https://www.googleapis.com/auth/drive']
 
 sys.path.insert(0, os.path.join(REPO_ROOT, '.agent', 'scripts'))
-from file_utils import assert_drive_result  # Drive Operation Verification (CLAUDE.md)
+from file_utils import assert_drive_result, apply_visibility  # Drive Operation Verification (CLAUDE.md)
 
 def authenticate(cred_dir=None):
     from google.auth.transport.requests import Request
@@ -36,32 +36,97 @@ def authenticate(cred_dir=None):
     return creds
 
 # ─── Text sanitiser ───────────────────────────────────────────────────────────
-def sanitise(text):
-    """Remove em-dashes and double-dashes, replace with comma+space."""
+def sanitise(text, edges=True):
+    """Remove em-dashes and double-dashes, replace with comma+space.
+
+    `edges` trims a leading comma left behind by that replacement. It must be
+    False when sanitising a fragment of a line rather than a whole line: since
+    add_formatted_run started splitting on links, the text after a link often
+    legitimately begins ", and ...", and trimming it produced "MOMand Teammate".
+    """
     # Em-dash with spaces around it
     text = re.sub(r'\s*—\s*', ', ', text)
     # Double-dash with spaces (avoid hitting table separator rows like |---|)
     text = re.sub(r'(?<!\|)\s*--\s*(?!\|)', ', ', text)
     # Clean up double commas or leading/trailing comma artifacts
     text = re.sub(r',\s*,', ',', text)
-    text = re.sub(r'^,\s*', '', text)
+    if edges:
+        text = re.sub(r'^,\s*', '', text)
     return text
 
 # ─── Inline formatter (bold, italic) ──────────────────────────────────────────
+def sanitise_frag(text):
+    """sanitise() for a fragment of a line: keeps a leading comma."""
+    return sanitise(text, edges=False)
+
+def _add_hyperlink(para, url, text):
+    """Insert a real clickable hyperlink run, blue and underlined.
+
+    python-docx has no hyperlink API, so the w:hyperlink element is built by
+    hand against an external relationship. Without this, add_formatted_run
+    wrote "[label](https://...)" as literal characters, which is how the
+    Digital Seller Portal PRD reached Drive with every link unclickable.
+    Added 8 Sep 2026.
+    """
+    from docx.oxml.shared import OxmlElement, qn
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+    from docx.shared import RGBColor
+
+    r_id = para.part.relate_to(url, RT.HYPERLINK, is_external=True)
+    link = OxmlElement('w:hyperlink')
+    link.set(qn('r:id'), r_id)
+
+    run = OxmlElement('w:r')
+    rPr = OxmlElement('w:rPr')
+    color = OxmlElement('w:color')
+    color.set(qn('w:val'), '1155CC')          # Google Docs link blue
+    rPr.append(color)
+    underline = OxmlElement('w:u')
+    underline.set(qn('w:val'), 'single')
+    rPr.append(underline)
+    run.append(rPr)
+
+    t = OxmlElement('w:t')
+    t.text = text
+    t.set(qn('xml:space'), 'preserve')
+    run.append(t)
+    link.append(run)
+    para._p.append(link)
+
+# [label](url) | `code` | **bold** | *italic* | plain
+INLINE_RE = re.compile(
+    r'\[([^\]]+)\]\(([^)\s]+)\)'      # 1 label, 2 url
+    r'|`([^`]+)`'                        # 3 inline code
+    r'|\*\*([^*]+)\*\*'                 # 4 bold
+    r'|\*([^*]+)\*'                      # 5 italic
+)
+
 def add_formatted_run(para, text):
-    """Parse **bold**, *italic*, and plain text into docx runs."""
-    from docx.shared import Pt
-    pattern = re.compile(r'(\*\*[^*]+\*\*|\*[^*]+\*|[^*]+)')
-    for match in pattern.finditer(text):
-        chunk = match.group(0)
-        if chunk.startswith('**') and chunk.endswith('**'):
-            run = para.add_run(sanitise(chunk[2:-2]))
+    """Parse links, `code`, **bold**, *italic* and plain text into docx runs."""
+    from docx.shared import Pt, RGBColor
+
+    pos = 0
+    for m in INLINE_RE.finditer(text):
+        if m.start() > pos:
+            para.add_run(sanitise_frag(text[pos:m.start()]))
+        label, url, code, bold, italic = m.group(1), m.group(2), m.group(3), m.group(4), m.group(5)
+        if url is not None:
+            # Strip inline markup inside a link label; a run cannot nest.
+            clean = re.sub(r'[`*]', '', label)
+            _add_hyperlink(para, url, sanitise_frag(clean))
+        elif code is not None:
+            run = para.add_run(code)          # never sanitise a code span
+            run.font.name = 'Consolas'
+            run.font.size = Pt(10)
+        elif bold is not None:
+            run = para.add_run(sanitise_frag(bold))
             run.bold = True
-        elif chunk.startswith('*') and chunk.endswith('*'):
-            run = para.add_run(sanitise(chunk[1:-1]))
-            run.italic = True
         else:
-            para.add_run(sanitise(chunk))
+            run = para.add_run(sanitise_frag(italic))
+            run.italic = True
+        pos = m.end()
+    if pos < len(text):
+        para.add_run(sanitise_frag(text[pos:]))
 
 # ─── Table parser ─────────────────────────────────────────────────────────────
 def is_table_row(line):
@@ -75,6 +140,31 @@ def parse_table_row(line):
     return [c.strip() for c in cells]
 
 # ─── Markdown → docx ──────────────────────────────────────────────────────────
+# ─── Publish-time link hygiene ────────────────────────────────────────────────
+LOCAL_HOST_RE = re.compile(
+    r'\[([^\]]*)\]\(\s*(?:https?://(?:localhost|127\.0\.0\.1)(?::\d+)?|file://)[^)]*\)'
+)
+BARE_LOCAL_HOST_RE = re.compile(
+    r'<?(?:https?://(?:localhost|127\.0\.0\.1)(?::\d+)?|file://)[^\s)>\]]*>?'
+)
+
+def strip_local_only_links(md):
+    """Drop links that only resolve on the owner's machine, keep their text.
+
+    Ledger ids are written as [`WAIT-0274`](http://localhost:3737/#find/WAIT-0274)
+    so the owner can open the record's card. That URL is dead for every other reader,
+    and CLAUDE.md is explicit that dashboard links do not travel to anything
+    leaving the machine. A published Google Doc read by Work colleagues is
+    exactly that case, so the link comes off here rather than out of the source
+    file, which the owner still reads locally.
+
+    Added 8 Sep 2026, after the Digital Seller Portal PRD went to Drive carrying
+    26 localhost links.
+    """
+    md = LOCAL_HOST_RE.sub(lambda m: m.group(1), md)
+    md = BARE_LOCAL_HOST_RE.sub('', md)
+    return md
+
 def md_to_docx(md_path, title=None):
     from docx import Document
     from docx.shared import Pt, RGBColor, Inches
@@ -102,6 +192,8 @@ def md_to_docx(md_path, title=None):
     with open(md_path, 'r', encoding='utf-8') as f:
         raw = f.read()
 
+    raw = strip_local_only_links(raw)
+
     lines = raw.split('\n')
     i = 0
 
@@ -115,6 +207,59 @@ def md_to_docx(md_path, title=None):
 
         # ── Blank line ──
         if line.strip() == '':
+            i += 1
+            continue
+
+        # ── Standalone image: ![alt](path) ──
+        # Added 8 Sep 2026. Without this an image line landed in the Doc as
+        # literal markdown, so a diagram-heavy PRD published with no diagrams.
+        # The Drive token carries only the drive scope, so the Docs API insert
+        # path is unavailable; embedding at the docx stage is what works.
+        m_img = re.match(r'^!\[([^\]]*)\]\(([^)]+)\)\s*$', line.strip())
+        if m_img:
+            from urllib.parse import unquote
+            alt, src = m_img.group(1), unquote(m_img.group(2))
+            if not os.path.isabs(src):
+                src = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(md_path)), src))
+            if os.path.exists(src):
+                usable_in = (doc.sections[0].page_width
+                             - doc.sections[0].left_margin
+                             - doc.sections[0].right_margin) / 914400.0
+                try:
+                    from PIL import Image as _PILImage
+                    with _PILImage.open(src) as im:
+                        px_w, px_h = im.size
+                except Exception:
+                    px_w = px_h = 0
+                p_img = doc.add_paragraph()
+                p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                set_para_spacing(p_img, before=6, after=2)
+                run = p_img.add_run()
+                # Cap height so a tall diagram still fits one page-ish, and
+                # cap width to the usable text column.
+                max_h_in = 8.0
+                w_in = usable_in
+                if px_w and px_h:
+                    h_in = w_in * px_h / float(px_w)
+                    if h_in > max_h_in:
+                        run.add_picture(src, height=Inches(max_h_in))
+                    else:
+                        run.add_picture(src, width=Inches(w_in))
+                else:
+                    run.add_picture(src, width=Inches(w_in))
+                if alt:
+                    cap = doc.add_paragraph()
+                    cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    set_para_spacing(cap, before=0, after=8)
+                    crun = cap.add_run(sanitise(alt))
+                    crun.italic = True
+                    crun.font.size = Pt(9)
+                    crun.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+            else:
+                p_img = doc.add_paragraph()
+                set_para_spacing(p_img)
+                miss = p_img.add_run('[image not found: %s]' % src)
+                miss.italic = True
             i += 1
             continue
 
@@ -256,7 +401,7 @@ def _format_pass(file_id, cred_dir, label):
     except Exception as e:
         print(f"[format_pass] skipped ({type(e).__name__}: {e})")
 
-def drive_upload(docx_path, title, share=True, cred_dir=None, parent_id=None):
+def drive_upload(docx_path, title, share=False, cred_dir=None, parent_id=None):
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
 
@@ -277,12 +422,13 @@ def drive_upload(docx_path, title, share=True, cred_dir=None, parent_id=None):
     link    = file.get('webViewLink')
     _format_pass(file_id, cred_dir, 'upload')
 
-    if share:
-        service.permissions().create(
-            fileId=file_id,
-            body={'type': 'anyone', 'role': 'commenter'},
-            fields='id'
-        ).execute()
+    # Sharing: domain by default, public only when explicitly asked.
+    # Until 8 Sep 2026 this block published every upload to anyone-with-link
+    # unconditionally, which is the landmine apply_visibility exists to close
+    # (CLAUDE.md, Google Workspace). The Digital Seller Portal PRD was found
+    # publicly commentable because of it. `share` now means "publish", not
+    # "share at all", and it defaults to False at the CLI.
+    apply_visibility(service, file_id, 'public' if share else 'domain')
 
     return file_id, link
 
@@ -355,7 +501,8 @@ def main():
     up = sub.add_parser('upload', help='Upload new Google Doc')
     up.add_argument('--file',      required=True, help='Path to .md file')
     up.add_argument('--title',     help='Document title (default: filename)')
-    up.add_argument('--no-share',  action='store_true', help='Skip public comment permission')
+    up.add_argument('--share',     action='store_true', help='Publish to anyone with the link. Default is the Work domain only')
+    up.add_argument('--no-share',  action='store_true', help='Deprecated, kept so old callers do not break. Domain-only is now the default')
     up.add_argument('--cred-dir',  help='Path to folder containing token.json (default: work-drive-connector)')
     up.add_argument('--parent-id', help='Google Drive folder ID to upload into')
 
@@ -385,7 +532,7 @@ def main():
     cred_dir = getattr(args, 'cred_dir', None)
 
     if args.command == 'upload':
-        share     = not getattr(args, 'no_share', False)
+        share     = getattr(args, 'share', False)   # publish only when asked
         parent_id = getattr(args, 'parent_id', None)
         file_id, link = drive_upload(docx_path, title=title, share=share,
                                      cred_dir=cred_dir, parent_id=parent_id)
