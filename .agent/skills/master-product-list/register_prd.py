@@ -71,15 +71,22 @@ def update_markdown(component, feature, details, version, status, prd_url, prd_t
         print(f"Error: Version '{version_main}' not found in Markdown.")
         return False
 
-    table_pattern = r"\| Feature \|.*?\|\n\|.*?\n((?:\|.*?\|\n?)+)"
-    table_match = re.search(table_pattern, comp_section[version_match.end():], re.DOTALL)
+    # Row patterns must be line-anchored with [^\n], never `.*?` under re.DOTALL.
+    # With DOTALL, `\|.*?\|` matched only the FIRST cell of the first row, so
+    # table_content captured a truncated prefix like "| **SAB Image Export** |".
+    # The write-back then appended the new row after that prefix and orphaned the
+    # rest of the original row onto its own line. Every registration corrupted one
+    # more row that way. Repaired 11 Sep 2026, after three rows in the E-commerce
+    # Core and B2C tables had to be re-joined by hand.
+    table_pattern = r"\| Feature \|[^\n]*\n\|[^\n]*\n((?:\|[^\n]*\n)+)"
+    table_match = re.search(table_pattern, comp_section[version_match.end():])
     if not table_match:
         print("Error: Feature table not found in Markdown.")
         return False
 
     table_content = table_match.group(1)
     feature_esc = re.escape(feature)
-    row_pattern = rf"\| \*\*{feature_esc}\*\* \|.*?\|.*?\|.*?\|"
+    row_pattern = rf"\| \*\*{feature_esc}\*\* \|[^\n]*\|"
     formatted_details = details.replace(';', '<br>')
     new_row = f"| **{feature}** | {formatted_details} | {status} | [{prd_title}]({prd_url}) |"
 
