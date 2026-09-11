@@ -1,6 +1,6 @@
 ---
 name: reply-router
-description: Auto reply drafts - turns new Slack messages that need the owner's reply into auto-drafted reply sessions via the ASB branching protocol. One session per CONVERSATION (Slack-thread style), not per message. Cron on WSL reads the mention ledger, filters and debounces, then writes branch requests; each sub-session drafts the reply and waits for approval. Toggle with /autodraft. Plan - journal/plans/plan_auto_reply_drafts.md.
+description: Auto reply drafts - turns new Slack messages that need the owner's reply into auto-drafted reply sessions via the ASB branching protocol. One session per CONVERSATION (Slack-thread style), not per message. An ASB app routine reads the mention ledger, filters and debounces, then writes branch requests; each sub-session drafts the reply and waits for approval. Toggle with /autodraft. Plan - journal/plans/plan_auto_reply_drafts.md.
 ---
 
 # Reply Router (auto reply drafts)
@@ -16,7 +16,7 @@ themselves. Design and phases:
 ```
 slack-push (seconds) + mention sweep (30m)
         -> journal/state/slack_mention_ledger.json      (existing)
-        -> reply_router.py run   (cron */5, WSL only)
+        -> reply_router.py run   (ASB app routine, */15 07-23 WIB)
               reap:   close conversations Slack already answered or dismissed,
                       and ones quiet past the TTL -> .asb/branches/status/<id>.json
               filter: status=open, kind in scope, debounce 30m, not muted,
@@ -111,18 +111,36 @@ python3 $RR on|off --source slack|gmail
 Config lives in `journal/state/automation_config.json` (`auto_reply_drafts`
 key): scope kinds, debounce, caps, quiet hours, `conversation_ttl_hours`,
 `muted_channels`. State (conversations + counters) in `journal/state/reply_router_state.json`. Neither is one
-of the four locked ledgers; the router is their single writer (WSL cron), and
-writes are atomic.
+of the four locked ledgers; the router is their single writer, and writes are
+atomic.
 
-Kill switch: `AUTO_REPLY_DRAFTS_DISABLE=1` in the crontab environment.
+Kill switch: `/autodraft off`, or `AUTO_REPLY_DRAFTS_DISABLE=1` in the
+environment.
 
-## Activation (once, on the WSL automation host only)
+## Activation: an app routine, not a crontab line
 
-```cron
-*/5 * * * * cd . && python3 .agent/skills/reply-router/scripts/reply_router.py run >> /tmp/reply_router.log 2>&1
+The router runs from the ASB app's own scheduler, so it follows whichever
+machine has the app open. The row lives in `journal/state/routines.json` and
+travels with the repo, so a new machine gets it from a `git pull` and needs no
+per machine setup:
+
+```json
+{ "job": "reply-router", "runner": "app", "command": "/autodraft run",
+  "cron": "*/15 7-23 * * *", "session_policy": "daily",
+  "autonomy": "draft-only", "catchup": "once", "enabled": true }
 ```
 
-Never install this on a second machine (CLAUDE.md: one automation host).
+**Never add this to a crontab.** It was a WSL cron job until 11 Sep 2026, the
+line was never installed, and the router sat idle with 23 messages waiting while
+`/autodraft status` reported ON. Two schedulers for one router means duplicate
+draft sessions, so the app row replaces the cron line rather than joining it.
+
+Two limits to know. An app routine only fires while the app is open, so a
+window that passes with every machine shut is recorded as `missed` and
+`catchup: once` runs it one time on the next launch. And the app open on two
+machines at once means two schedulers over one `reply_router_state.json`, which
+has no lock: `processed` keys dedupe within a machine, git dedupes across
+machines only as fast as it syncs.
 
 Regression test: `python3 tests/test_reply_router_conversations.py`.
 
