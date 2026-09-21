@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI, Harness, dan Aplikasi Second Brain: apa bedanya dan kenapa Anda butuh ketiganya</title>
+<style>
+:root{
+  --bg:#fbfbfa; --panel:#ffffff; --ink:#16181d; --muted:#5c6270; --line:#e4e5e9;
+  --accent:#1f6feb; --accent-soft:#e8f0fe;
+  --green:#137a4c; --green-soft:#e3f4ec;
+  --amber:#8a5a00; --amber-soft:#fdf1dc;
+  --red:#a42c2c; --red-soft:#fbe9e9;
+  --violet:#6035c9; --violet-soft:#eee9fc;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0e1014; --panel:#161920; --ink:#e8eaef; --muted:#9aa1af; --line:#282c36;
+    --accent:#5b9dff; --accent-soft:#16233a;
+    --green:#4fd39a; --green-soft:#10261e;
+    --amber:#e0aa53; --amber-soft:#2a2113;
+    --red:#f08a8a; --red-soft:#2c1717;
+    --violet:#b096f5; --violet-soft:#1e1935;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1014; --panel:#161920; --ink:#e8eaef; --muted:#9aa1af; --line:#282c36;
+  --accent:#5b9dff; --accent-soft:#16233a;
+  --green:#4fd39a; --green-soft:#10261e;
+  --amber:#e0aa53; --amber-soft:#2a2113;
+  --red:#f08a8a; --red-soft:#2c1717;
+  --violet:#b096f5; --violet-soft:#1e1935;
+}
+:root[data-theme="light"]{
+  --bg:#fbfbfa; --panel:#ffffff; --ink:#16181d; --muted:#5c6270; --line:#e4e5e9;
+  --accent:#1f6feb; --accent-soft:#e8f0fe;
+  --green:#137a4c; --green-soft:#e3f4ec;
+  --amber:#8a5a00; --amber-soft:#fdf1dc;
+  --red:#a42c2c; --red-soft:#fbe9e9;
+  --violet:#6035c9; --violet-soft:#eee9fc;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.62;
+  font-size:16px;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+.wrap{max-width:980px;margin:0 auto;padding:0 22px 120px}
+
+header.hero{padding:64px 0 34px;border-bottom:1px solid var(--line);margin-bottom:8px}
+.eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--muted);margin:0 0 14px}
+h1{font-size:clamp(30px,5.2vw,46px);line-height:1.12;letter-spacing:-.02em;margin:0 0 18px;font-weight:680}
+.lede{font-size:clamp(17px,2.4vw,19.5px);color:var(--muted);margin:0;max-width:66ch}
+.meta{margin-top:26px;font-family:var(--mono);font-size:12px;color:var(--muted)}
+
+nav.toc{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--line);
+  margin:0 -22px 46px;padding:11px 22px;overflow-x:auto;white-space:nowrap;scrollbar-width:none}
+nav.toc::-webkit-scrollbar{display:none}
+nav.toc a{display:inline-block;font-family:var(--mono);font-size:11.5px;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--muted);text-decoration:none;padding:5px 11px;border-radius:6px;margin-right:2px}
+nav.toc a:hover{color:var(--ink);background:var(--accent-soft)}
+
+section{margin:0 0 62px;scroll-margin-top:64px}
+h2{font-size:clamp(21px,3.2vw,27px);letter-spacing:-.01em;margin:0 0 6px;font-weight:660}
+h2 .num{font-family:var(--mono);font-size:13px;color:var(--accent);margin-right:12px;font-weight:500}
+.sub{color:var(--muted);margin:0 0 26px;font-size:15.5px;max-width:66ch}
+h3{font-size:16.5px;margin:34px 0 10px;font-weight:640;letter-spacing:-.005em}
+p{margin:0 0 15px;max-width:70ch}
+ul,ol{margin:0 0 15px;padding-left:22px;max-width:70ch}
+li{margin-bottom:7px}
+a{color:var(--accent)}
+strong{font-weight:640}
+code{font-family:var(--mono);font-size:.88em;background:var(--accent-soft);color:var(--ink);
+  padding:1.5px 6px;border-radius:4px}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px 24px;margin:0 0 18px}
+.grid{display:grid;gap:14px;margin:0 0 22px}
+@media(min-width:680px){.grid.c2{grid-template-columns:1fr 1fr}.grid.c3{grid-template-columns:repeat(3,1fr)}}
+.card h4{margin:0 0 8px;font-size:15px;font-weight:650}
+.card p{margin-bottom:0;font-size:14.5px;color:var(--muted)}
+.card .tag{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;
+  text-transform:uppercase;padding:3px 8px;border-radius:20px;margin-bottom:10px}
+.t-blue{background:var(--accent-soft);color:var(--accent)}
+.t-green{background:var(--green-soft);color:var(--green)}
+.t-amber{background:var(--amber-soft);color:var(--amber)}
+.t-violet{background:var(--violet-soft);color:var(--violet)}
+.t-red{background:var(--red-soft);color:var(--red)}
+
+.note{border-top:2px solid var(--accent);padding:13px 0 0;margin:6px 0 24px;max-width:70ch}
+.note.warn{border-top-color:var(--amber)}
+.note.good{border-top-color:var(--green)}
+.note strong{display:block;margin-bottom:5px;color:var(--accent);
+  font-family:var(--mono);font-size:11px;letter-spacing:.11em;text-transform:uppercase}
+.note.warn strong{color:var(--amber)}
+.note.good strong{color:var(--green)}
+.note p{color:var(--muted)}
+.note p:last-child{margin-bottom:0}
+
+.steps{counter-reset:s;list-style:none;padding:0;margin:0 0 22px}
+.steps li{counter-increment:s;position:relative;padding:0 0 20px 44px;margin:0;
+  border-left:1px solid var(--line);margin-left:13px}
+.steps li:last-child{border-left-color:transparent;padding-bottom:0}
+.steps li::before{content:counter(s);position:absolute;left:-13px;top:0;width:26px;height:26px;
+  border-radius:50%;background:var(--panel);border:1px solid var(--line);color:var(--muted);
+  font-family:var(--mono);font-size:12px;display:flex;align-items:center;justify-content:center}
+.steps .t{font-weight:640;margin-bottom:3px;font-size:15px}
+.steps .d{color:var(--muted);font-size:14.5px;line-height:1.55}
+
+.tw{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 0 20px;
+  border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;min-width:540px;font-size:14.5px}
+th,td{text-align:left;padding:11px 15px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--mono);font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--muted);font-weight:500;background:var(--bg)}
+tr:last-child td{border-bottom:none}
+td strong{font-weight:640}
+.st{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;
+  padding:2px 8px;border-radius:20px;white-space:nowrap}
+.st.a{background:var(--violet-soft);color:var(--violet)}
+.st.h{background:var(--green-soft);color:var(--green)}
+.st.p{background:var(--accent-soft);color:var(--accent)}
+
+dl{margin:0;max-width:70ch}
+dt{font-weight:650;margin-top:16px;font-size:15px}
+dt:first-child{margin-top:0}
+dd{margin:3px 0 0;color:var(--muted);font-size:14.5px;line-height:1.55}
+
+footer{border-top:1px solid var(--line);padding-top:24px;margin-top:60px;font-size:13.5px;color:var(--muted)}
+.toggle{position:fixed;right:16px;bottom:16px;z-index:30;background:var(--panel);
+  border:1px solid var(--line);color:var(--muted);border-radius:24px;padding:8px 14px;
+  font-family:var(--mono);font-size:11px;cursor:pointer;letter-spacing:.06em}
+.toggle:hover{color:var(--ink)}
+.toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.fig{margin:6px 0 30px;background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:18px 18px 8px;overflow-x:auto}
+.fig svg{display:block;min-width:660px;width:100%;height:auto}
+.fig .cap{margin:12px 0 8px;font-size:13px;color:var(--muted);line-height:1.55;
+  border-top:1px solid var(--line);padding-top:11px}
+
+svg text{font-family:var(--sans);fill:var(--ink)}
+svg .bx{fill:var(--panel);stroke:var(--line);stroke-width:1.5}
+svg .bx-app{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5}
+svg .bx-h{fill:var(--green-soft);stroke:var(--green);stroke-width:1.5}
+svg .bx-m{fill:var(--violet-soft);stroke:var(--violet);stroke-width:1.5}
+svg .bx-o{fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5}
+svg .chip{fill:var(--panel);stroke:var(--line);stroke-width:1}
+svg .ttl{font-size:15.5px;font-weight:680}
+svg .ttl2{font-size:13.5px;font-weight:650}
+svg .eyb{font-family:var(--mono);font-size:10.5px;fill:var(--muted);letter-spacing:.09em}
+svg .lbl{font-size:12.5px;fill:var(--muted)}
+svg .ln{stroke:#8a90a0;stroke-width:1.7;fill:none}
+svg .ln.dash{stroke-dasharray:5 4}
+svg .lane{fill:none;stroke:var(--line);stroke-width:1}
+svg .dot{stroke:none}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<button class="toggle" id="tg">TEMA</button>
+<div class="wrap">
+
+<header class="hero">
+  <p class="eyebrow">Penjelasan konsep &middot; Untuk semua orang</p>
+  <h1>AI, harness, dan aplikasi second brain</h1>
+  <p class="lede">Tiga hal ini sering dikira satu hal yang sama. Padahal ketiganya beda pekerjaan, dan kalau salah satu tidak ada, hasilnya terasa langsung. Halaman ini menjelaskannya dengan gambar lebih dulu, tulisan hanya sebagai keterangan.</p>
+  <p class="meta">Ditulis oleh Your Name &middot; 13 September 2026 &middot; Bebas dibagikan</p>
+</header>
+
+<nav class="toc">
+  <a href="#s0">Intinya</a><a href="#s1">Peta</a><a href="#s2">Model AI</a><a href="#s3">Harness</a>
+  <a href="#s4">Second brain</a><a href="#s5">Aplikasi</a><a href="#s6">Contoh nyata</a>
+  <a href="#s7">Siapa kerja apa</a><a href="#s8">Salah paham</a><a href="#s9">Kalau rusak</a><a href="#s10">Istilah</a>
+</nav>
+
+<section id="s0">
+  <h2><span class="num">00</span>Intinya dalam satu paragraf</h2>
+  <p class="sub">Kalau Anda hanya membaca satu bagian, baca yang ini.</p>
+  <div class="grid c3">
+    <div class="card"><span class="tag t-violet">Lapis 1</span><h4>Model AI adalah mesin berpikirnya</h4><p>Sangat pintar. Tetapi dia tidak ingat apa pun, tidak tahu urusan Anda, dan tidak punya tangan untuk mengerjakan sesuatu.</p></div>
+    <div class="card"><span class="tag t-green">Lapis 2</span><h4>Harness adalah tempat kerjanya</h4><p>Arsip, aturan main, alat, dan catatan. Harness yang membuat mesin tadi ingat, tahu konteks, dan bisa bertindak.</p></div>
+    <div class="card"><span class="tag t-blue">Lapis 3</span><h4>Aplikasi adalah pintu Anda</h4><p>Tempat Anda duduk, meminta, melihat hasilnya, dan menyetujui sebelum ada yang terkirim keluar.</p></div>
+  </div>
+  <div class="note">
+    <strong>Analoginya</strong>
+    <p>Model AI adalah <strong>koki jenius yang baru tiba dan hilang ingatan setiap pagi</strong>. Harness adalah <strong>dapurnya</strong>: resep, bahan yang tersusun, pisau, dan buku catatan pesanan. Aplikasi adalah <strong>ruang makan dan meja pesan</strong>: tempat Anda memesan, melihat masakan datang, dan bilang setuju sebelum makanan diantar ke tamu.</p>
+    <p>Koki hebat tanpa dapur tidak menghasilkan apa-apa. Dapur lengkap tanpa pintu masuk tidak bisa Anda pakai.</p>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">01</span>Peta besarnya</h2>
+  <p class="sub">Baca dari atas ke bawah. Anak panah menunjukkan ke mana pekerjaan bergerak, bukan sekadar di mana kotaknya duduk.</p>
+
+  <div class="fig">
+  <svg viewBox="0 0 900 640" role="img" aria-label="Peta tiga lapis: Anda berbicara ke aplikasi, aplikasi memanggil harness, harness memberi konteks ke model AI dan bertindak ke dunia luar melalui gerbang persetujuan">
+    <defs>
+      <marker id="aEnd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="#8a90a0"/>
+      </marker>
+      <marker id="aStart" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M10 0 L0 5 L10 10 z" fill="#8a90a0"/>
+      </marker>
+    </defs>
+
+    <rect class="bx" x="355" y="14" width="190" height="54" rx="10"/>
+    <text class="ttl" x="450" y="38" text-anchor="middle">ANDA</text>
+    <text class="lbl" x="450" y="56" text-anchor="middle">minta, baca, setujui</text>
+
+    <line class="ln" x1="450" y1="70" x2="450" y2="98" marker-end="url(#aEnd)" marker-start="url(#aStart)"/>
+
+    <rect class="bx-app" x="40" y="104" width="820" height="116" rx="12"/>
+    <text class="eyb" x="62" y="128">LAPIS 3 &middot; APLIKASI</text>
+    <text class="ttl" x="62" y="150">Pintu masuk: tempat Anda duduk dan memutuskan</text>
+    <rect class="chip" x="62" y="166" width="186" height="36" rx="8"/>
+    <text class="lbl" x="155" y="189" text-anchor="middle">Percakapan &amp; riwayat</text>
+    <rect class="chip" x="260" y="166" width="186" height="36" rx="8"/>
+    <text class="lbl" x="353" y="189" text-anchor="middle">Sambungan ke tool</text>
+    <rect class="chip" x="458" y="166" width="186" height="36" rx="8"/>
+    <text class="lbl" x="551" y="189" text-anchor="middle">Antrean persetujuan</text>
+    <rect class="chip" x="656" y="166" width="186" height="36" rx="8"/>
+    <text class="lbl" x="749" y="189" text-anchor="middle">Bisa dibuka dari HP</text>
+
+    <line class="ln" x1="450" y1="220" x2="450" y2="256" marker-end="url(#aEnd)" marker-start="url(#aStart)"/>
+    <text class="lbl" x="462" y="243">perintah turun, hasil naik</text>
+
+    <rect class="bx-h" x="40" y="262" width="820" height="184" rx="12"/>
+    <text class="eyb" x="62" y="286">LAPIS 2 &middot; HARNESS</text>
+    <text class="ttl" x="62" y="308">Tempat kerja: ingatan, aturan, alat, dan catatan</text>
+    <rect class="chip" x="62" y="324" width="186" height="44" rx="8"/>
+    <text class="lbl" x="155" y="351" text-anchor="middle">Ingatan jangka panjang</text>
+    <rect class="chip" x="260" y="324" width="186" height="44" rx="8"/>
+    <text class="lbl" x="353" y="351" text-anchor="middle">Aturan &amp; cara kerja baku</text>
+    <rect class="chip" x="458" y="324" width="186" height="44" rx="8"/>
+    <text class="lbl" x="551" y="351" text-anchor="middle">Alat &amp; skrip</text>
+    <rect class="chip" x="656" y="324" width="186" height="44" rx="8"/>
+    <text class="lbl" x="749" y="351" text-anchor="middle">Pemeriksa mutu</text>
+    <rect class="chip" x="62" y="380" width="186" height="44" rx="8"/>
+    <text class="lbl" x="155" y="407" text-anchor="middle">Buku janji &amp; keputusan</text>
+    <rect class="chip" x="260" y="380" width="186" height="44" rx="8"/>
+    <text class="lbl" x="353" y="407" text-anchor="middle">Siapa menunggu apa</text>
+    <rect class="chip" x="458" y="380" width="186" height="44" rx="8"/>
+    <text class="lbl" x="551" y="407" text-anchor="middle">Pohon kerja</text>
+    <rect class="chip" x="656" y="380" width="186" height="44" rx="8"/>
+    <text class="lbl" x="749" y="407" text-anchor="middle">Tugas terjadwal</text>
+
+    <line class="ln" x1="250" y1="446" x2="250" y2="514" marker-end="url(#aEnd)" marker-start="url(#aStart)"/>
+    <text class="lbl" x="262" y="474">konteks turun,</text>
+    <text class="lbl" x="262" y="492">jawaban naik</text>
+
+    <line class="ln" x1="650" y1="446" x2="650" y2="466" marker-end="url(#aEnd)"/>
+    <rect class="bx-o" x="556" y="468" width="188" height="28" rx="14"/>
+    <text class="eyb" x="650" y="486" text-anchor="middle">GERBANG PERSETUJUAN</text>
+    <line class="ln" x1="650" y1="496" x2="650" y2="514" marker-end="url(#aEnd)"/>
+
+    <rect class="bx-m" x="80" y="518" width="340" height="102" rx="12"/>
+    <text class="eyb" x="102" y="542">LAPIS 1 &middot; MODEL AI</text>
+    <text class="ttl" x="102" y="564">Mesin berpikir</text>
+    <text class="lbl" x="102" y="586">Pintar sekali. Tidak ingat apa pun,</text>
+    <text class="lbl" x="102" y="604">tidak kenal Anda, tidak punya tangan.</text>
+
+    <rect class="bx-o" x="480" y="518" width="340" height="102" rx="12"/>
+    <text class="eyb" x="502" y="542">DUNIA LUAR</text>
+    <text class="ttl" x="502" y="564">Slack, email, Drive, kalender, tiket</text>
+    <text class="lbl" x="502" y="586">Tempat pekerjaan benar-benar mendarat</text>
+    <text class="lbl" x="502" y="604">dan dibaca orang lain.</text>
+  </svg>
+  <p class="cap"><strong>Bacanya begini.</strong> Anda bicara ke aplikasi. Aplikasi meneruskan ke harness. Harness memilih ingatan dan aturan yang relevan, lalu menurunkannya ke model AI. Model mengembalikan jawaban. Harness memeriksa mutunya, mencatatnya, dan kalau hasilnya harus keluar ke orang lain, hasil itu berhenti dulu di gerbang persetujuan sampai Anda bilang ya. Model AI tidak pernah menyentuh dunia luar secara langsung.</p>
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">02</span>Kenapa Anda butuh model AI</h2>
+  <p class="sub">Lapis yang paling banyak dibicarakan orang, dan satu-satunya lapis yang tidak bisa Anda buat sendiri.</p>
+  <p>Model AI adalah bagian yang bisa membaca, menulis, meringkas, menalar, dan menyusun bahasa. Itu kemampuan baru yang dulu tidak ada. Tanpa lapis ini, dua lapis lain hanya jadi folder dan tombol.</p>
+  <p>Tetapi model AI punya empat keterbatasan bawaan. Keempatnya bukan bug, melainkan sifat. Keempatnya juga persis alasan lapis kedua ada.</p>
+  <div class="grid c2">
+    <div class="card"><span class="tag t-red">Sifat 1</span><h4>Dia lupa</h4><p>Setiap percakapan baru dimulai dari nol. Apa yang Anda jelaskan kemarin tidak ada lagi hari ini.</p></div>
+    <div class="card"><span class="tag t-red">Sifat 2</span><h4>Dia tidak kenal Anda</h4><p>Dia tidak tahu klien Anda, cara kerja tim Anda, siapa yang sedang menunggu jawaban Anda.</p></div>
+    <div class="card"><span class="tag t-red">Sifat 3</span><h4>Dia tidak punya tangan</h4><p>Dia bisa menulis pesan Slack. Dia tidak bisa mengirimnya, membuka file Anda, atau mengubah tiket.</p></div>
+    <div class="card"><span class="tag t-red">Sifat 4</span><h4>Dia tidak punya aturan</h4><p>Tanpa rambu, mutunya naik turun. Hari ini bagus, besok panjang dan bertele-tele.</p></div>
+  </div>
+  <div class="note warn">
+    <strong>Salah paham yang paling mahal</strong>
+    <p>Banyak orang mengira empat hal di atas selesai dengan mengganti ke model yang lebih baru atau lebih mahal. Tidak. Model yang lebih pintar tetap lupa, tetap tidak kenal Anda, dan tetap tidak punya tangan. Yang berubah hanya kualitas kalimatnya.</p>
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">03</span>Kenapa Anda butuh harness</h2>
+  <p class="sub">Harness adalah semua hal di sekeliling model yang membuatnya berguna berulang kali, bukan sekali saja.</p>
+  <p>Harness bukan program ajaib. Isinya hal-hal biasa: berkas berisi aturan, folder berisi catatan, skrip kecil, dan daftar. Justru karena biasa, Anda bisa membacanya, mengoreksinya, dan memilikinya.</p>
+  <div class="tw">
+  <table>
+    <thead><tr><th>Isi harness</th><th>Masalah yang dia selesaikan</th><th>Bentuk nyatanya</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Ingatan</strong></td><td>Model lupa setiap kali mulai</td><td>Catatan kecil satu fakta per berkas, dibaca ulang setiap sesi</td></tr>
+      <tr><td><strong>Aturan &amp; cara kerja baku</strong></td><td>Mutu naik turun tiap hari</td><td>Satu berkas berisi cara menulis notulen, cara menyusun dokumen produk, larangan gaya bahasa</td></tr>
+      <tr><td><strong>Alat &amp; skrip</strong></td><td>Model tidak punya tangan</td><td>Program kecil yang bisa membaca kalender, menarik transkrip, mengirim pesan</td></tr>
+      <tr><td><strong>Buku janji</strong></td><td>Janji hilang antar percakapan</td><td>Daftar komitmen Anda, dengan tanggal jatuh tempo dan statusnya</td></tr>
+      <tr><td><strong>Daftar penantian</strong></td><td>Anda lupa siapa yang belum membalas</td><td>Daftar orang lain yang berutang jawaban ke Anda, lengkap dengan batas waktunya</td></tr>
+      <tr><td><strong>Pohon kerja</strong></td><td>Semua jadi tumpukan tanpa alamat</td><td>Struktur bercabang, setiap catatan wajib menyebut satu cabang tempatnya bernaung</td></tr>
+      <tr><td><strong>Pemeriksa mutu</strong></td><td>Draf jelek terlanjur dikirim</td><td>Pemeriksa otomatis yang menolak tautan mati, bahasa keliru, dan klaim palsu</td></tr>
+      <tr><td><strong>Tugas terjadwal</strong></td><td>Anda harus ingat untuk bertanya</td><td>Pekerjaan yang jalan sendiri tiap pagi, meski Anda tidak membuka apa pun</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="note good">
+    <strong>Pembeda yang sebenarnya</strong>
+    <p>Tanpa harness, Anda punya asisten yang pintar untuk satu percakapan. Dengan harness, Anda punya asisten yang makin berguna tiap minggu, karena setiap koreksi Anda tersimpan dan berlaku selamanya.</p>
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">04</span>Kenapa harness khusus <em>second brain</em></h2>
+  <p class="sub">Harness ada banyak jenis. Yang satu ini dirancang untuk isi kepala Anda, bukan untuk satu tugas teknis.</p>
+  <p>Harness untuk menulis kode hanya perlu mengerti kode. Harness <em>second brain</em> mengurus hal yang jauh lebih berantakan: pekerjaan Anda, janji Anda, keputusan Anda, dan orang-orang yang menunggu Anda. Ada tiga hal yang hanya dimiliki jenis ini.</p>
+  <div class="grid c3">
+    <div class="card"><span class="tag t-green">Satu</span><h4>Dia melacak janji, bukan cuma tugas</h4><p>Aplikasi to-do mencatat apa yang Anda ketik. Second brain menangkap janji yang keluar dari mulut Anda di rapat, lalu menagihnya.</p></div>
+    <div class="card"><span class="tag t-green">Dua</span><h4>Dia melacak arah dua-arah</h4><p>Bukan hanya utang Anda ke orang lain, tetapi juga utang orang lain ke Anda, lengkap dengan kapan waktunya menagih.</p></div>
+    <div class="card"><span class="tag t-green">Tiga</span><h4>Semuanya punya alamat</h4><p>Setiap catatan menyebut satu cabang pekerjaan. Jadi pertanyaan "sebenarnya bagaimana urusan klien X" dijawab dengan membuka satu cabang, bukan membaca semuanya.</p></div>
+  </div>
+  <div class="note warn">
+    <strong>Kenapa ini penting setelah bulan ketiga</strong>
+    <p>Second brain apa pun akan penuh. Setelah beberapa bulan ada ratusan catatan, janji separuh jalan, dan utusan yang belum dibalas. Kalau tidak ada alamat sejak catatan pertama, satu-satunya cara menjawab pertanyaan sederhana adalah membaca semuanya. Itu titik di mana kebanyakan orang berhenti memakai second brain mereka.</p>
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">05</span>Kenapa Anda butuh aplikasinya</h2>
+  <p class="sub">Harness itu kumpulan berkas. Berkas tidak punya pintu, tidak punya tombol setuju, dan tidak bisa dibuka sambil antre.</p>
+  <p>Pertanyaan yang wajar: kalau harness sudah lengkap, kenapa masih perlu aplikasi? Karena harness menjawab "apa yang dikerjakan", dan aplikasi menjawab "bagaimana Anda ikut di dalamnya". Lima hal ini hanya bisa diberikan oleh aplikasi.</p>
+  <ol class="steps">
+    <li><div class="t">Pintu masuk yang tidak menakutkan</div><div class="d">Tanpa aplikasi, memakai harness berarti mengetik perintah di layar hitam. Itu menutup pintu untuk hampir semua orang, termasuk Anda saat sedang di jalan.</div></li>
+    <li><div class="t">Satu tempat menyambungkan tool</div><div class="d">Slack, email, kalender, Drive, tiket. Aplikasi yang mengurus izin dan sambungannya, lalu menjaganya tetap hidup. Anda tidak pernah menempelkan kata sandi ke dalam percakapan.</div></li>
+    <li><div class="t">Gerbang persetujuan yang nyata</div><div class="d">Ini bagian terpenting. Pesan yang akan keluar ke orang lain berhenti di antrean, dan baru terkirim setelah Anda menekan setuju. Tanpa gerbang ini, Anda tidak akan pernah berani memberi akses apa pun.</div></li>
+    <li><div class="t">Banyak urusan berjalan berdampingan</div><div class="d">Empat hal yang tidak berhubungan dipecah jadi empat percakapan terpisah, supaya Anda menyelesaikannya satu per satu, bukan sekaligus dalam satu tumpukan panjang.</div></li>
+    <li><div class="t">Dia tetap bekerja saat Anda tutup</div><div class="d">Aplikasi menjalankan pekerjaan terjadwal. Ringkasan pagi sudah siap sebelum Anda membukanya, karena harness jalan semalaman tanpa Anda.</div></li>
+  </ol>
+  <div class="note">
+    <strong>Cara singkat mengingat pembagiannya</strong>
+    <p>Model memberi <strong>kecerdasan</strong>. Harness memberi <strong>ingatan dan aturan</strong>. Aplikasi memberi <strong>kendali dan akses</strong>. Anda tetap pemilik keputusan di ketiganya.</p>
+  </div>
+
+  <h3>Isi aplikasinya, satu per satu</h3>
+  <p>Lima alasan di atas terdengar abstrak sampai Anda melihat bentuknya. Ini isi aplikasi second brain yang sudah berjalan, dikelompokkan menjadi enam bagian.</p>
+
+  <p class="eyebrow" style="margin:26px 0 12px">Bagian 1 &middot; Tempat Anda bicara</p>
+  <div class="grid c3">
+    <div class="card"><span class="tag t-blue">Ruang kerja</span><h4>Satu ruang kerja aktif</h4><p>Semua catatan, aturan, dan arsip milik satu ruang kerja. Anda bisa punya beberapa, misalnya kantor dan pribadi, lalu berpindah dengan satu klik. Yang aktif menentukan ingatan mana yang dipakai.</p></div>
+    <div class="card"><span class="tag t-blue">Percakapan</span><h4>Riwayat yang tidak hilang</h4><p>Setiap percakapan tersimpan dan bisa dibuka lagi besok. Anda bisa melanjutkan yang kemarin, bukan mengulang dari awal.</p></div>
+    <div class="card"><span class="tag t-blue">Cabang</span><h4>Pecah jadi beberapa percakapan</h4><p>Kalau satu tugas menghasilkan empat hal terpisah yang butuh keputusan Anda, aplikasi memecahnya menjadi empat percakapan sendiri. Anda menyelesaikannya satu per satu, bukan sebagai satu tumpukan panjang.</p></div>
+  </div>
+
+  <p class="eyebrow" style="margin:26px 0 12px">Bagian 2 &middot; Cara memasukkan bahan</p>
+  <div class="grid c3">
+    <div class="card"><span class="tag t-blue">Suara</span><h4>Bicara, bukan mengetik</h4><p>Tahan tombol mikrofon, bicara, lepas. Kata-katanya muncul di kolom ketik sebagai draf yang masih bisa Anda sunting, dan tidak ada yang terkirim sebelum Anda menekan kirim. Pengubahan suara jadi teks berjalan di komputer Anda sendiri.</p></div>
+    <div class="card"><span class="tag t-blue">Rekam rapat</span><h4>Perekam rapat bawaan</h4><p>Satu tombol untuk merekam rapat, termasuk suara lawan bicara. Rekamannya langsung masuk ke jalur yang mengubahnya menjadi notulen dan daftar tindak lanjut.</p></div>
+    <div class="card"><span class="tag t-blue">Bot rapat</span><h4>Bot yang ikut rapat sendiri</h4><p>Untuk rapat yang tidak Anda hadiri, sebuah bot bisa masuk ke tautan rapat dan merekamnya. Ketersediaannya tergantung sistem operasi komputer Anda, dan aplikasi mengatakannya terus terang kalau tidak tersedia.</p></div>
+  </div>
+
+  <p class="eyebrow" style="margin:26px 0 12px">Bagian 3 &middot; Sambungan ke dunia luar</p>
+  <div class="grid c3">
+    <div class="card"><span class="tag t-blue">Panel sambungan</span><h4>Satu panel untuk semua tool</h4><p>Slack, email, kalender, penyimpanan berkas, tiket kerja, papan desain, repositori kode, WhatsApp, dan alat pencatat rapat. Satu kartu per layanan, satu tombol sambung.</p></div>
+    <div class="card"><span class="tag t-blue">Kunci</span><h4>Kredensial tidak lewat percakapan</h4><p>Token dan izin masuk disimpan aplikasi, bukan ditempel ke dalam chat. Anda tidak pernah mengirimkan kata sandi ke asisten Anda.</p></div>
+    <div class="card"><span class="tag t-blue">Sambungan sendiri</span><h4>Bisa menambah layanan Anda sendiri</h4><p>Kalau kantor Anda punya sistem internal, ada kartu khusus untuk menyambungkannya. Tidak terbatas pada daftar bawaan.</p></div>
+  </div>
+
+  <p class="eyebrow" style="margin:26px 0 12px">Bagian 4 &middot; Pagar pengaman</p>
+  <div class="grid c3">
+    <div class="card"><span class="tag t-amber">Antrean</span><h4>Antrean persetujuan</h4><p>Pesan yang akan keluar ke orang lain, misalnya WhatsApp, berhenti di antrean di dalam aplikasi. Baru terkirim setelah Anda menekan setuju di sana.</p></div>
+    <div class="card"><span class="tag t-amber">Kewenangan</span><h4>Tingkat kewenangan</h4><p>Anda menentukan sejauh mana asisten boleh bertindak sendiri. Ini bukan permintaan sopan di dalam prompt, melainkan setelan yang benar-benar mengunci kemampuannya.</p></div>
+    <div class="card"><span class="tag t-amber">Bukti</span><h4>Catatan setiap tindakan</h4><p>Setiap pekerjaan otomatis meninggalkan catatan: kapan mulai, kapan selesai, berhasil atau gagal, dan apa sebab gagalnya. Kuota habis dan jaringan putus dibedakan, bukan disamakan jadi "error".</p></div>
+  </div>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Tingkat kewenangan</th><th>Yang boleh dilakukan tanpa Anda</th><th>Cocok untuk</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Hanya membaca</strong></td><td>Membaca dan melapor. Tidak menulis apa pun.</td><td>Minggu-minggu pertama, saat Anda masih menguji</td></tr>
+      <tr><td><strong>Hanya membuat draf</strong></td><td>Menulis draf dan mencatat ke arsip. Begitu menyentuh tombol kirim, dia berhenti dan menunggu.</td><td>Setelan wajar untuk sehari-hari</td></tr>
+      <tr><td><strong>Boleh mengirim terbatas</strong></td><td>Mengirim sendiri, hanya ke tujuan yang sudah Anda izinkan.</td><td>Pekerjaan berulang yang sudah Anda percayai</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p class="eyebrow" style="margin:26px 0 12px">Bagian 5 &middot; Kerja yang berjalan sendiri</p>
+  <div class="grid c3">
+    <div class="card"><span class="tag t-green">Jadwal</span><h4>Pekerjaan terjadwal</h4><p>Anda menentukan jam dan harinya. Misalnya menyapu email dan Slack tiap dua puluh menit, atau menyiapkan ringkasan tiap pagi sebelum Anda bangun.</p></div>
+    <div class="card"><span class="tag t-green">Pilih otak</span><h4>Pilih AI dan modelnya</h4><p>Anda memilih AI mana yang menjalankan tiap pekerjaan, dan seberapa keras dia harus berpikir. Penyapuan rutin pakai model murah, laporan mingguan pakai yang kelas atas.</p></div>
+    <div class="card"><span class="tag t-green">Jujur</span><h4>Dia mengaku kalau terlewat</h4><p>Pekerjaan terjadwal hanya jalan selama aplikasinya terbuka. Jadwal yang lewat saat laptop tertutup ditandai terlewat, bukan diam-diam dianggap selesai.</p></div>
+  </div>
+
+  <p class="eyebrow" style="margin:26px 0 12px">Bagian 6 &middot; Tetap milik Anda</p>
+  <div class="grid c3">
+    <div class="card"><span class="tag t-violet">Pindah</span><h4>Bawa semuanya pindah mesin</h4><p>Satu tombol untuk mengemas seluruh ruang kerja, termasuk riwayat percakapan, lalu membukanya di komputer lain. Kunci dan izin masuk ikut terbawa dalam bentuk terenkripsi.</p></div>
+    <div class="card"><span class="tag t-violet">Terbuka</span><h4>Isinya berkas biasa</h4><p>Ingatan dan aturan Anda bukan format rahasia. Anda bisa membukanya, membacanya, mengoreksinya, dan menyimpannya sendiri.</p></div>
+    <div class="card"><span class="tag t-violet">Pembaruan</span><h4>Pembaruan tanpa kehilangan apa-apa</h4><p>Aplikasi memperbarui dirinya sendiri, sementara ruang kerja Anda tidak tersentuh. Ganti versi aplikasi tidak berarti mengulang dari nol.</p></div>
+  </div>
+
+  <div class="note warn">
+    <strong>Satu hal yang perlu Anda ketahui sejak awal</strong>
+    <p>Pekerjaan terjadwal di dalam aplikasi hanya jalan saat aplikasinya terbuka. Kalau sebuah tugas harus tetap jalan meski laptop Anda tertutup, tugas itu tempatnya di server yang selalu menyala, bukan di aplikasi. Aplikasi yang baik mengatakan batas ini di depan, bukan setelah Anda kehilangan satu hari catatan.</p>
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">06</span>Satu contoh nyata, dari awal sampai selesai</h2>
+  <p class="sub">Sebuah rapat direkam pagi ini. Perhatikan bagaimana pekerjaan berpindah antar lapis, dan berapa kali Anda benar-benar dilibatkan.</p>
+
+  <div class="fig">
+  <svg viewBox="0 0 900 360" role="img" aria-label="Alur tujuh langkah dari rekaman rapat sampai pengingat esok hari, melintasi lapis aplikasi, harness, dan model AI">
+    <defs>
+      <marker id="bEnd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="#8a90a0"/>
+      </marker>
+    </defs>
+
+    <rect class="lane" x="130" y="34" width="750" height="74" rx="8"/>
+    <rect class="lane" x="130" y="126" width="750" height="74" rx="8"/>
+    <rect class="lane" x="130" y="218" width="750" height="74" rx="8"/>
+    <text class="eyb" x="20" y="68">APLIKASI</text>
+    <text class="eyb" x="20" y="160">HARNESS</text>
+    <text class="eyb" x="20" y="252">MODEL AI</text>
+
+    <polyline class="ln" points="200,71 320,71 320,163 440,163 440,255 560,255 560,163 680,163 680,71 790,71 790,163 850,163" marker-end="url(#bEnd)"/>
+
+    <circle class="dot" cx="200" cy="71" r="13" fill="#5b9dff"/>
+    <text x="200" y="76" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">1</text>
+    <text class="lbl" x="200" y="26" text-anchor="middle">Rekaman masuk</text>
+
+    <circle class="dot" cx="320" cy="163" r="13" fill="#3fae7d"/>
+    <text x="320" y="168" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">2</text>
+    <text class="lbl" x="320" y="122" text-anchor="middle">Ambil transkrip</text>
+
+    <circle class="dot" cx="440" cy="255" r="13" fill="#9a7ae8"/>
+    <text x="440" y="260" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">3</text>
+    <text class="lbl" x="440" y="316" text-anchor="middle">Tulis draf notulen</text>
+
+    <circle class="dot" cx="560" cy="163" r="13" fill="#3fae7d"/>
+    <text x="560" y="168" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">4</text>
+    <text class="lbl" x="560" y="122" text-anchor="middle">Periksa &amp; catat janji</text>
+
+    <circle class="dot" cx="680" cy="71" r="13" fill="#5b9dff"/>
+    <text x="680" y="76" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">5</text>
+    <text class="lbl" x="680" y="26" text-anchor="middle">Anda menyetujui</text>
+
+    <circle class="dot" cx="790" cy="71" r="13" fill="#5b9dff"/>
+    <text x="790" y="76" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">6</text>
+    <text class="lbl" x="790" y="26" text-anchor="middle">Terkirim</text>
+
+    <circle class="dot" cx="850" cy="163" r="13" fill="#3fae7d"/>
+    <text x="850" y="168" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">7</text>
+    <text class="lbl" x="872" y="196" text-anchor="end">Besok ditagih</text>
+  </svg>
+  <p class="cap"><strong>Tujuh langkah, satu keputusan Anda.</strong> Model AI hanya masuk sekali, di langkah tiga, dan hanya untuk menulis. Semua urusan mengambil bahan, memeriksa mutu, mencatat janji, mengirim, dan menagih besok dikerjakan oleh harness. Anda hanya muncul di langkah lima.</p>
+  </div>
+
+  <ol class="steps">
+    <li><div class="t">Rekaman rapat muncul</div><div class="d">Aplikasi melihatnya lewat sambungan ke alat perekam rapat.</div></li>
+    <li><div class="t">Harness menarik transkrip dan membuka aturannya</div><div class="d">Dia tahu bentuk notulen yang Anda pakai, bahasa yang harus dipakai untuk klien ini, dan siapa peserta yang sudah dikenal.</div></li>
+    <li><div class="t">Model AI menulis drafnya</div><div class="d">Ini satu-satunya bagian yang butuh kecerdasan bahasa. Bahan dan aturannya sudah disiapkan harness.</div></li>
+    <li><div class="t">Harness memeriksa dan mencatat</div><div class="d">Tautan yang mati ditolak. Janji Anda di rapat masuk ke buku janji. Janji orang lain yang menghambat Anda masuk ke daftar penantian.</div></li>
+    <li><div class="t">Anda membaca dan menyetujui</div><div class="d">Satu kali. Bukan tujuh kali.</div></li>
+    <li><div class="t">Harness mengirim dan menandai</div><div class="d">Pesan keluar, lalu catatannya diperbarui di detik yang sama supaya tidak ada yang terkirim dua kali.</div></li>
+    <li><div class="t">Besok pagi dia menagih sendiri</div><div class="d">Yang belum dibalas muncul di ringkasan pagi Anda, tanpa Anda perlu ingat untuk bertanya.</div></li>
+  </ol>
+</section>
+
+<section id="s7">
+  <h2><span class="num">07</span>Siapa mengerjakan apa</h2>
+  <p class="sub">Tabel pembanding kalau Anda perlu menjelaskannya ke orang lain dalam satu menit.</p>
+  <div class="tw">
+  <table>
+    <thead><tr><th>Pertanyaan</th><th>Model AI</th><th>Harness</th><th>Aplikasi</th></tr></thead>
+    <tbody>
+      <tr><td>Bisa menalar dan menulis?</td><td><span class="st a">ya, ini tugasnya</span></td><td>tidak</td><td>tidak</td></tr>
+      <tr><td>Ingat urusan Anda minggu lalu?</td><td>tidak</td><td><span class="st h">ya</span></td><td>menyimpan riwayat percakapan</td></tr>
+      <tr><td>Tahu aturan dan gaya Anda?</td><td>tidak</td><td><span class="st h">ya</span></td><td>tidak</td></tr>
+      <tr><td>Bisa membuka Slack atau Drive?</td><td>tidak</td><td>punya alatnya</td><td><span class="st p">yang memegang izinnya</span></td></tr>
+      <tr><td>Menahan pesan sampai Anda setuju?</td><td>tidak</td><td>menandai perlu disetujui</td><td><span class="st p">ya, antreannya di sini</span></td></tr>
+      <tr><td>Jalan sendiri saat Anda tidur?</td><td>tidak</td><td>isinya pekerjaan terjadwal</td><td><span class="st p">yang menjalankannya</span></td></tr>
+      <tr><td>Anda bisa membaca dan mengoreksinya?</td><td>tidak</td><td><span class="st h">ya, isinya berkas biasa</span></td><td>lewat pengaturan</td></tr>
+      <tr><td>Bisa Anda bawa pindah?</td><td>tidak, milik penyedianya</td><td><span class="st h">ya, milik Anda</span></td><td>tergantung aplikasinya</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="s8">
+  <h2><span class="num">08</span>Lima salah paham yang sering terjadi</h2>
+  <p class="sub">Semuanya berujung pada satu akar: mengira tiga lapis ini adalah satu barang.</p>
+  <div class="grid c2">
+    <div class="card"><span class="tag t-red">Keliru</span><h4>"Model yang lebih pintar akan mengingat saya"</h4><p>Tidak akan. Mengingat adalah pekerjaan harness. Model termahal sekalipun tetap mulai dari nol.</p></div>
+    <div class="card"><span class="tag t-red">Keliru</span><h4>"Prompt panjang sama dengan harness"</h4><p>Prompt panjang hilang saat percakapan ditutup. Harness bertahan, bisa diperbaiki, dan berlaku untuk semua percakapan berikutnya.</p></div>
+    <div class="card"><span class="tag t-red">Keliru</span><h4>"Aplikasinya yang pintar"</h4><p>Aplikasi tidak berpikir. Dia memberi pintu, izin, dan tombol setuju. Kalau aplikasinya diganti, kecerdasannya tidak ikut hilang.</p></div>
+    <div class="card"><span class="tag t-red">Keliru</span><h4>"Kalau sudah otomatis, saya tidak perlu terlibat"</h4><p>Justru sebaliknya. Yang diotomatiskan adalah pengumpulan, penyusunan, dan penagihan. Keputusan tetap milik Anda, dan gerbang persetujuan memastikan itu.</p></div>
+    <div class="card"><span class="tag t-red">Keliru</span><h4>"Ini cuma untuk orang teknis"</h4><p>Harness memang berbentuk berkas, tetapi isinya kalimat biasa berisi aturan Anda sendiri. Aplikasi ada persis supaya Anda tidak perlu menyentuh layar hitam.</p></div>
+    <div class="card"><span class="tag t-green">Benar</span><h4>"Yang paling berharga adalah lapis tengah"</h4><p>Model bisa diganti. Aplikasi bisa diganti. Ingatan, aturan, dan catatan janji Anda adalah satu-satunya bagian yang tidak bisa dibeli, karena dia tumbuh dari pekerjaan Anda sendiri.</p></div>
+  </div>
+</section>
+
+<section id="s9">
+  <h2><span class="num">09</span>Kalau terasa ada yang salah, lapis mana?</h2>
+  <p class="sub">Gejalanya berbeda-beda, dan tiap gejala menunjuk ke satu lapis. Ini cara cepat menebaknya.</p>
+  <div class="tw">
+  <table>
+    <thead><tr><th>Yang Anda rasakan</th><th>Lapis yang bermasalah</th><th>Yang perlu diperbaiki</th></tr></thead>
+    <tbody>
+      <tr><td>"Dia menulisnya bertele-tele dan tidak seperti saya"</td><td><span class="st h">Harness</span></td><td>Aturan gaya bahasanya belum ditulis, atau belum pernah dikoreksi</td></tr>
+      <tr><td>"Saya harus menjelaskan ulang konteksnya tiap hari"</td><td><span class="st h">Harness</span></td><td>Ingatannya belum ada, atau tidak dibaca di awal sesi</td></tr>
+      <tr><td>"Dia salah menalar, padahal bahannya lengkap"</td><td><span class="st a">Model</span></td><td>Pakai model kelas lebih tinggi untuk pekerjaan berpikir berat</td></tr>
+      <tr><td>"Dia tidak bisa membuka kalender saya"</td><td><span class="st p">Aplikasi</span></td><td>Sambungan tool belum disetujui di pengaturan</td></tr>
+      <tr><td>"Ada pesan terkirim yang belum saya baca"</td><td><span class="st p">Aplikasi</span></td><td>Gerbang persetujuannya dilewati atau dimatikan</td></tr>
+      <tr><td>"Janji saya tetap lolos dan terlupakan"</td><td><span class="st h">Harness</span></td><td>Buku janjinya tidak diperbarui di saat yang sama dengan tindakannya</td></tr>
+      <tr><td>"Semua tercatat, tapi saya tetap tidak bisa mencarinya"</td><td><span class="st h">Harness</span></td><td>Catatannya tidak diberi alamat ke cabang pekerjaan sejak awal</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="note good">
+    <strong>Pola yang akan Anda lihat</strong>
+    <p>Hampir semua keluhan sehari-hari menunjuk ke lapis tengah, bukan ke model. Itu kabar baik, karena lapis tengah adalah satu-satunya lapis yang bisa Anda perbaiki sendiri, hari ini juga.</p>
+  </div>
+</section>
+
+<section id="s10">
+  <h2><span class="num">10</span>Istilah, dalam bahasa manusia</h2>
+  <p class="sub">Daftar kata yang sering muncul di percakapan soal AI, diterjemahkan ke arti sehari-hari.</p>
+  <dl>
+    <dt>Model AI</dt><dd>Mesin yang bisa membaca dan menulis bahasa. Contohnya Claude, GPT, atau Gemini. Dia dipanggil, dia menjawab, lalu dia lupa.</dd>
+    <dt>Harness</dt><dd>Semua hal di sekeliling model yang membuatnya berguna berulang kali: ingatan, aturan, alat, dan catatan. Kata aslinya berarti tali kekang, yang memang tepat.</dd>
+    <dt>Second brain</dt><dd>Tempat menyimpan apa yang tidak sanggup diingat kepala Anda: catatan, janji, keputusan, dan utang jawaban.</dd>
+    <dt>Aplikasi second brain</dt><dd>Pintu masuk ke harness. Tempat Anda bicara, melihat hasil, menyambungkan tool, dan menyetujui pengiriman.</dd>
+    <dt>Ruang kerja</dt><dd>Satu kumpulan ingatan, aturan, dan catatan yang berdiri sendiri. Ruang kerja kantor dan ruang kerja pribadi tidak saling melihat isi masing-masing.</dd>
+    <dt>Tingkat kewenangan</dt><dd>Setelan yang menentukan sejauh mana asisten boleh bertindak tanpa Anda: hanya membaca, hanya membuat draf, atau boleh mengirim ke tujuan tertentu.</dd>
+    <dt>Pekerjaan terjadwal</dt><dd>Tugas yang jalan sendiri pada jam yang Anda tentukan, tanpa Anda mengetik apa pun. Hasilnya sudah menunggu saat Anda membuka aplikasi.</dd>
+    <dt>Konteks</dt><dd>Bahan yang diberikan ke model sebelum dia menjawab. Harness yang memilih bahan mana yang relevan, supaya model tidak menebak.</dd>
+    <dt>Tool</dt><dd>Tangan model. Program kecil yang bisa benar-benar membuka kalender, menarik transkrip, atau mengirim pesan.</dd>
+    <dt>Gerbang persetujuan</dt><dd>Aturan bahwa apa pun yang keluar ke orang lain harus Anda setujui dulu. Ini yang membuat pemberian akses jadi masuk akal.</dd>
+    <dt>Agen</dt><dd>Model yang diberi tugas, alat, dan kebebasan melakukan beberapa langkah berturut-turut sebelum melapor. Tetap tinggal di dalam harness.</dd>
+    <dt>Sub-agen</dt><dd>Pembantu yang dipanggil untuk satu pekerjaan kasar, misalnya membaca dua belas transkrip, lalu hasilnya dikembalikan. Memakai model yang lebih murah.</dd>
+    <dt>Prompt</dt><dd>Perintah yang Anda ketik. Sifatnya sekali pakai. Aturan yang ingin berlaku selamanya tempatnya di harness, bukan di prompt.</dd>
+    <dt>Ledger, atau buku catatan</dt><dd>Daftar yang menyimpan janji, keputusan, dan penantian, lengkap dengan status dan tanggalnya.</dd>
+    <dt>Pohon kerja</dt><dd>Susunan bercabang dari semua urusan Anda. Setiap catatan menyebut satu cabang, supaya semuanya punya alamat.</dd>
+  </dl>
+</section>
+
+<footer>
+  <p><strong>Cara memakai halaman ini.</strong> Kirimkan ke siapa pun yang bingung membedakan "AI", "harness", dan "aplikasinya". Bagian 01 dan 06 cukup untuk percakapan lima menit. Sisanya untuk yang ingin menggali.</p>
+  <p>Ditulis dari cara kerja harness second brain yang dipakai sehari-hari oleh penulis, termasuk aturan operasinya, buku janji dan penantiannya, pohon kerjanya, serta gerbang persetujuan pada setiap pengiriman keluar.</p>
+  <p style="margin-bottom:0">Your Name, 13 September 2026. Koreksi diterima dan memang diharapkan.</p>
+</footer>
+
+</div>
+<script>
+(function(){
+  var b=document.getElementById('tg'), r=document.documentElement;
+  b.addEventListener('click',function(){
+    var cur=r.getAttribute('data-theme');
+    if(!cur){cur=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}
+    r.setAttribute('data-theme', cur==='dark'?'light':'dark');
+  });
+})();
+</script>
+</body>
+</html>

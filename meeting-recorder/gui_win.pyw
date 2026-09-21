@@ -26,7 +26,8 @@ if sys.stderr is None:
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import load_config, slugify           # noqa: E402
-from recorder import ScreenRecorder, WindowsCapture, write_sidecar, now_stamp  # noqa: E402
+from recorder import (ScreenRecorder, WindowsCapture, active_window,  # noqa: E402
+                      list_windows, write_sidecar, now_stamp)
 
 WSL_REPO = "."
 CREATE_NO_WINDOW = 0x08000000
@@ -131,13 +132,45 @@ class App:
                        variable=self.auto_var).pack(anchor="w", padx=12, pady=(6, 0))
         self.video_var = tk.BooleanVar(value=False)
         tk.Checkbutton(root, text="Record video (screen, needs ffmpeg)",
-                       variable=self.video_var).pack(anchor="w", padx=12)
+                       variable=self.video_var,
+                       command=self._on_video_toggled).pack(anchor="w", padx=12)
+
+        # What the video covers. Hidden until video is ticked, because it is
+        # meaningless otherwise and the window is already dense.
+        #
+        # The default is the window you were last in, not the whole desktop:
+        # two monitors of desktop cost roughly ten times the disk and carry
+        # every notification that crosses the screen into the recording.
+        self.video_row = tk.Frame(root)
+        self.ACTIVE = "Active window (what you were last in)"
+        self.WHOLE_SCREEN = "Every monitor (large files)"
+        self.window_var = tk.StringVar(value=self.ACTIVE)
+        self.window_box = ttk.Combobox(self.video_row, textvariable=self.window_var,
+                                       state="readonly", font=("Segoe UI", 9))
+        self.window_box.pack(side="left", fill="x", expand=True)
+        tk.Button(self.video_row, text="↻", width=3,
+                  command=self.refresh_windows).pack(side="left", padx=(6, 0))
         tk.Button(root, text="Open recordings folder", relief="groove",
                   command=lambda: os.startfile(self.rec_dir)).pack(anchor="w", padx=12, pady=6)
 
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.refresh_calendar()
         self.tick()
+
+    def _on_video_toggled(self):
+        if self.video_var.get():
+            self.refresh_windows()
+            self.video_row.pack(fill="x", padx=12, pady=(2, 0))
+        else:
+            self.video_row.pack_forget()
+
+    def refresh_windows(self):
+        """Re-read the open windows. Worth a button: the meeting window
+        usually opens after this recorder does."""
+        titles = list_windows([os.getpid()])
+        self.window_box["values"] = [self.ACTIVE] + titles + [self.WHOLE_SCREEN]
+        if self.window_var.get() not in self.window_box["values"]:
+            self.window_var.set(self.ACTIVE)
 
     def _on_title_typed(self, *_):
         """Title no longer matches a calendar candidate -> it is an ad-hoc
@@ -202,14 +235,43 @@ class App:
             return
         self.screen = None
         if self.video_var.get():
-            try:
-                self.screen = ScreenRecorder(self.base)
-                self.screen.start()
-                devices.append("Screen: gdigrab -> .mp4")
-            except FileNotFoundError:
-                self.screen = None
-                messagebox.showwarning("Meeting Recorder",
-                                       "ffmpeg not found; recording audio only.")
+            picked = self.window_var.get()
+            # This window holds the button that was just pressed, so it is
+            # never the answer to "what was I looking at".
+            mine = [os.getpid()]
+            if picked == self.WHOLE_SCREEN:
+                window = None
+            elif picked == self.ACTIVE:
+                window = active_window(mine)
+            else:
+                window = picked
+            if picked != self.WHOLE_SCREEN and not window:
+                messagebox.showwarning(
+                    "Meeting Recorder",
+                    "No window was open to record; recording audio only.")
+            elif window and window not in list_windows(mine):
+                # The window was open when the list was built and is not open
+                # now. Recording the whole desktop instead would hand over the
+                # thing the pick was avoiding.
+                messagebox.showwarning(
+                    "Meeting Recorder",
+                    f'"{window}" is not open any more; recording audio only.')
+            else:
+                try:
+                    self.screen = ScreenRecorder(self.base, window=window)
+                    if self.screen.start():
+                        devices.append("Video: %s -> .mp4"
+                                       % (window or "whole screen"))
+                    else:
+                        self.screen = None
+                        messagebox.showwarning(
+                            "Meeting Recorder",
+                            "ffmpeg could not open the screen capture; "
+                            "recording audio only.")
+                except FileNotFoundError:
+                    self.screen = None
+                    messagebox.showwarning("Meeting Recorder",
+                                           "ffmpeg not found; recording audio only.")
         open(self.base + ".recording", "w").close()
         self.start_time = datetime.datetime.now(datetime.timezone.utc)
         self.button.config(text="■  Stop Recording", bg="#c62828")

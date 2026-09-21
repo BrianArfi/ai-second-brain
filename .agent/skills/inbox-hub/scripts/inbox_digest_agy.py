@@ -44,6 +44,9 @@ NAMES_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'slack_user_names.json')
 AGY_BRIDGE = os.path.join(BASE_DIR, '.agent', 'skills', 'agy-bridge', 'run.py')
 INBOX_CLI = os.path.join(BASE_DIR, '.agent', 'skills', 'inbox-hub', 'scripts', 'inbox_sweep.py')
 
+sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'scripts'))
+from brian_voice import voice_block  # noqa: E402
+
 # generic words that make a term useless for grepping repo context
 _STOP = {'the', 'and', 'for', 'with', 'please', 'this', 'that', 'from', 'your',
          'owner', 'you', 'confirm', 'review', 'update', 'proceed', 'above',
@@ -123,8 +126,10 @@ CONVERSATION (most recent last, names already resolved, treat as ground truth):
 VERIFIED REPO DOCS you MAY reference by name (these exist; do NOT invent others):
 {doc_block}
 
-Write ONLY the reply text the owner will send. Rules:
-- Plain flowing prose, professional but warm. No emoji. No bullet lists. English. 2 to 6 sentences.
+{voice_block()}
+
+Write ONLY the reply text the owner will send. The voice model above is measured from his own
+messages; follow it over any instinct about what a professional reply looks like. Rules:
 - SOLVE the ask: answer the actual question when the conversation or a listed doc lets you.
   When you cannot answer it here, commit to ONE concrete next step, who the owner will check with
   and by when, never a contentless acknowledgement.

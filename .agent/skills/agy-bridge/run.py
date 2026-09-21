@@ -192,12 +192,28 @@ def compute_cost(in_tok, out_tok, ran_model, fallback_tier, backend, cfg):
 
 # ---------- chain resolution + time routing ----------
 
+def backend_base_url(spec):
+    """Base URL for a backend, with an env override.
+
+    A local daemon does not always sit on the loopback address the config was
+    written against: Ollama may run in WSL, in a container, or on another box on
+    the LAN, and the same models.json is read from all three checkouts. So a
+    backend may name an env var in `base_url_env`, and setting it wins over the
+    literal. Unset or empty falls back to the literal, so nothing changes for a
+    backend that does not declare one."""
+    env_name = spec.get("base_url_env")
+    if env_name:
+        override = (os.environ.get(env_name) or "").strip()
+        if override:
+            return override
+    return spec.get("base_url") or ""
+
 def local_router_up(spec, timeout=0.15):
     """Cheap TCP connect, not an HTTP round trip. A router bound to loopback
     answers in microseconds or not at all, so this stays inside the 'fast check'
     budget while still telling the truth about a daemon that is not running."""
     try:
-        parts = urllib.parse.urlsplit(spec.get("base_url") or "")
+        parts = urllib.parse.urlsplit(backend_base_url(spec))
         host, port = parts.hostname, parts.port or (443 if parts.scheme == "https" else 80)
         if not host:
             return False
@@ -363,7 +379,7 @@ def run_anthropic_compatible(backend, model, prompt, timeout, cfg):
     Returns (ok, text, reason, meta). Real servers return EXACT usage."""
     meta = {"latency_ms": 0, "in_tok": 0, "out_tok": 0, "tokens_estimated": False}
     spec = cfg.get("backends", {}).get(backend, {})
-    base = (spec.get("base_url") or "").rstrip("/")
+    base = backend_base_url(spec).rstrip("/")
     token = load_token(cfg, backend)
     hint = spec.get("credential_hint", f"set {spec.get('token_env','TOKEN')} or token.env")
     if not base:
@@ -426,7 +442,7 @@ def run_openai_compatible(backend, model, prompt, timeout, cfg):
     """
     meta = {"latency_ms": 0, "in_tok": 0, "out_tok": 0, "tokens_estimated": False}
     spec = cfg.get("backends", {}).get(backend, {})
-    base = (spec.get("base_url") or "").rstrip("/")
+    base = backend_base_url(spec).rstrip("/")
     if not base:
         return False, f"no {backend} base_url", "error", meta
     token = load_token(cfg, backend)
@@ -673,7 +689,7 @@ def list_remote_models(name, spec, cfg, timeout=6):
 
     Model ids move, especially at the fast-moving vendors, and a stale id in
     models.json fails as an opaque 400. Asking beats guessing."""
-    base = (spec.get("base_url") or "").rstrip("/")
+    base = backend_base_url(spec).rstrip("/")
     token = load_token(cfg, name)
     if not base or (not token and not spec.get("no_auth")):
         return None
@@ -792,7 +808,7 @@ def setup(cfg, write=False):
         print(f"{name} ({spec.get('type')})")
         if spec.get("no_auth"):
             up = local_router_up(spec)
-            print(f"  {'reachable' if up else 'NOT reachable'} at {spec.get('base_url')}")
+            print(f"  {'reachable' if up else 'NOT reachable'} at {backend_base_url(spec)}")
             if up:
                 ready.append(name)
             else:
@@ -875,7 +891,7 @@ def doctor(cfg):
     for name, spec in (cfg.get("backends") or {}).items():
         if spec.get("type") != "openai-compatible" or spec.get("retired"):
             continue
-        base = (spec.get("base_url") or "").rstrip("/")
+        base = backend_base_url(spec).rstrip("/")
         if spec.get("no_auth"):
             if local_router_up(spec):
                 ids = list_remote_models(name, spec, cfg)

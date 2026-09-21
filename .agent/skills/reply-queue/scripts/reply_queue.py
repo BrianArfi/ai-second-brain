@@ -46,6 +46,7 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '
 # of the harness, and behaviourally identical to the Rust half in the ASB app's slackpush.rs.
 sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'scripts'))
 from slack_text import render as slack_render  # noqa: E402
+from brian_voice import voice_block  # noqa: E402
 STATE_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'reply_queue.json')
 LEDGER_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'slack_mention_ledger.json')
 TOKEN_ENV = os.path.join(BASE_DIR, '.agent', 'skills', 'slack-connector', 'token.env')
@@ -59,13 +60,15 @@ RETENTION_DAYS = 14   # drop drafted entries for items no longer open/known > th
 
 VOICE_PROMPT_HEADER = (
     "You are drafting Slack REPLIES for the owner to review and send himself - you are "
-    "NOT sending anything. Write in the owner's voice: plain flowing prose, no emoji, no "
-    "numbered or bolded lists, direct and warm-brief (2-5 sentences). Do not use "
-    "em-dashes. Do not add parenthetical asides. Each draft should read like a real "
-    "person replying in Slack, not a formal memo.\n\n"
+    "NOT sending anything. Each draft reads like a real person replying in Slack, not a "
+    "formal memo. The voice model below is measured from his own messages; follow it over "
+    "any instinct about what a professional reply looks like.\n\n"
+    + voice_block() + "\n\n"
     "For EACH item below, output exactly this block format (blank line between items):\n"
     "ITEM: <item_id>\n"
     "DRAFT: <the reply text, one paragraph, no line breaks>\n\n"
+    "The block format holds one paragraph only, so the 'split it into two messages' rule "
+    "above cannot apply here. Pick the single most important thing and say only that.\n\n"
     "Only draft a reply when there is something the owner can plausibly say without more "
     "context than given. If an item cannot be drafted responsibly (needs info you don't "
     "have), still include the block but set DRAFT to exactly: SKIP - needs more context.\n\n"

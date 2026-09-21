@@ -36,6 +36,15 @@ import time
 import urllib.parse
 import urllib.request
 
+# Windows consoles default to cp1252, which cannot encode the emoji in the report
+# headings, so a plain `report` crashed with UnicodeEncodeError on the Windows
+# checkout. Force UTF-8 on the streams instead of stripping the emoji.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8')
+    except (AttributeError, ValueError):
+        pass
+
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
 STATE_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'slack_mention_ledger.json')
 DIGEST_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'slack_sweep_digest.jsonl')
@@ -120,7 +129,7 @@ def is_noise(text, is_bot, author=None, channel=None):
 def load_token():
     tok = os.environ.get('SLACK_USER_TOKEN')
     if not tok and os.path.exists(TOKEN_ENV):
-        for line in open(TOKEN_ENV):
+        for line in open(TOKEN_ENV, encoding='utf-8'):
             line = line.strip()
             if line.startswith('SLACK_USER_TOKEN='):
                 tok = line.split('=', 1)[1].strip().strip('"').strip("'")
@@ -152,7 +161,7 @@ def slack(method, token, params=None, retries=3):
 
 def load_state():
     if os.path.exists(STATE_PATH):
-        with open(STATE_PATH) as f:
+        with open(STATE_PATH, encoding='utf-8') as f:
             return json.load(f)
     return {'search_watermark': 0.0, 'watermarks': {}, 'threads': {},
             'items': {}, 'channel_names': {}, 'last_sweep': None}
@@ -179,7 +188,7 @@ def save_state(state):
 
     if os.path.exists(STATE_PATH):
         try:
-            with open(STATE_PATH) as f:
+            with open(STATE_PATH, encoding='utf-8') as f:
                 on_disk = json.load(f)
         except (json.JSONDecodeError, OSError):
             on_disk = None      # unreadable: our copy is the better of the two
@@ -190,7 +199,7 @@ def save_state(state):
                                  retention_days=ANSWERED_RETENTION_DAYS)
 
     tmp = STATE_PATH + '.tmp'
-    with open(tmp, 'w') as f:
+    with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(state, f, indent=1, ensure_ascii=False)
     os.replace(tmp, STATE_PATH)
     return state
@@ -199,7 +208,7 @@ def digest_append(rows):
     if not rows:
         return
     os.makedirs(os.path.dirname(DIGEST_PATH), exist_ok=True)
-    with open(DIGEST_PATH, 'a') as f:
+    with open(DIGEST_PATH, 'a', encoding='utf-8') as f:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + '\n')
 
@@ -212,6 +221,20 @@ def thread_ts_from_permalink(permalink):
     except Exception:
         return None
 
+# Reply drafts quote the original message back to the owner, so the ledger is the
+# only copy of it the drafting session ever sees. A 600 character cap cut real
+# messages mid-word (Teammate's 11 Sep Apple Store list stopped at "proper bra"),
+# and a truncated original is worse than none: it reads complete and the reply
+# answers half the ask. Keep the whole message, and mark the cut when a genuinely
+# huge paste forces one.
+STORE_TEXT_LIMIT = 12000
+
+def store_text(text):
+    text = text or ''
+    if len(text) <= STORE_TEXT_LIMIT:
+        return text
+    return text[:STORE_TEXT_LIMIT] + '\n[... truncated, open the permalink for the rest]'
+
 def new_item(state, channel_id, channel_name, ts, author, text, permalink, kind,
              thread_ts=None, is_bot=False):
     item_id = f'{channel_id}:{ts}'
@@ -220,7 +243,7 @@ def new_item(state, channel_id, channel_name, ts, author, text, permalink, kind,
     noise = is_noise(text, is_bot or str(author).startswith('B'), author, channel_id)
     state['items'][item_id] = {
         'channel': channel_id, 'channel_name': channel_name, 'ts': ts,
-        'thread_ts': thread_ts, 'author': author, 'text': text[:600],
+        'thread_ts': thread_ts, 'author': author, 'text': store_text(text),
         'permalink': permalink, 'kind': kind,          # mention | dm | thread_followup
         'status': 'dismissed' if noise else 'open',
         'access_request': (not noise) and is_access_request(text),
@@ -776,7 +799,7 @@ def cmd_classify(args):
     if not os.path.exists(DIGEST_PATH):
         print('digest empty, nothing to classify')
         return
-    rows = [json.loads(l) for l in open(DIGEST_PATH) if l.strip()]
+    rows = [json.loads(l) for l in open(DIGEST_PATH, encoding='utf-8') if l.strip()]
     if not rows:
         print('digest empty, nothing to classify')
         return
@@ -798,13 +821,13 @@ def cmd_classify(args):
                                 'text': r['text'][:200]}, ensure_ascii=False)
                     for r in rows[:400]))
     tmp = os.path.join(os.path.dirname(DIGEST_PATH), 'slack_classify_prompt.txt')
-    with open(tmp, 'w') as f:
+    with open(tmp, 'w', encoding='utf-8') as f:
         f.write(prompt)
     out = subprocess.run([sys.executable, AGY_BRIDGE, '--task', 'harvest',
                           '--prompt-file', tmp, '--timeout', '180'],
                          capture_output=True, text=True)
     result_path = os.path.join(os.path.dirname(DIGEST_PATH), 'slack_classify_result.txt')
-    with open(result_path, 'w') as f:
+    with open(result_path, 'w', encoding='utf-8') as f:
         f.write(out.stdout)
     if out.returncode == 0 and out.stdout.strip():
         os.replace(DIGEST_PATH, DIGEST_PATH + '.classified')   # consume digest

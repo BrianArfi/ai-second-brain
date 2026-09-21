@@ -1,0 +1,90 @@
+{
+  "automation_id": "reply-router",
+  "label": "Auto reply drafts",
+  "description": "Turns new Slack messages that need a reply into drafted reply sessions. Drafting only; sending always waits for approval.",
+  "config_path": "journal/state/automation_config.json",
+  "config_key": "auto_reply_drafts",
+  "state_path": "journal/state/reply_router_state.json",
+  "health_command": ".agent/skills/reply-router/scripts/reply_router.py health",
+  "job": "reply-router",
+  "depends_on": {
+    "kind": "app_setting",
+    "id": "scheduled_runs",
+    "label": "Scheduled runs",
+    "where": "Settings, Routines",
+    "help": "This automation is a scheduled routine. With scheduled runs switched off it never fires, no matter what its own switch says."
+  },
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "Auto reply drafts",
+      "type": "bool",
+      "default": true,
+      "help": "Master switch. Off means no drafts are written at all; messages are held and picked up whenever it is switched back on."
+    },
+    {
+      "key": "max_per_hour",
+      "label": "Drafts per hour",
+      "type": "int",
+      "min": 1,
+      "max": 60,
+      "default": 10,
+      "unit": "conversation",
+      "usage_key": "dispatched_this_hour",
+      "help": "Most conversations opened in one hour. Anything over the limit is held, not dropped, and the next run picks it up."
+    },
+    {
+      "key": "max_per_day",
+      "label": "Drafts per day",
+      "type": "int",
+      "min": 1,
+      "max": 200,
+      "default": 30,
+      "unit": "conversation",
+      "usage_key": "dispatched_today",
+      "help": "Most conversations opened in one day. Anything over the limit is held until the next WIB midnight, not dropped."
+    },
+    {
+      "key": "debounce_minutes",
+      "label": "Wait before drafting",
+      "type": "int",
+      "min": 0,
+      "max": 240,
+      "default": 30,
+      "unit": "minute",
+      "help": "How long a message waits before it counts as needing a reply, so a burst of messages becomes one draft. Messages are held for this long, never dropped."
+    },
+    {
+      "key": "quiet_hours_wib",
+      "label": "Quiet hours (WIB)",
+      "type": "hour_range",
+      "default": [0, 6],
+      "help": "No drafts are written inside this window. Messages arriving here are held and drafted once the window ends."
+    },
+    {
+      "key": "conversation_ttl_hours",
+      "label": "Close a quiet conversation after",
+      "type": "int",
+      "min": 1,
+      "max": 168,
+      "default": 24,
+      "unit": "hour",
+      "help": "A reply session with no activity for this long is closed and its chat retired. The draft is kept; only the open session is dropped."
+    },
+    {
+      "key": "muted_channels",
+      "label": "Muted channels",
+      "type": "string_list",
+      "default": [],
+      "help": "Messages in these channels are dropped, not held. No later run will reconsider them, so a muted channel is silent by design."
+    },
+    {
+      "key": "sources",
+      "label": "Sources",
+      "type": "enum",
+      "options": ["slack", "gmail"],
+      "default": ["slack"],
+      "help": "Which inboxes are watched. A source switched off means its messages are held, and they are drafted if it is switched back on."
+    }
+  ]
+}

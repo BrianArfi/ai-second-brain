@@ -23,6 +23,14 @@ The caller provides: the draft text, the draft type (PRD / MOM / Slack / weekly 
 3. **Tone**: professional for Work/Secondary; conversational pyramid style ONLY for You LinkedIn content (never for client docs).
 4. **Formatting**: NO em-dash characters (use `-` or `--`). No unresolved placeholders (`[TBD]`, `TODO`, `xxx`). Dates coherent with WIB (UTC+7).
 5. **Slack-specific**: channel target appropriate for the content; Slack permalink included when replying about a specific task.
+
+   **Voice check, Slack and WhatsApp only.** the owner's median Slack message is 61 characters and 75% are under 200 (`.agent/skills/no-ai-slop/brian_voice.md`, measured from 1,530 messages he typed himself). Raise each of these as an issue, quoting the line:
+   - over 200 characters with no fact that could not be dropped, or content that should have been two short messages
+   - a heading, a table, a bold lead-in, three or more bullets, or a sign-off
+   - an ask written as an instruction with no question mark and no softener ("ya", "right?", "can you")
+   - `Please find`, `Kindly`, `As discussed`, `Circling back`, `Additionally`, `Furthermore`, `That said`, `Moving forward`, `Best regards`
+   - a closing line that recaps the message, or the other person's message restated back to them before the answer
+   - English written to somebody the owner speaks Indonesian with in that thread
 6. **Sourcing**: flag any claim that looks inferred rather than sourced (no source file / transcript / message cited). **Quote-the-line gate:** only raise this if you can quote the exact draft sentence at issue. If you cannot point at a specific concrete claim, do not raise a sourcing issue. No vague "some claims seem unsourced" findings.
 
 7. **Invented requirements (PRD / BRD, blocker-level)**: flag every requirement stated as committed scope that cites no source. A source means a Fathom recording URL or ID, a dated meeting with its MOM, or a named decision with the person and the date. "The team agreed", "per discussion", and "as aligned" are not sources.

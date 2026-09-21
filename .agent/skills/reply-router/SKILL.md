@@ -1,6 +1,6 @@
 ---
 name: reply-router
-description: Auto reply drafts - turns new Slack messages that need the owner's reply into auto-drafted reply sessions via the ASB branching protocol. One session per CONVERSATION (Slack-thread style), not per message. An ASB app routine reads the mention ledger, filters and debounces, then writes branch requests; each sub-session drafts the reply and waits for approval. Toggle with /autodraft. Plan - journal/plans/plan_auto_reply_drafts.md.
+description: Auto reply drafts - turns new Slack messages that need the owner's reply into auto-drafted reply sessions via the ASB branching protocol. One session per CONVERSATION (Slack-thread style), not per message. The ASB app runs it on its own ticker: it reads the mention ledger, filters and debounces, then writes branch requests; each sub-session drafts the reply and waits for approval. Toggle with /autodraft. Plan - journal/plans/plan_auto_reply_drafts.md.
 ---
 
 # Reply Router (auto reply drafts)
@@ -16,7 +16,7 @@ themselves. Design and phases:
 ```
 slack-push (seconds) + mention sweep (30m)
         -> journal/state/slack_mention_ledger.json      (existing)
-        -> reply_router.py run   (ASB app routine, */15 07-23 WIB)
+        -> reply_router.py run   (ASB app ticker, auto_drafts.rs, every 5 min)
               reap:   close conversations Slack already answered or dismissed,
                       and ones quiet past the TTL -> .asb/branches/status/<id>.json
               filter: status=open, kind in scope, debounce 30m, not muted,
@@ -99,6 +99,7 @@ backlog and drafts nothing, so switching it on never floods the sidebar.
 ```bash
 RR=.agent/skills/reply-router/scripts/reply_router.py
 python3 $RR status              # config, counters, conversations waiting
+python3 $RR health              # one-line verdict; exit 2 = off while work waits
 python3 $RR run [--dry-run]     # cron entry; dry-run shows what would dispatch
 python3 $RR list [--all]        # open reply conversations, age, session id
 python3 $RR claim --conv K --session ID     # sub-session registers itself
@@ -110,37 +111,62 @@ python3 $RR on|off --source slack|gmail
 
 Config lives in `journal/state/automation_config.json` (`auto_reply_drafts`
 key): scope kinds, debounce, caps, quiet hours, `conversation_ttl_hours`,
-`muted_channels`. State (conversations + counters) in `journal/state/reply_router_state.json`. Neither is one
+`muted_channels`.
+
+**A toggle reaches the routine only through git.** The config path is resolved
+from the script's own location, so secondaryping a switch in one checkout writes that
+checkout's file, while the routine runs on whichever machine has the app open. A
+toggle written and never pushed is applied here and invisible there. `on`, `off`
+and `status` print the resolved path, the machine, and a warning when the file is
+uncommitted or unpushed. Being off was silent until 14 Sep 2026: `run` returned
+"off (config)" to a log nobody reads, so a toggle that missed its target hid for
+eleven days and 88 messages.
+
+**Every limit now publishes what it is holding.** The router writes the shared
+`held` block on every run, one entry per limit that held work back: `switch_off`,
+`cap_hour`, `cap_day`, `quiet_hours`, `debounce`, `muted`. Each entry says how
+many items, whether they are held or dropped, which setting did it, and when the
+work comes back. `settings_schema.json` next to this file declares the same
+limits for the Settings pane. `health` exits 2 when something needs a human, and
+step 0c of the morning update banners it. The contract, the escalation window,
+and the CLI: [`docs/harness_reference.md#automation-limits`](../../../docs/harness_reference.md#automation-limits).
+Contract test: `python3 tests/test_automation_settings.py`. State (conversations + counters) in `journal/state/reply_router_state.json`. Neither is one
 of the four locked ledgers; the router is their single writer, and writes are
 atomic.
 
 Kill switch: `/autodraft off`, or `AUTO_REPLY_DRAFTS_DISABLE=1` in the
 environment.
 
-## Activation: an app routine, not a crontab line
+## Activation: the app hosts it. There is nothing to schedule.
 
-The router runs from the ASB app's own scheduler, so it follows whichever
-machine has the app open. The row lives in `journal/state/routines.json` and
-travels with the repo, so a new machine gets it from a `git pull` and needs no
-per machine setup:
+The router has no scheduler entry and needs none. The ASB app runs it itself,
+from `src-tauri/src/auto_drafts.rs`: a ticker every 5 minutes while the app is
+open, which runs `reply_router.py run` and then drains the requests it wrote
+into that day's group in the rail. The only switch is
+`auto_reply_drafts.enabled` in `journal/state/automation_config.json`, which is
+the same key `/autodraft on` and the Settings row write.
 
-```json
-{ "job": "reply-router", "runner": "app", "command": "/autodraft run",
-  "cron": "*/15 7-23 * * *", "session_policy": "daily",
-  "autonomy": "draft-only", "catchup": "once", "enabled": true }
-```
+**Never add this to a crontab, and never give it a `runner: app` row either.**
+Both have now been tried and both were the same mistake in different clothes.
+It was a WSL cron line until 11 Sep 2026 that was never installed, so the
+router sat idle with 23 messages waiting while `/autodraft status` reported ON.
+The fix that day added a scheduler row, `*/15 7-23 WIB`, without noticing that
+the app had hosted the job natively since 3 Sep. That ran the same script twice:
+one model turn every fifteen minutes for work already done, and a stray
+top-level chat each day beside the group it belonged in. The row is disabled as
+of 17 Sep 2026, and from app 0.16.2 the scheduler refuses it on its own with
+`hosted by the app's auto reply drafts ticker` in the Routines pane.
 
-**Never add this to a crontab.** It was a WSL cron job until 11 Sep 2026, the
-line was never installed, and the router sat idle with 23 messages waiting while
-`/autodraft status` reported ON. Two schedulers for one router means duplicate
-draft sessions, so the app row replaces the cron line rather than joining it.
+The lesson worth keeping: nothing running is the symptom of a disabled feature
+AND of an unscheduled one, and reaching for a scheduler is how the second host
+gets built. Check `auto_reply_drafts.enabled` first, and check which host
+already exists before adding one.
 
-Two limits to know. An app routine only fires while the app is open, so a
-window that passes with every machine shut is recorded as `missed` and
-`catchup: once` runs it one time on the next launch. And the app open on two
-machines at once means two schedulers over one `reply_router_state.json`, which
-has no lock: `processed` keys dedupe within a machine, git dedupes across
-machines only as fast as it syncs.
+Two limits to know. The ticker only runs while the app is open, so hours with
+every machine shut produce no drafts and there is no catch-up for them. And the
+app open on two machines at once means two tickers over one
+`reply_router_state.json`, which has no lock: `processed` keys dedupe within a
+machine, git dedupes across machines only as fast as it syncs.
 
 Regression test: `python3 tests/test_reply_router_conversations.py`.
 

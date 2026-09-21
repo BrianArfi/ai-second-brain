@@ -76,8 +76,12 @@ def load_json_safe(path, default):
 
 def run_report(key):
     cmd = SCRIPTS[key]
+    # The reports print emoji. On Windows the child inherits a cp1252 stdout and
+    # dies with UnicodeEncodeError, so force UTF-8 both ways.
+    env = dict(os.environ, PYTHONIOENCODING='utf-8')
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30, cwd=BASE_DIR)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30, cwd=BASE_DIR,
+                           env=env, encoding='utf-8', errors='replace')
         if r.returncode != 0:
             return None, f'! {key} report exited {r.returncode}: {r.stderr.strip()[:300]}'
         out = r.stdout.strip()

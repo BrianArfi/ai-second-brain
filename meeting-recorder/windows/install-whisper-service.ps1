@@ -15,6 +15,10 @@
 $ErrorActionPreference = 'Stop'
 $Port     = 8083
 $Keeper   = 'C:\tools\whisper-keeper.ps1'
+# The task runs the VBS, not the PS1. Task Scheduler calling powershell.exe
+# directly creates a console window before -WindowStyle Hidden applies, so a
+# black box flashes on screen every 3 minutes. See whisper-keeper.vbs.
+$Launcher = 'C:\tools\whisper-keeper.vbs'
 $TaskName = 'WhisperServer-Keeper'
 
 function Assert-Admin {
@@ -31,6 +35,10 @@ if (-not (Test-Path $Keeper)) {
   Write-Host "ERROR: $Keeper not found. Copy whisper-keeper.ps1 to C:\tools first." -ForegroundColor Red
   exit 1
 }
+if (-not (Test-Path $Launcher)) {
+  Write-Host "ERROR: $Launcher not found. Copy whisper-keeper.vbs to C:\tools first." -ForegroundColor Red
+  exit 1
+}
 
 # 1) Firewall rule ---------------------------------------------------------------
 $rule = Get-NetFirewallRule -DisplayName 'Whisper Server 8083 (WSL bots)' -ErrorAction SilentlyContinue
@@ -43,8 +51,7 @@ if (-not $rule) {
 }
 
 # 2) Scheduled Task --------------------------------------------------------------
-$action  = New-ScheduledTaskAction -Execute 'powershell.exe' `
-  -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Keeper`""
+$action  = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument "`"$Launcher`""
 $atLogon = New-ScheduledTaskTrigger -AtLogOn
 # Repeat every 3 minutes. [TimeSpan]::MaxValue serializes to an invalid task-XML
 # duration, so use a long-but-valid window (10 years = effectively indefinite).

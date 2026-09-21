@@ -275,6 +275,44 @@ def apply_mentions(text, index=None, all_occurrences=False):
         out = out[:h['start']] + '<@%s>' % uid + out[h['end']:]
     return out, [{'name': h['name'], 'id': uid} for h, uid in chosen], unresolved
 
+MENTION_RE = re.compile(r'<@(U[A-Z0-9]+)(\|[^>]*)?>')
+
+def expand_mentions(text, plain=False):
+    """Turn `<@<SLACK_ID>>` into something a human can read.
+
+    the owner reviews every draft and every quoted original on the page, away from
+    Slack, so a bare id tells him nothing: he cannot tell who is being addressed
+    or talked about, which is the one thing he needs to approve a send.
+
+    Two forms, for two readers:
+      default  `<@<SLACK_ID>|Teammate Dev Singh>` - what goes IN the draft file.
+               Slack renders it as a real mention, so readability costs no ping.
+      plain    `@Teammate Dev Singh` - for a quoted original, where the id belongs
+               to the message being shown rather than to anything being sent.
+
+    An id with no name in the index is left as it is. A wrong name is worse than
+    a visible id, so this never guesses.
+
+    Returns (new_text, unresolved_ids).
+    """
+    names = _cached_names()
+    unresolved = []
+
+    def sub(m):
+        uid, existing = m.group(1), m.group(2)
+        name = names.get(uid)
+        if not name:
+            if not existing:
+                unresolved.append(uid)
+            return m.group(0)
+        return '@' + name if plain else '<@%s|%s>' % (uid, name)
+
+    return MENTION_RE.sub(sub, text), unresolved
+
+def bare_mentions(text):
+    """Every `<@Uxxx>` carrying no name. What a draft must not reach the owner with."""
+    return [m.group(1) for m in MENTION_RE.finditer(text) if not m.group(2)]
+
 def read_text(args):
     if args.text is not None:
         return args.text
@@ -285,7 +323,7 @@ def read_text(args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('action', choices=['check', 'apply', 'lookup', 'refresh'])
+    ap.add_argument('action', choices=['check', 'apply', 'expand', 'lookup', 'refresh'])
     ap.add_argument('--text')
     ap.add_argument('--file')
     ap.add_argument('--name', help='name to look up (lookup action)')
@@ -293,7 +331,10 @@ def main():
                     help='refresh: rebuild only when the index is older than DAYS (or missing)')
     ap.add_argument('--all', action='store_true',
                     help='apply: mention every occurrence, not only the first')
-    ap.add_argument('--in-place', action='store_true', help='apply: write back to --file')
+    ap.add_argument('--in-place', action='store_true',
+                    help='apply/expand: write back to --file')
+    ap.add_argument('--plain', action='store_true',
+                    help='expand: write @Name instead of <@ID|Name>, for a quoted original')
     a = ap.parse_args()
 
     if a.action == 'refresh':
@@ -325,7 +366,29 @@ def main():
 
     text = read_text(a)
 
+    if a.action == 'expand':
+        new, unresolved = expand_mentions(text, plain=a.plain)
+        if a.in_place and a.file:
+            with open(a.file, 'w', encoding='utf-8') as fh:
+                fh.write(new)
+            print('wrote %s' % a.file)
+        else:
+            sys.stdout.write(new)
+        for uid in unresolved:
+            print('  no name for %s, left as it is' % uid, file=sys.stderr)
+        return 0
+
     if a.action == 'check':
+        bare = bare_mentions(text)
+        if bare:
+            # A bare id is unreadable on the page, so the owner cannot tell who the
+            # message addresses and cannot approve it. Rule:
+            # memory feedback-drafts-readable-md-named-handles.
+            print('%d mention(s) carry a bare id and no name:' % len(bare))
+            for uid in dict.fromkeys(bare):
+                print('  <@%s>  ->  run: slack_mentions.py expand --file <draft> --in-place'
+                      % uid)
+            return 1
         people = unmentioned(text, index)
         if not people:
             print('OK: every person named in this message already carries a handle.')

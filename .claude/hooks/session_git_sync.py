@@ -133,11 +133,41 @@ def main():
         emit("✓ Up to date with origin/main.")
 
     if dirty:
+        # Uncommitted changes used to end the sync here, so a session opened on a
+        # checkout with one stray edit ran the whole turn against a stale repo
+        # (20 Sep 2026: 16 commits behind, and the session rebuilt work another
+        # session had already finished). Stash, pull, put it back.
+        rc, _, _ = run_git(["stash", "push", "--quiet", "-m", "session_git_sync autostash"], repo, timeout=20)
+        if rc != 0:
+            emit(
+                f"⚠ origin/main is {behind} commit(s) ahead, the working tree is dirty, and it could not "
+                f"be stashed — NOT auto-pulled.\nSync manually: commit or stash, then "
+                f"'git pull --rebase origin main'.\nDirty files:\n{dirty}",
+                f"Git sync: {behind} commit(s) behind origin/main — manual sync needed (stash failed)",
+            )
+
+        rc, _, _ = run_git(["pull", "--rebase", "origin", "main", "--quiet"], repo, timeout=30)
+        if rc != 0:
+            run_git(["rebase", "--abort"], repo, timeout=10)
+            run_git(["stash", "pop"], repo, timeout=20)
+            emit(
+                f"⚠ Pull --rebase hit conflicts ({behind} commit(s) behind) — rebase aborted and your "
+                f"uncommitted changes restored.\nResolve manually: 'git pull --rebase origin main'.",
+                "Git sync: rebase conflict — manual sync needed",
+            )
+
+        rc, _, err = run_git(["stash", "pop"], repo, timeout=20)
+        if rc != 0:
+            emit(
+                f"⚠ Pulled {behind} commit(s), but your uncommitted changes CONFLICT with them and are "
+                f"still in the stash.\nRecover them: 'git stash list' then 'git stash pop' and fix the "
+                f"conflicts.\n{err.strip()}",
+                "Git sync: pulled, but stashed changes need manual recovery",
+            )
         emit(
-            f"⚠ origin/main is {behind} commit(s) ahead, but the working tree has uncommitted changes — "
-            f"NOT auto-pulled.\nSync manually: commit or stash, then 'git pull --rebase origin main'.\n"
-            f"Dirty files:\n{dirty}",
-            f"Git sync: {behind} commit(s) behind origin/main — manual sync needed (uncommitted changes)",
+            f"✓ Stashed local edits, pulled {behind} commit(s) from origin/main, restored the edits.\n"
+            f"Was dirty:\n{dirty}",
+            f"Git sync: pulled {behind} commit(s) (local edits stashed and restored)",
         )
 
     rc, _, _ = run_git(["pull", "--rebase", "origin", "main", "--quiet"], repo, timeout=30)

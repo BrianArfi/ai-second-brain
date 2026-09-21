@@ -41,5 +41,20 @@ else
   python3 "$REPO_DIR/.agent/scripts/heartbeat.py" --job maintenance --status ok --summary "token refresh sweep: ${RATIO:-?} services healthy" >> "$LOG_FILE" 2>&1
 fi
 
+# Model id drift: are the agy-bridge chains still pointing at models that exist?
+# Vendors retire ids without warning and a dead chain entry fails silently --
+# run.py refuses it and falls through, so bulk work quietly lands on a Pro tier.
+# --heartbeat self-reports to the Routines panel, so the app surfaces this the
+# same way it surfaces every other job, rather than it living in a log nobody opens.
+# Never fatal: drift is a finding, not a broken maintenance run, so the exit code
+# is recorded and swallowed.
+echo "[$(date)] Checking agy-bridge model id drift..." >> "$LOG_FILE"
+if command -v timeout >/dev/null 2>&1; then
+  timeout 300s python3 "$REPO_DIR/.agent/scripts/model_drift_check.py" --heartbeat >> "$LOG_FILE" 2>&1
+else
+  python3 "$REPO_DIR/.agent/scripts/model_drift_check.py" --heartbeat >> "$LOG_FILE" 2>&1
+fi
+echo "[$(date)] model drift check exit $?" >> "$LOG_FILE"
+
 echo "Daily Maintenance Finished: $(date)" >> "$LOG_FILE"
 echo "-----------------------------------------------" >> "$LOG_FILE"

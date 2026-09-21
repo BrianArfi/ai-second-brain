@@ -504,9 +504,48 @@ def _main_logic(mode, dry_run=False):
         print("[0b/9] Dashboard check: SKIPPED (dry-run)", flush=True)
         is_alive = True  # assume up in dry-run
 
+    # ── Step 0c: Automation switches ─────────────────────────────────
+    # An automation that is switched off looks exactly like an automation with
+    # nothing to do. The reply router sat off for eleven days in September 2026
+    # because a toggle landed in the wrong checkout and nothing anywhere said so.
+    # Exit 2 from `health` means off while work is waiting.
+    # Reads every automation that declares settings_schema.json, not the reply
+    # router alone, so the next automation inherits this instead of rebuilding
+    # it. Exit 2 means work is held by something that will not clear by itself,
+    # or by a limit that has been holding the same work for over a day.
+    autodraft_warning = None
+    if not dry_run:
+        print("[0c/9] Automation limits: what is held...", end=" ", flush=True)
+        automation_settings = os.path.join(SCRIPT_DIR, 'automation_settings.py')
+        try:
+            res = subprocess.run([sys.executable, automation_settings, 'held'],
+                                 capture_output=True, text=True, encoding='utf-8',
+                                 timeout=30)
+            out = (res.stdout or res.stderr).strip()
+            if res.returncode == 2:
+                autodraft_warning = out
+                print("⚠ work held, needs attention")
+            else:
+                print(f"✓ ({out.splitlines()[0] if out else 'nothing held'})")
+        except subprocess.TimeoutExpired:
+            print("❌ TIMEOUT")
+        except Exception as e:
+            print(f"❌ ERROR: {e}")
+    else:
+        print("[0c/9] Automation limits: SKIPPED (dry-run)", flush=True)
+
     sections = [f"# {mode_label} - {now.strftime('%Y-%m-%d %H:%M')}\n"]
     if not is_alive:
         sections.append("> [!IMPORTANT]\n> Dashboard was found offline and was automatically restarted.\n")
+    if autodraft_warning:
+        body = "\n".join(f"> {l.strip()}" for l in autodraft_warning.splitlines() if l.strip())
+        sections.append(
+            "> [!IMPORTANT]\n"
+            "> Automation limits are holding work:\n"
+            f"{body}\n"
+            "> Inspect with `python3 .agent/scripts/automation_settings.py show <id>`. "
+            "For auto reply drafts, `/autodraft on` switches it back on and prints the "
+            "`config:` path, which must be the checkout the ASB routine runs in.\n")
 
     gcal_script = os.path.join(BASE_DIR, '.agent', 'skills', 'google-calendar-connector', 'gcal_manager.py')
     work_slack_script = os.path.join(BASE_DIR, '.agent', 'skills', 'slack-connector', 'scripts', 'slack_client.py')
@@ -751,6 +790,24 @@ def _main_logic(mode, dry_run=False):
         write_output(sections, output_file)
     elif is_morning:
         print("[7-8] Backlogs/Fathom: SKIPPED (morning mode)", flush=True)
+
+    # ── Step 8b: Auto reply draft grouping (morning only) ────────────
+    # The ASB app decides which session a drafted reply lands under. Until 16 Sep
+    # 2026 it parented each draft to whatever chat was live, so one day's drafts
+    # scattered across several sidebar trees and the owner had to hunt for them. The
+    # app now creates a per-day container instead, but that logic sits in the app
+    # binary and can change on any build, so it gets checked rather than trusted.
+    # Reads the app's own state, which only exists on the Windows machine: on the
+    # WSL automation host the script exits and the step reports "not applicable".
+    if is_morning:
+        print("[8b] Auto reply draft grouping...", flush=True)
+        out = _step("Auto-draft grouping", [
+            sys.executable,
+            os.path.join(BASE_DIR, '.agent', 'scripts', 'check_autodraft_grouping.py'),
+            '--exit-zero',
+        ], timeout=30)
+        sections.append("## Auto Reply Draft Grouping\n```\n{}\n```\n".format(out))
+        write_output(sections, output_file)
 
     # ── Step 9: Work Document Indexing (Evening only) ───────────────
     if not is_morning:

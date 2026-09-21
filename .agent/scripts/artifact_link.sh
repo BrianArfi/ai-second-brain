@@ -53,11 +53,27 @@ if [ -z "${PLATFORM:-}" ]; then
 fi
 
 # Percent-encode only what a file:// URL genuinely needs. Spaces are the common case.
+#
+# `python3` is not on PATH under Git Bash on Windows: the interpreter is `python`, and the name
+# `python3` resolves to Microsoft's App Execution Alias, which prints a Store advertisement to
+# stdout and exits 9009. That advertisement went into the URL, so the script printed `file:///`
+# and nothing else. Pick whichever interpreter is actually there.
+PY_BIN="$(command -v python3 2>/dev/null || true)"
+if [ -z "$PY_BIN" ] || ! "$PY_BIN" -c '' >/dev/null 2>&1; then
+  PY_BIN="$(command -v python 2>/dev/null || true)"
+fi
+
 urlencode() {
-  python3 - "$1" <<'PY'
+  if [ -n "$PY_BIN" ]; then
+    "$PY_BIN" - "$1" <<'PY'
 import sys, urllib.parse
 print(urllib.parse.quote(sys.argv[1], safe="/:"))
 PY
+  else
+    # No interpreter at all. A space is the only character that shows up in practice, and an
+    # unencoded one breaks the link, so encode that much rather than printing nothing.
+    printf '%s\n' "${1// /%20}"
+  fi
 }
 
 case "$PLATFORM" in
@@ -77,7 +93,19 @@ case "$PLATFORM" in
     [ "$OPEN" = "1" ] && open "$ABS"
     ;;
   *)
-    echo "file://$(urlencode "$ABS")"
+    # Windows native. Two things have to be right or the link opens nothing.
+    #
+    # 1. Git Bash hands back an MSYS path, `/c/Users/you/x.html`. Windows cannot open that, so
+    #    the drive letter goes back where Windows expects it: `C:/Users/you/x.html`.
+    # 2. A `file://` URL needs THREE slashes in front of a drive letter. `file://C:/x` names a host
+    #    called `C:`; `file:///C:/x` names the path. The two-slash form was what this branch emitted,
+    #    and it is why nothing handed over from a Windows session had ever been clickable.
+    WINABS="$ABS"
+    case "$WINABS" in
+      /[A-Za-z]/*) WINABS="$(printf '%s' "${WINABS:1:1}" | tr '[:lower:]' '[:upper:]'):${WINABS:2}" ;;
+    esac
+    echo "${WINABS//\//\\}"
+    echo "file:///$(urlencode "$WINABS")"
     [ "$OPEN" = "1" ] && start "" "$ABS" 2>/dev/null || true
     ;;
 esac

@@ -2,7 +2,7 @@
 
 > This file holds the full tool detail that used to live in `CLAUDE.md`. The lean `CLAUDE.md` keeps the always-on rules and routing; **Read the relevant section here when the matching task appears.** A rule lives in exactly one place: core owns rules, this file owns detail.
 >
-> Anchors: [#platform](#platform) · [#google-workspace](#google-workspace) · [#repo-skills](#repo-skills) · [#subagents](#subagents) · [#preferred-tools](#preferred-tools) · [#dedicated-tools](#dedicated-tools)
+> Anchors: [#platform](#platform) · [#google-workspace](#google-workspace) · [#repo-skills](#repo-skills) · [#subagents](#subagents) · [#preferred-tools](#preferred-tools) · [#dedicated-tools](#dedicated-tools) · [#automation-limits](#automation-limits)
 
 ---
 
@@ -261,3 +261,67 @@ Use `pdftotext`, not the `Read` tool. Use `Read` only when the user directly ask
 
 ### Cross-model offload
 - **agy-bridge** -- [`.agent/skills/agy-bridge/run.py`](../.agent/skills/agy-bridge/run.py): shell out to non-Claude models (agy: Gemini/GPT-OSS), capability-routed via [`models.json`](../.agent/skills/agy-bridge/models.json) with a `claude_fallback` tier. **Exit 3 = `{"status":"fallback_to_claude"}` sentinel the caller MUST honor.** Every call logs per-Mtok cost + Claude counterfactual to `dashboard-data/agy_usage_log.jsonl` (`--report` / `localhost:3737` 💸 tab). **z.ai / GLM 5.2 retired 2026-07-27** (subscription ended): removed from every chain, never pass `--backend zai`. Time routing has no live effect now that only flat-rate agy remains. The full capability->model matrix, pricing, and time-routing live in `models.json` + the SOP: [`.agent/skills/agy-bridge/SKILL.md`](../.agent/skills/agy-bridge/SKILL.md).
+
+---
+
+## automation-limits
+
+Every automation that can hold back work declares its settings and publishes what
+it is holding right now. One shape, so a reader learns it once instead of
+learning each automation's private vocabulary.
+
+**Why it exists.** An automation that is switched off looks exactly like one with
+nothing to do, and an automation that is throttling looks exactly like one that
+decided the work was not worth doing. The reply router sat off for eleven days in
+September 2026 for that reason: the toggle landed in another checkout, `run`
+printed `off (config)` to a log nobody reads, and 88 messages waited.
+
+**The contract**, defined in [`.agent/scripts/automation_settings.py`](../.agent/scripts/automation_settings.py):
+
+- **`<skill>/settings_schema.json`** declares the automation id, its config and
+  state paths, and one descriptor per setting (`key`, `type`, `default`, bounds,
+  `help`, optional `usage_key`). The Settings pane renders from this, so a new
+  automation gets its controls without the app learning anything about it.
+- **`help` is mandatory and must say what happens to work that hits the limit**:
+  held, or dropped. `validate` fails a schema whose help dodges it. A cap holds,
+  a mute drops, and from the outside those look the same.
+- **`state["held"]`** is a list of `{reason, items, unit, disposition, clears_at,
+  setting, since}`, rewritten on **every** run including the quiet ones. A block
+  written only when something is wrong goes stale the moment it is fixed, and
+  then reports a problem that ended days ago.
+- **`disposition` and `clears_at` come from the reason, never from the caller**,
+  so "dropped" cannot start meaning "held" in one automation and not another.
+- **Escalation.** Self-clearing limits fire constantly, so surfacing each one
+  trains the user to ignore the surface. They escalate only after holding the
+  same work past `PERSIST_ESCALATE_HOURS` (24), which separates a burst being
+  smoothed from a backlog that never drains. `switch_off` and `needs_auth`
+  escalate at once, because waiting does not fix them.
+- **`depends_on` is mandatory for anything the app schedules** (`runner: app` in
+  `routines.json`), naming the parent switch and where to find it. `validate`
+  fails a schema that omits it. A child rendered ON under a parent that makes it
+  inert is the single most misleading thing the pane can show: it stops the
+  reader looking any further. That is what "Auto reply drafts: ON" under
+  "Scheduled runs: OFF" did on 14 Sep 2026.
+- **`parent_off` is computed by the reader, never written by the automation.** An
+  automation whose scheduler is stopped never runs, so it never gets the chance
+  to report that it is not running; a child cannot witness its own absence. The
+  repo cannot read the app's master switch either, so `scheduler_silent()`
+  infers it: a routine declared `enabled` with a 15-minute cron and no run in
+  `runs.jsonl` for hours is not between ticks. That catches every reason the
+  scheduler might be stopped, not only the one switch.
+- **`<skill> health`** prints one line and exits **2** when held work needs a
+  human. That exit code is the whole integration surface. A stopped parent is
+  reported before anything about the automation's own switches.
+
+```bash
+python3 .agent/scripts/automation_settings.py list            # who declares settings
+python3 .agent/scripts/automation_settings.py show <id>       # values, usage, held
+python3 .agent/scripts/automation_settings.py held            # exit 2 = needs a human
+python3 .agent/scripts/automation_settings.py validate        # schema drift
+```
+
+Readers today: step 0c of [`daily_update_runner.py`](../.agent/scripts/daily_update_runner.py)
+banners anything escalated into the morning update. The ASB app Settings pane is
+the app-side half and is not built yet; the schema is ready for it. Design notes:
+[`journal/plans/plan_automation_settings_surface.md`](../journal/plans/plan_automation_settings_surface.md).
+Contract test: `python3 tests/test_automation_settings.py`.

@@ -2,11 +2,18 @@
 """work_hours.py: reconstruct the owner's working hours per day from digital traces.
 
 Sources (all local, no network except optional Google Calendar):
-  - Claude Code session transcripts (~/.claude/projects/*/):
+  - Claude Code session transcripts, EVERY store in CLAUDE_PROJECT_ROOTS
+    (~/.claude/projects plus any Windows home mounted under /mnt, because the
+    sweep runs on WSL and the owner also drives Claude Code from Windows):
       entrypoint claude-vscode/cli  -> interactive AI workstream (counts)
-      entrypoint sdk-cli            -> automation (cron digests etc, excluded;
-                                       counted separately as automated_runs)
-      subagent files under <session-uuid>/ inherit the parent session.
+      entrypoint sdk-cli            -> automation: cron sweeps, headless runs,
+                                       branch sub-sessions. Counted as parallel
+                                       output in the `automation` lane, never as
+                                       desk time. WORK_HOURS_COUNT_AUTOMATION=0
+                                       restores the old exclude-entirely rule.
+      subagent files under <session-uuid>/ inherit the parent session, so N
+      agents inside one session are one stream, by design: they share the
+      session's wall clock and would otherwise multiply the same minutes.
   - Antigravity conversations (~/.gemini/antigravity-cli/conversations/*.db):
       one SQLite file per conversation, opened READ-ONLY. See the "Antigravity
       reader" section below for what this source can and cannot tell us.
@@ -23,8 +30,10 @@ Model:
     the day it started on).
   - Each interactive session = one stream. Event timestamps are clustered into
     blocks: a gap > GAP_MIN minutes splits a block.
-  - actual_h    = union of all blocks (meetings + sessions)  -> "jam kerja beneran"
-  - effective_h = sum of per-stream hours (parallel counted N times)
+  - actual_h    = union of interactive blocks (meetings + sessions the owner drove)
+                  -> "jam kerja beneran". Automation is NOT in this union.
+  - effective_h = sum of per-stream hours, automation included (parallel counted
+                  N times) -> two concurrent sessions really do count twice
   - leverage    = effective / actual  -> the productivity multiplier
   - attention_h = union of human-typed message clusters + meetings -> hands-on floor
 
@@ -72,7 +81,7 @@ from pathlib import Path
 WIB = timezone(timedelta(hours=7))
 UTC = timezone.utc
 BASE_DIR = Path(__file__).resolve().parents[4]
-CLAUDE_PROJECTS = Path.home() / '.claude' / 'projects'
+CLAUDE_PROJECTS = Path.home() / '.claude' / 'projects'   # this host's own store
 STATE_PATH = BASE_DIR / 'journal' / 'state' / 'work_hours.json'
 CACHE_PATH = BASE_DIR / 'journal' / 'state' / 'work_hours_cache.json'
 FATHOM_REGISTRY = BASE_DIR / 'journal' / 'fathom_registry.json'
@@ -138,6 +147,47 @@ GIT_REPOS = [BASE_DIR] + [p for p in _path_list(
     'WORK_HOURS_GIT_REPOS', 'work_hours_git_repos', GIT_REPO_DEFAULTS)
     if p != BASE_DIR]
 
+def _claude_root_defaults():
+    """Every Claude Code transcript store reachable from this host.
+
+    The sweep runs on ONE machine (WSL, per CLAUDE.md), but the owner drives Claude
+    Code from Windows too, and those transcripts live in the Windows home, not
+    in ~/.claude. Until 20 Sep 2026 they were simply invisible: 2,040 Windows
+    transcripts in a 7-day window against 166 WSL ones, which is why the tracker
+    reported one session on a day with a dozen. From WSL the Windows home is
+    mounted, so we add any /mnt/<drive>/Users/<user>/.claude/projects we find.
+    A host that is not WSL finds nothing here and is unchanged.
+
+    macOS is a genuinely separate filesystem and stays out of reach: its
+    sessions are only counted if the sweep is ever run there.
+    """
+    roots = [str(Path.home() / '.claude' / 'projects')]
+    for drive in ('/mnt/c', '/mnt/d'):
+        users = Path(drive) / 'Users'
+        if not users.is_dir():
+            continue
+        try:
+            homes = sorted(users.iterdir())
+        except OSError:
+            continue
+        for home in homes:
+            if home.name in ('Public', 'Default', 'Default User', 'All Users'):
+                continue
+            p = home / '.claude' / 'projects'
+            if p.is_dir():
+                roots.append(str(p))
+    return roots
+
+CLAUDE_PROJECT_ROOTS = _path_list(
+    'WORK_HOURS_CLAUDE_DIRS', 'work_hours_claude_dirs', _claude_root_defaults())
+
+# Count automation (cron sweeps, headless runs, branch sub-sessions) as parallel
+# output. ON since 20 Sep 2026: automation IS the leverage this chart exists to
+# show, and excluding it pinned most days at 1.0x. It contributes to `effective`
+# ONLY -- never to `actual`, `attention`, or the day's start/end span, because a
+# 03:00 cron run is not the owner at the desk. Set 0 to restore the old behaviour.
+COUNT_AUTOMATION = os.environ.get('WORK_HOURS_COUNT_AUTOMATION', '1') != '0'
+
 # Antigravity conversation stores. The CLI store is SQLite (parsed); the IDE
 # store is raw protobuf (counted and reported only, see the module docstring).
 AGY_CONV_DEFAULTS = [str(Path.home() / '.gemini' / 'antigravity-cli' / 'conversations')]
@@ -166,6 +216,9 @@ LANES = [
     ('work', 'Work PM'),
     ('you', 'You'),
     ('other', 'Other AI'),
+    # automation gets its own lane rather than being folded into work/you,
+    # so "Work PM 4h" keeps meaning four hours the owner was in.
+    ('automation', 'Automation'),
 ]
 
 TS_RE = re.compile(rb'"timestamp"\s*:\s*"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})')
@@ -175,6 +228,24 @@ ENT_RE = re.compile(rb'"entrypoint"\s*:\s*"([^"]+)"')
 # so they are what separates an app session from automation now that BOTH
 # carry entrypoint 'sdk-cli'.
 UI_RE = re.compile(rb'"type"\s*:\s*"(?:atis-latch|last-prompt|ai-title|mode)"')
+# Prompts nothing human typed. The desktop app now drives scheduled runs, branch
+# sub-sessions AND the owner's own chats through one entrypoint ('sdk-cli') and
+# writes the same UI markers to all of them (measured 20 Sep 2026: 2,862 of
+# 2,869 sessions carry a marker), so the only thing left that separates a
+# machine-started session from a human one is the shape of its opening prompt.
+AUTO_PROMPT_RE = re.compile(
+    r'^\s*(?:\[scheduled run\b'
+    r'|You are a branch of the session\b'
+    r'|\[autonomous[- ]loop\b'
+    r'|<<autonomous-loop'
+    r'|Continue the loop\b)', re.I)
+# A session with a single typed prompt that then ran this long is the owner giving
+# one instruction and watching it work, not a cron one-shot. Below it, a lone
+# prompt with a couple of minutes of activity is automation.
+try:
+    MIN_DESK_MIN = max(1, int(os.environ.get('WORK_HOURS_MIN_DESK_MIN', '10')))
+except ValueError:
+    MIN_DESK_MIN = 10
 SCAN_V = 2   # bump to invalidate every cached parse (new fields below)
 CMD_RE = re.compile(r'<command-name>(/[\w:-]+)</command-name>')
 TAG_RE = re.compile(r'<[^>]{1,80}>')
@@ -343,24 +414,39 @@ def is_automated(entry):
     if ent in AUTOMATED_ENTRYPOINTS:
         # 'sdk-cli' used to mean cron only. The AI Second Brain desktop app
         # drives Claude Code through the same SDK entrypoint, so every
-        # interactive session on macOS is stamped 'sdk-cli' too, and the old
-        # rule silently dropped all of them (0 sessions, leverage 1.0x, from
-        # 9 Aug 2026). Two signals rescue an app session: the interactive UI
-        # markers, and more than one human-typed minute. A cron run is a
-        # single injected prompt with no UI records, so it stays excluded.
-        return not (entry.get('ui') and len(entry.get('hum') or ()) >= 2)
+        # interactive session is stamped 'sdk-cli' too, and the first fix for
+        # that (9 Aug 2026) leaned on UI markers plus >= 2 human-typed minutes.
+        # The app then started writing those markers to scheduled runs as well,
+        # which left the marker test doing no work and the human-minute test
+        # doing all of it -- so 428 sessions the owner opened with ONE typed prompt
+        # and then watched for an hour were filed as cron (20 Sep 2026).
+        # Order matters: name the machine-started shapes first, then treat a
+        # typed prompt as a typed prompt.
+        if AUTO_PROMPT_RE.match(entry.get('fh') or ''):
+            return True
+        hum = len(entry.get('hum') or ())
+        if hum >= 2:
+            return False
+        return not (hum >= 1 and len(entry.get('act') or ()) >= MIN_DESK_MIN)
     if ent:
         return False
     label = entry.get('label') or ''
     return label.startswith('Work in /home')
 
 def collect_sessions(window_start_min, cache):
-    """Scan all Claude project dirs; returns {sid: session-entry}."""
+    """Scan every Claude project store in CLAUDE_PROJECT_ROOTS.
+
+    Returns {sid: session-entry}. Session ids are transcript UUIDs, so a session
+    seen under two roots merges into one entry rather than double-counting."""
     sessions = {}
-    if not CLAUDE_PROJECTS.is_dir():
-        return sessions
+    for root in CLAUDE_PROJECT_ROOTS:
+        if root.is_dir():
+            _collect_sessions_root(root, window_start_min, cache, sessions)
+    return sessions
+
+def _collect_sessions_root(root, window_start_min, cache, sessions):
     wstart_s = window_start_min * 60
-    for proj in sorted(CLAUDE_PROJECTS.iterdir()):
+    for proj in sorted(root.iterdir()):
         if not proj.is_dir() or proj.name.startswith('-tmp-'):
             continue
         lane = lane_for_slug(proj.name)
@@ -375,10 +461,14 @@ def collect_sessions(window_start_min, cache):
             cache[key] = cached
             sid = f.stem
             e = sessions.setdefault(sid, {'lane': lane, 'slug': proj.name, 'ent': None,
-                                          'label': None, 'act': set(), 'hum': set(),
+                                          'label': None, 'fh': None,
+                                          'act': set(), 'hum': set(),
                                           'ui': False, 'runtime': 'claude-code'})
             e['ent'] = cached.get('ent') or e['ent']
             e['ui'] = e.get('ui') or bool(cached.get('ui'))
+            # kept apart from `label`: the label prefers the app's generated
+            # title, and is_automated has to read the opening prompt itself
+            e['fh'] = cached.get('first_human') or e['fh']
             e['label'] = cached.get('title') or cached.get('first_human') or e['label']
             e['act'].update(cached.get('act') or [])
             e['hum'].update(cached.get('hum') or [])
@@ -778,6 +868,7 @@ def assemble_day(day_str, sessions, gcal_events, with_commits=True, ai_speed=AI_
     union_min = set()
     attention_min = set()
     automated = 0
+    auto_roll = {}      # runtime -> rolled-up automation for the day
     lane_min = {k: 0 for k, _ in LANES}
     # per-runtime tally so the Hours tab can name its sources instead of
     # presenting one blended number of unknown provenance
@@ -811,6 +902,22 @@ def assemble_day(day_str, sessions, gcal_events, with_commits=True, ai_speed=AI_
         if is_automated(e):
             automated += 1
             rt_bucket(rt)['automated_runs'] += 1
+            if not COUNT_AUTOMATION:
+                continue
+            # Parallel output, not desk time: automation minutes feed `effective`
+            # and the automation lane, and touch neither union_min (actual) nor
+            # attention_min. A cron sweep at 03:00 must not extend the workday.
+            adur = sum(b[1] - b[0] for b in blocks_from_minutes(act, GAP_MIN))
+            lane_min['automation'] += adur
+            rt_bucket(rt)['minutes'] += adur
+            # Rolled up below, not appended one-per-run: a busy day has 300+ of
+            # these, and shipping each one would put ~115 KB per day into the
+            # state file the dashboard fetches whole on every load.
+            a = auto_roll.setdefault(rt, {'min': 0, 'runs': 0, 'span': set(), 'top': []})
+            a['min'] += adur
+            a['runs'] += 1
+            a['span'].update(act)
+            a['top'].append((adur, e['label'] or 'Automated run'))
             continue
         blocks = blocks_from_minutes(act, GAP_MIN)
         dur = sum(b[1] - b[0] for b in blocks)
@@ -834,15 +941,32 @@ def assemble_day(day_str, sessions, gcal_events, with_commits=True, ai_speed=AI_
             'blocks': [[fmt_min(b[0], day_midnight), fmt_min(b[1], day_midnight)] for b in blocks],
         })
 
-    if not streams:
+    for rt, a in sorted(auto_roll.items()):
+        # one row per runtime. `minutes` is the parallel sum (what the runs
+        # actually produced); `blocks` is the union of when they ran, so the
+        # timeline shows a truthful band instead of 300 overlapping slivers.
+        streams.append({
+            'id': 'auto-' + rt, 'lane': 'automation', 'kind': 'auto', 'runtime': rt,
+            'label': f'{a["runs"]} automated run' + ('s' if a['runs'] != 1 else ''),
+            'minutes': a['min'], 'runs': a['runs'], 'human_msgs': 0,
+            'top': [t[1][:70] for t in sorted(a['top'], reverse=True)[:6]],
+            'blocks': [[fmt_min(b[0], day_midnight), fmt_min(b[1], day_midnight)]
+                       for b in blocks_from_minutes(a['span'], GAP_MIN)],
+        })
+
+    # A day exists because the owner was in it. Automation alone is not a workday,
+    # and its blocks never define the span.
+    desk = [s for s in streams if s['kind'] != 'auto']
+    if not desk:
         return None
 
-    starts = [b[0] for s in streams for b in s['blocks']]
-    ends = [b[1] for s in streams for b in s['blocks']]
+    starts = [b[0] for s in desk for b in s['blocks']]
+    ends = [b[1] for s in desk for b in s['blocks']]
     actual = len(union_min)
     effective = sum(s['minutes'] for s in streams)
     # hands-on floor: bounded by real logged activity so attention <= actual always
     attention = len(attention_min & union_min) if attention_min else 0
+    ai_lane_min = sum(v for k, v in lane_min.items() if k != 'meetings')
 
     def clock(m):
         return f'{(m // 60) % 24:02d}:{m % 60:02d}'
@@ -859,19 +983,23 @@ def assemble_day(day_str, sessions, gcal_events, with_commits=True, ai_speed=AI_
         'leverage': round(effective / actual, 2) if actual else 0,
         # human-equivalent output: meetings 1:1 + AI hours x speed factor. The
         # factor is an explicit assumption (AI works faster than manual), NOT a
-        # measurement, and the UI labels it as such.
-        'human_equiv_h': hours(lane_min['meetings']
-                               + sum(v for k, v in lane_min.items() if k != 'meetings') * ai_speed),
-        'output_x': (round((lane_min['meetings']
-                            + sum(v for k, v in lane_min.items() if k != 'meetings') * ai_speed)
+        # measurement, and the UI labels it as such. Automation counts here for
+        # the same reason it counts in `effective`: it is work that got done.
+        'human_equiv_h': hours(lane_min['meetings'] + ai_lane_min * ai_speed),
+        'output_x': (round((lane_min['meetings'] + ai_lane_min * ai_speed)
                            / actual, 2) if actual else 0),
         'ai_speed': ai_speed,
         'meeting_h': hours(lane_min['meetings']),
-        'ai_h': hours(sum(v for k, v in lane_min.items() if k != 'meetings')),
+        # ai_h stays "AI hours the owner was driving"; automation is reported apart
+        # so the two are never silently blended into one number.
+        'ai_h': hours(ai_lane_min - lane_min['automation']),
+        'automation_h': hours(lane_min['automation']),
         'lane_hours': {k: hours(v) for k, v in lane_min.items()},
         'sessions': sum(1 for s in streams if s['kind'] == 'ai'),
+        'auto_runs_counted': sum(s.get('runs', 0) for s in streams if s['kind'] == 'auto'),
         'meetings_count': len(meetings),
         'automated_runs': automated,
+        'automation_counted': COUNT_AUTOMATION,
         # which runtimes produced this day's hours. Present so the Methodology
         # card can name them; a day with no Antigravity activity simply has no
         # 'antigravity' key rather than a misleading zero.
@@ -899,7 +1027,8 @@ def describe_sources(agy_stats):
     INFERRED, so the UI is never forced to render a degraded number as though it
     were a measured one. Same discipline as the AI-speed factor, which the card
     already labels 'assumed'."""
-    claude_present = CLAUDE_PROJECTS.is_dir()
+    claude_roots = [p for p in CLAUDE_PROJECT_ROOTS if p.is_dir()]
+    claude_present = bool(claude_roots)
     agy_dirs = agy_stats.get('dirs') or []
     agy_present = bool(agy_dirs) and agy_stats.get('seen', 0) > 0
 
@@ -949,14 +1078,18 @@ def describe_sources(agy_stats):
     return {
         'claude-code': {
             'present': claude_present,
-            'paths': [str(CLAUDE_PROJECTS)],
+            'paths': [str(p) for p in claude_roots],
             'measured': ['activity timestamps', 'human-typed message timestamps',
                          'entrypoint (interactive vs sdk automation)'],
             'inferred': [],
-            'unavailable': [],
+            'unavailable': ['sessions run on a host whose filesystem this sweep '
+                            'cannot reach (macOS)'],
             'caveats': ([] if claude_present else
                         ['no %s on this machine; no Claude hours counted'
-                         % CLAUDE_PROJECTS]),
+                         % CLAUDE_PROJECTS])
+            + ([] if COUNT_AUTOMATION else
+               ['automation (cron sweeps, headless runs) is excluded from '
+                'parallel output; set WORK_HOURS_COUNT_AUTOMATION=1 to count it']),
         },
         'antigravity': {
             'present': agy_present,
@@ -1094,7 +1227,9 @@ def cmd_show(args):
         print(f"human-equiv {day['human_equiv_h']}h (AI x{day.get('ai_speed')}) | "
               f"productivity {day['output_x']}x vs manual solo")
     print(f"meetings {day['meeting_h']}h ({day['meetings_count']}) | ai {day['ai_h']}h "
-          f"({day['sessions']} sessions) | automated runs {day['automated_runs']}")
+          f"({day['sessions']} sessions) | automation {day.get('automation_h', 0)}h "
+          f"({day.get('auto_runs_counted', 0)} of {day['automated_runs']} runs"
+          f"{'' if day.get('automation_counted', True) else ', excluded'})")
     rts = day.get('runtimes') or {}
     if rts:
         print('runtimes: ' + ' | '.join(

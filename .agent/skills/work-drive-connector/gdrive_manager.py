@@ -331,6 +331,18 @@ def upload_file(file_path, folder_id=None, convert_to_docs=False, visibility='do
     elif convert_to_docs and file_path.endswith('.csv'):
         file_metadata['mimeType'] = 'application/vnd.google-apps.spreadsheet'
         print(f"[Work Drive] Converting {file_name} to Google Sheet...")
+    elif convert_to_docs and file_path.lower().endswith(('.pptx', '.ppt')):
+        # --convert used to cover markdown, csv and text only, so a deck
+        # uploaded with it landed as a PowerPoint attachment that opens in a
+        # download prompt rather than in Slides. Added 14 Sep 2026.
+        file_metadata['mimeType'] = 'application/vnd.google-apps.presentation'
+        print(f"[Work Drive] Converting {file_name} to Google Slides...")
+    elif convert_to_docs and file_path.lower().endswith(('.xlsx', '.xls')):
+        file_metadata['mimeType'] = 'application/vnd.google-apps.spreadsheet'
+        print(f"[Work Drive] Converting {file_name} to Google Sheet...")
+    elif convert_to_docs and file_path.lower().endswith(('.docx', '.doc')):
+        file_metadata['mimeType'] = 'application/vnd.google-apps.document'
+        print(f"[Work Drive] Converting {file_name} to Google Doc...")
     elif convert_to_docs and mime_type and mime_type.startswith('text/'):
         file_metadata['mimeType'] = 'application/vnd.google-apps.document'
         print(f"[Work Drive] Converting {file_name} to Google Doc...")

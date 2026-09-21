@@ -157,6 +157,46 @@ RATIONALE_LEADINS = [
     'to walk you through', 'the reason for this is', 'by way of background',
 ]
 
+# Slack only. the owner's own 1,530 Slack messages carry no heading, no table, and bold in
+# 3% of them (.agent/skills/no-ai-slop/brian_voice.md). A draft that opens with a heading
+# reads as a memo pasted into a chat window, which is the single most visible tell that
+# he did not write it. Warning-level: a genuinely structured message is occasionally
+# right, and this hook must not become the thing that stops a correct send.
+VOICE_PHRASES = [
+    'please find', 'kindly ', 'as discussed', 'circling back',
+    'per my last message', 'i wanted to reach out', 'just following up to see',
+    'best regards', 'kind regards', 'warm regards', 'best,', 'regards,',
+    'thanks and regards', 'looking forward to hearing', 'additionally,',
+    'furthermore,', 'that said,', 'moving forward,', 'to summarise', 'to summarize',
+    'in summary', 'to recap',
+]
+
+VOICE_STRUCTURE = [
+    (re.compile(r'(?m)^\s{0,3}#{1,6}\s+\S'), 'a markdown heading'),
+    (re.compile(r'(?m)^\s{0,3}\|.*\|'), 'a table'),
+    (re.compile(r'(?m)^\s{0,3}\*\*'), 'a bold lead-in'),
+    (re.compile(r'(?m)^\s{0,3}\*[^*\n]{1,60}\*\s*:'), 'a bold label opening a paragraph'),
+]
+
+def voice_notes(text, command):
+    """Ways an outbound Slack draft does not read like the owner, per the measured model."""
+    if 'slack_client.py' not in command:
+        return []
+    notes = []
+    for rx, label in VOICE_STRUCTURE:
+        if rx.search(text):
+            notes.append(label)
+    bullets = len(re.findall(r'(?m)^\s{0,3}[-*•]\s+\S', text))
+    if bullets >= 3:
+        notes.append('%d bullets (he uses a list in 8%% of messages, and only for '
+                     'genuinely parallel items)' % bullets)
+    low = ' '.join(text.lower().split())
+    hits = [p for p in VOICE_PHRASES if p in low]
+    if hits:
+        notes.append('phrases he does not use: ' + ', '.join(h.strip().rstrip(',')
+                                                             for h in hits[:5]))
+    return notes
+
 def payload_words(text):
     """Words the reader has to read, with the payload excluded.
 
@@ -395,6 +435,7 @@ def main():
     words = find_words(text)
     phrases = find_phrases(text)
     rationale = find_rationale(text)
+    voice = voice_notes(text, command)
     count = payload_words(text)
     over = ceiling and count > ceiling
 
@@ -420,6 +461,8 @@ def main():
             extra.append(f'{count} words against a {ceiling}-word budget for {channel}')
         if rationale:
             extra.append('unrequested rationale: ' + ', '.join(rationale[:3]))
+        if voice:
+            extra.append('not his voice: ' + '; '.join(voice[:3]))
         if extra:
             reason += ' Also present, fix in the same pass: ' + '; '.join(extra) + '.'
         print(json.dumps({
@@ -431,7 +474,7 @@ def main():
         }))
         sys.exit(0)
 
-    if ambiguous_names and not (words or phrases or over or rationale):
+    if ambiguous_names and not (words or phrases or over or rationale or voice):
         print(json.dumps({
             'hookSpecificOutput': {
                 'hookEventName': 'PreToolUse',
@@ -446,7 +489,7 @@ def main():
         }))
         sys.exit(0)
 
-    if words or phrases or over or rationale or ambiguous_names:
+    if words or phrases or over or rationale or ambiguous_names or voice:
         bits = []
         if ambiguous_names:
             bits.append('names matching two live Slack accounts, so no handle was '
@@ -464,9 +507,13 @@ def main():
             )
         if rationale:
             bits.append('unrequested rationale: ' + ', '.join(rationale[:3]))
+        if voice:
+            bits.append('shapes the owner never uses on Slack: ' + '; '.join(voice))
         advice = '.agent/skills/no-ai-slop/SKILL.md'
         if over or rationale:
             advice = '.agent/skills/no-ai-slop/answer_budget.md'
+        if voice and not (over or rationale):
+            advice = '.agent/skills/no-ai-slop/brian_voice.md'
         print(json.dumps({
             'hookSpecificOutput': {
                 'hookEventName': 'PreToolUse',
