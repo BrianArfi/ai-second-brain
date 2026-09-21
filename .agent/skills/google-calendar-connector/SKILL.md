@@ -57,6 +57,25 @@ The event ID is the first field of the base64 `eid` in a calendar link:
 
 `--attendees` on `update` **replaces** the whole list, it does not append.
 
+### Attach the document the meeting is about
+
+A decision meeting that does not carry its own pre-read makes every attendee
+hunt for the link, and half of them arrive without having read it. `--attach`
+puts the Drive file on the invite as a real chip, on both `create` and `update`.
+
+```bash
+python3 .agent/skills/google-calendar-connector/gcal_manager.py update --event-id <id> --profile work \
+  --attach 'https://docs.google.com/document/d/<DOC_ID>/edit|Example Catalogue: Gift Card Revenue Model (v1.7)'
+```
+
+Entries are separated by `;`, not `,`, because document titles contain commas.
+The part after `|` is the title the chip shows: pass it, or the reader sees a
+raw URL. A bare file id works in place of a URL. `--attach` on `update`
+**replaces** the whole attachment list, the same way `--attendees` does.
+
+Check the file's sharing before you attach it. The chip does not grant access,
+so a domain-restricted doc stays unreadable to anyone outside the domain.
+
 ### RSVP (answer an invite someone else sent)
 
 ```bash

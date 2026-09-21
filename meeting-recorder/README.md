@@ -84,10 +84,35 @@ tanpa terminal):
 Daemon watcher (`python3 meeting-recorder/watcher.py`) hanya perlu kalau mau
 folder dipantau terus-menerus (mis. file audio yang ditaruh manual).
 
-**Video on-demand:** centang "Record video (screen)" di GUI, atau CLI
-`recorder.py "Nama" --video` (Windows, ffmpeg gdigrab). Hasil `<base>.mp4`
-tercatat sebagai `video_path` di registry entry; transcript tetap dari audio.
-Untuk meeting yang the owner hadiri sendiri, video sudah ada di Fathom.
+**Video on-demand:** centang "Record video (screen)" di GUI, di ASB app
+(Meetings tab), atau CLI `recorder.py "Nama" --video` (Windows, ffmpeg gdigrab).
+Hasil `<base>.mp4` tercatat sebagai `video_path` di registry entry; transcript
+tetap dari audio. Untuk meeting yang the owner hadiri sendiri, video sudah ada di
+Fathom.
+
+**Default-nya satu window, bukan seluruh layar.** `--video` merekam window yang
+terakhir dipakai (bukan window yang memegang tombol Record, makanya ada
+`--video-exclude-pid`). Daftar window: `recorder.py --list-windows` (JSON,
+filter Alt-Tab: minimize, cloaked, tool window, dan window kecil dibuang).
+Pilih window lain dengan judul persis: `--video-window "Zoom Meeting"`. Seluruh
+monitor tetap bisa lewat `--video-whole-screen`, tapi itu pilihan mahal.
+
+**Angka terukur di mesin the owner (dua monitor, 5760x2160):** seluruh desktop
+15 fps = 7,7 GB/jam, 5 fps = 3,0 GB/jam, satu monitor 5 fps = 0,55 GB/jam.
+Karena itu framerate default sekarang 5, bukan 15. Menurunkan resolusi tidak
+dipakai: pada 1280 px lebar tulisan di layar sudah tidak terbaca, dan rekaman
+layar yang tidak terbaca itu nol gunanya.
+
+**Batas gdigrab yang wajib diingat:** capture window itu menyalin *area layar*
+milik window tersebut, bukan buffer window-nya. Window yang tertutup jendela
+lain akan merekam jendela yang menutupinya, dan window yang minimize merekam
+hitam. Diuji pada empat window: hanya yang benar-benar terlihat yang
+menghasilkan gambar. Jadi biarkan window yang direkam tetap terlihat. Capture
+window yang tertutup butuh Windows Graphics Capture API, dan ffmpeg tidak
+punya input untuk itu.
+
+Kalau window pilihan sudah tertutup, recorder menolak turun ke rekaman seluruh
+layar: yang jalan hanya audio, dan peringatannya keluar di stderr.
 
 ## Meeting sendiri (ad-hoc, tidak ada di kalender)
 

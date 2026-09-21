@@ -16,6 +16,7 @@ window.Tabs = window.Tabs || {};
     { key: 'work', name: 'Work PM', cat: 'cat-2' },
     { key: 'you', name: 'You', cat: 'cat-3' },
     { key: 'other', name: 'Other AI', cat: 'cat-4' },
+    { key: 'automation', name: 'Automation', cat: 'cat-5' },
   ];
   const LANE_BY_KEY = Object.fromEntries(LANES.map(l => [l.key, l]));
 
@@ -114,7 +115,8 @@ window.Tabs = window.Tabs || {};
       }),
       Comp.statTile({
         key: 'wh-effective', icon: '🔀', label: 'Parallel output', value: hFmt(day.effective_h),
-        sub: `${day.sessions} AI streams + ${day.meetings_count} meetings`,
+        sub: `${day.sessions} AI streams + ${day.meetings_count} meetings${
+          day.automation_h ? ` + ${hFmt(day.automation_h)} automation` : ''}`,
       }),
       Comp.statTile({
         key: 'wh-leverage', icon: '🚀', label: 'Productivity', value: `${outX(day)}×`,
@@ -414,7 +416,8 @@ window.Tabs = window.Tabs || {};
       return `<tr>
         <td class="num">${mClock(b0)}–${mClock(b1)}</td>
         <td>${Comp.badge(lane.cat, lane.name)}</td>
-        <td class="hours-td-label" title="${U.esc(s.label)}">${s.kind === 'meeting' ? '🎥 ' : '🤖 '}${U.esc(s.label)}</td>
+        <td class="hours-td-label" title="${U.esc(s.kind === 'auto' && s.top ? s.top.join(' · ') : s.label)}">${
+          s.kind === 'meeting' ? '🎥 ' : s.kind === 'auto' ? '⚙️ ' : '🤖 '}${U.esc(s.label)}</td>
         <td class="num">${mDur(s.minutes)}</td>
       </tr>`;
     }).join('');
@@ -422,8 +425,11 @@ window.Tabs = window.Tabs || {};
       <thead><tr><th>Time</th><th>Lane</th><th>Stream</th><th>Active</th></tr></thead>
       <tbody>${rows}</tbody></table></div>
       <div class="hours-footnote">Workday boundary 04:00 WIB · AI streams from Claude Code transcripts
-      (gaps > 15 min split a block) · ${day.automated_runs || 0} automated cron runs excluded ·
-      actual = union of all streams, parallel output = sum of streams ·
+      (gaps > 15 min split a block) · ${day.automated_runs || 0} automated runs (cron sweeps, headless
+      runs, branch sub-sessions) ${day.automation_counted === false ? 'excluded'
+        : 'rolled into the Automation lane: they add to parallel output, never to actual hours'} ·
+      subagents inside a session share its clock and stay one stream ·
+      actual = union of the streams the owner drove, parallel output = sum of all streams ·
       productivity = (meetings + AI hours × ${day.ai_speed || 1}) ÷ actual — the ×${day.ai_speed || 1}
       AI-speed factor is an assumption, tune it via sweep --ai-speed.</div>`;
     return Comp.card({

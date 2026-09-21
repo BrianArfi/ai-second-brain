@@ -70,19 +70,81 @@ def project_dir():
         return os.path.abspath(env)
     return str(Path(__file__).resolve().parent.parent.parent)
 
+def git_root_of(path):
+    """Nearest ancestor directory holding a .git entry, or None."""
+    p = Path(path).resolve()
+    for cand in [p] + list(p.parents):
+        try:
+            if (cand / ".git").exists():
+                return str(cand)
+        except OSError:
+            return None
+    return None
+
 def is_external(target):
     t = target.lower()
     return t.startswith(("http://", "https://", "mailto:", "tel:", "ftp://", "slack://"))
 
-def check_text(text, doc_path, project):
-    """Return (broken, unlinked) for one document's text.
+# One repo, several checkouts, and a link the owner clicks is opened by the app on
+# the machine he is sitting at. A path that is absolute on ANOTHER machine is
+# the largest class of dead link in this repo, and it never looks wrong: the
+# viewer resolves a leading "/" against the session workspace root, so
+# ~/... is looked up at C:~/... and simply fails.
+FOREIGN_ROOTS = (
+    ".",   # WSL automation host
+    ".",                    # macOS
+    "C:/Users/you/.gemini/antigravity/scratch/product-second-brain",  # Windows session
+    "//wsl.localhost/Ubuntu.",
+)
 
-    broken:   [(label, target)] whose local target does not exist
+def foreign_machine_link(path_part, project):
+    """If the target is a repo path written for a different machine, return the
+    path it should carry on THIS machine. Otherwise return None."""
+    p = path_part.replace("\\", "/")
+    if p.lower().startswith("file:///"):
+        p = "/" + p[8:]
+    for root in FOREIGN_ROOTS:
+        if p.lower().startswith(root.lower() + "/"):
+            tail = p[len(root) + 1:]
+            here = os.path.normpath(os.path.join(project, tail.replace("/", os.sep)))
+            here = here.replace("\\", "/")
+            mine = os.path.normpath(p).replace("\\", "/")
+            if here.lower() == mine.lower():
+                return None  # this machine's own root, so the link is correct
+            return here
+    return None
+
+ABS_RE = re.compile(r"^(?:/|[A-Za-z]:[\\/])")
+
+def is_absolute_link(path_part):
+    return bool(ABS_RE.match(path_part))
+
+def app_facing(doc_path, project):
+    """True for documents the owner opens in the app rather than on GitHub.
+
+    The app resolves a relative link from the workspace root, not from the
+    folder the document sits in, so a relative link inside one of these is dead
+    on arrival even though the file it names exists. Repo prose (CLAUDE.md,
+    docs/, .agent/) is read in an editor or on GitHub, where relative is
+    correct, so it is left alone.
+    """
+    try:
+        rel = os.path.relpath(os.path.abspath(doc_path), project).replace("\\", "/")
+    except ValueError:
+        return False
+    return rel.split("/")[0] in ("journal", "Clients", "inbox", "_temp")
+
+def check_text(text, doc_path, project):
+    """Return (broken, unlinked, fragile) for one document's text.
+
+    broken:   [(label, target, hint)] the reader cannot open this
     unlinked: [(name, repo-relative path)] named in prose but never linked
+    fragile:  [(label, target, absolute form)] opens for me, dies for the owner
     """
     doc_dir = os.path.dirname(os.path.abspath(doc_path)) or project
 
     broken = []
+    fragile = []
     linked_targets = set()
     for m in LINK_RE.finditer(text):
         target = m.group("target").strip()
@@ -106,8 +168,34 @@ def check_text(text, doc_path, project):
         # not only as a repo-root-relative one.
         if path_part.startswith("/"):
             candidates.append(os.path.normpath(path_part))
-        if not any(os.path.exists(c) for c in candidates):
-            broken.append((label or target, target))
+        here = foreign_machine_link(path_part, project)
+        if here is not None:
+            hint = "written for another machine, on this one it is " + here
+            if not os.path.exists(here):
+                hint += " (which does not exist either)"
+            broken.append((label or target, target, hint))
+            continue
+        hit = next((c for c in candidates if os.path.exists(c)), None)
+        if hit is None:
+            broken.append((label or target, target, ""))
+            continue
+
+        # A folder is not openable. The app says "is not a file" and the reader
+        # is stuck, even though the path is perfectly correct. Link a file
+        # inside it, or the index that lists its contents.
+        if os.path.isdir(hit):
+            index = next((os.path.join(hit, n) for n in ("README.md", "index.md")
+                          if os.path.exists(os.path.join(hit, n))), None)
+            hint = ("points at a folder, and the app can only open files"
+                    + (f"; link {os.path.relpath(index, project)} instead" if index
+                       else "; link one file inside it instead"))
+            broken.append((label or target, target, hint))
+            continue
+
+        # Resolves here, dies for the owner: the app resolves a relative link from
+        # the workspace root, not from this file's folder.
+        if app_facing(doc_path, project) and not is_absolute_link(path_part):
+            fragile.append((label or target, target, hit.replace("\\", "/")))
 
     # Bare filenames in prose. Fenced blocks are excluded because they are examples,
     # but INLINE code is not: `Some_Doc.md` in a sentence is exactly the case this
@@ -130,7 +218,7 @@ def check_text(text, doc_path, project):
         hit = find_in_repo(name, project)
         if hit:
             unlinked.append((name, os.path.relpath(hit, project)))
-    return broken, unlinked
+    return broken, unlinked, fragile
 
 _INDEX = {}
 
@@ -143,12 +231,19 @@ def find_in_repo(name, project):
                 _INDEX.setdefault(f, os.path.join(root, f))
     return _INDEX.get(name)
 
-def report(doc_rel, broken, unlinked):
+def report(doc_rel, broken, unlinked, fragile=()):
     lines = []
     if broken:
-        lines.append(f"{doc_rel}: {len(broken)} link(s) point at a file that does not exist:")
-        for label, target in broken:
-            lines.append(f"  - [{label}]({target})")
+        lines.append(f"{doc_rel}: {len(broken)} link(s) the reader cannot open:")
+        for entry in broken:
+            label, target = entry[0], entry[1]
+            hint = entry[2] if len(entry) > 2 else "no file at this path"
+            lines.append(f"  - [{label}]({target})  <- {hint}")
+    if fragile:
+        lines.append(f"{doc_rel}: {len(fragile)} relative link(s) that resolve here and die "
+                     f"for the owner (the app resolves from the workspace root):")
+        for label, target, absolute in fragile:
+            lines.append(f"  - [{label}]({target})  <- write it as {absolute}")
     if unlinked:
         lines.append(f"{doc_rel}: file(s) named in prose but not linked:")
         for name, rel in unlinked:
@@ -171,7 +266,14 @@ def run_hook():
         project = project_dir()
         norm = os.path.abspath(path)
         if not norm.startswith(os.path.abspath(project)):
-            sys.exit(0)
+            # The write may have gone to another checkout of this same repo,
+            # by UNC path from Windows into WSL for instance. That is exactly
+            # when a machine-specific link gets written, so check it there
+            # rather than skipping, using that checkout as the root.
+            owner = git_root_of(norm)
+            if not owner:
+                sys.exit(0)
+            project = owner
         if any(s in norm for s in SKIP_DIRS):
             sys.exit(0)
         if not os.path.exists(norm):
@@ -180,12 +282,12 @@ def run_hook():
         with open(norm, "r", encoding="utf-8", errors="replace") as fh:
             text = fh.read()
 
-        broken, unlinked = check_text(text, norm, project)
-        if not broken and not unlinked:
+        broken, unlinked, fragile = check_text(text, norm, project)
+        if not broken and not unlinked and not fragile:
             sys.exit(0)
 
         rel = os.path.relpath(norm, project)
-        lines = report(rel, broken, unlinked)
+        lines = report(rel, broken, unlinked, fragile)
         payload = {
             "hookSpecificOutput": {
                 "hookEventName": "PostToolUse",
@@ -200,7 +302,46 @@ def run_hook():
         pass
     sys.exit(0)
 
-def run_cli(targets):
+def as_link_target(abs_path):
+    """An absolute path safe to put inside a markdown link target."""
+    return abs_path.replace("\\", "/").replace(" ", "%20")
+
+def fix_text(text, doc_path, project):
+    """Rewrite every link that resolves on this machine but not for the reader.
+
+    Covers the two classes the guard can repair without guessing: a relative
+    link inside an app-facing document, and a link written for another
+    machine's checkout. A link whose target does not exist at all is left
+    alone, because there is nothing to point it at.
+    """
+    broken, _unlinked, fragile = check_text(text, doc_path, project)
+    doc_dir = os.path.dirname(os.path.abspath(doc_path)) or project
+    swaps = {}
+
+    for label, target, absolute in fragile:
+        swaps[target] = as_link_target(absolute)
+
+    for entry in broken:
+        target = entry[1]
+        hint = entry[2] if len(entry) > 2 else ""
+        if not hint.startswith("written for another machine"):
+            continue
+        path_part = unquote(target.split("#")[0])
+        here = foreign_machine_link(path_part, project)
+        if here and os.path.isfile(here):
+            swaps[target] = as_link_target(here)
+
+    out, n = text, 0
+    for old, new in swaps.items():
+        if old == new:
+            continue
+        needle = "](" + old + ")"
+        if needle in out:
+            out = out.replace(needle, "](" + new + ")")
+            n += 1
+    return out, n
+
+def run_cli(targets, fix=False):
     project = project_dir()
     docs = []
     for t in targets:
@@ -213,26 +354,41 @@ def run_cli(targets):
             docs.append(p)
 
     bad = 0
+    fixed_docs = fixed_links = 0
     for doc in sorted(docs):
         try:
             with open(doc, "r", encoding="utf-8", errors="replace") as fh:
                 text = fh.read()
         except Exception:
             continue
-        broken, unlinked = check_text(text, doc, project)
-        if broken or unlinked:
+        if fix:
+            new, n = fix_text(text, doc, project)
+            if n:
+                with open(doc, "w", encoding="utf-8") as fh:
+                    fh.write(new)
+                text = new
+                fixed_docs += 1
+                fixed_links += n
+                print(f"fixed {n} link(s) in {os.path.relpath(doc, project)}")
+        broken, unlinked, fragile = check_text(text, doc, project)
+        if broken or unlinked or fragile:
             bad += 1
-            print("\n".join(report(os.path.relpath(doc, project), broken, unlinked)))
+            print("\n".join(report(os.path.relpath(doc, project), broken, unlinked, fragile)))
+    if fixed_links:
+        print(f"\nrewrote {fixed_links} link(s) across {fixed_docs} document(s).")
     if bad:
         print(f"\n{bad} document(s) with link problems.")
         return 1
-    print(f"{len(docs)} document(s) checked, all links resolve.")
+    print(f"{len(docs)} document(s) checked, every link opens.")
     return 0
 
 if __name__ == "__main__":
     try:
-        if len(sys.argv) > 1:
-            sys.exit(run_cli(sys.argv[1:]))
+        argv = sys.argv[1:]
+        fix = "--fix" in argv
+        argv = [a for a in argv if a != "--fix"]
+        if argv:
+            sys.exit(run_cli(argv, fix=fix))
         run_hook()
     except SystemExit:
         raise

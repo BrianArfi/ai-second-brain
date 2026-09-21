@@ -1613,9 +1613,16 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._send_json(500, json.dumps({'error': 'Failed to read work hours', 'details': str(e)}))
 
     def _maybe_refresh_work_hours(self):
-        """Spawn a detached `work_hours.py sweep --backfill 2` when the state file
-        is older than WORK_HOURS_REFRESH_SECS. flock + an in-process debounce keep
-        it single-flight; the 60s frontend poll picks up the fresh file next tick."""
+        """Spawn a detached `work_hours.py sweep` when the state file is older
+        than WORK_HOURS_REFRESH_SECS. flock + an in-process debounce keep it
+        single-flight; the 60s frontend poll picks up the fresh file next tick.
+
+        The backfill window follows how stale the file is. It was pinned at 2
+        days, so a machine with no cron (no WSL host, or the cron never
+        installed) healed only the last 2 days whenever the tab was opened and
+        left every older gap permanently empty: on 19 Sep 2026 the tab was 4
+        days behind and 4 to 13 Sep had no data at all, which reads as "the owner
+        did not work" rather than "nobody swept"."""
         try:
             try:
                 age = time.time() - WORK_HOURS_PATH.stat().st_mtime
@@ -1627,9 +1634,13 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             if now - DashboardHandler._wh_spawned_at < 120:
                 return
             DashboardHandler._wh_spawned_at = now
+            # +2 days of overlap so a partly-swept boundary day is recomputed,
+            # capped at 30 because the parse cache prunes at 21 days.
+            stale_days = 14 if age is None else int(age // 86400) + 2
+            backfill = str(max(2, min(30, stale_days)))
             log_path = BASE_DIR / '.agent' / 'skills' / 'work-hours' / 'work_hours_cron.log'
             argv = [sys.executable, '.agent/skills/work-hours/scripts/work_hours.py',
-                    'sweep', '--backfill', '2', '--quiet']
+                    'sweep', '--backfill', backfill, '--quiet']
             # flock is a util-linux binary and does NOT exist on macOS: prefixing
             # it there made Popen raise FileNotFoundError, which the except below
             # swallowed, so the tab served a file frozen on 9 Aug 2026 and said

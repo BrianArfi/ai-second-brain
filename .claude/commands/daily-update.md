@@ -3,7 +3,21 @@ description: Daily - Daily update - auto-detects WIB time; morning prep before 1
 argument-hint: "[optional focus, or 'morning'/'evening' to force a mode]"
 ---
 
-Determine current WIB time first: run `TZ=Asia/Jakarta date '+%H:%M %A %Y-%m-%d'`.
+Determine current WIB time first. **Do NOT run `TZ=Asia/Jakarta date` in Git Bash on Windows.** Git Bash ships no tzdata, so `TZ=Asia/Jakarta` is silently ignored and the command returns **UTC**, which reads as 7 hours earlier than the owner's actual local time. On 14 Sep 2026 that returned 05:43 when the real time was 12:43 WIB, and the run entered morning mode after a morning update had already gone out.
+
+Get the time from a host that has tzdata:
+
+```bash
+# WSL or macOS (native):
+TZ=Asia/Jakarta date '+%H:%M %A %Y-%m-%d'
+
+# Windows native (proxy to WSL):
+wsl.exe bash -c "TZ=Asia/Jakarta date '+%H:%M %A %Y-%m-%d'"
+```
+
+Sanity check before trusting it: UTC plus 7 must equal the WIB figure. If a machine reports the same clock for both `date -u` and the WIB command, that machine has no tzdata and its answer is UTC. Use the other host.
+
+**Then check whether a morning update already ran today**, because that decides the mode as much as the clock does: grep `Dashboard.md` for a `(Pagi)` section carrying today's date, and look for `_temp/daily_plan_<today>.md`. If either exists, morning has run and the mode is evening regardless of the hour.
 
 If $ARGUMENTS forces a mode ("morning" or "evening"), obey it. Otherwise (the owner's rule: morning until 17:00 WIB, since his work window starts ~12:30):
 

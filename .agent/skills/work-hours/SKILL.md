@@ -10,11 +10,39 @@ and what the leverage was (parallel output / actual hours).
 
 ## Capabilities
 
-- Harvests every Claude Code session transcript under `~/.claude/projects/` and
-  classifies it: `entrypoint: claude-vscode|cli` = interactive workstream (counts),
-  `entrypoint: sdk-cli` = automation (inbox digests etc — excluded, counted
-  separately as `automated_runs`). Subagent transcripts under `<session-uuid>/`
-  inherit the parent session.
+- Harvests every Claude Code session transcript in **every** store it can reach:
+  `~/.claude/projects/` plus any Windows home mounted under `/mnt/<drive>/Users/*`.
+  The sweep runs on WSL but the owner drives Claude Code from Windows too, and those
+  transcripts are not in the WSL home. Before 20 Sep 2026 they were simply unseen
+  (2,040 Windows transcripts in a 7-day window against 166 WSL ones), which is why
+  a day with a dozen sessions reported one. Override the list with
+  `WORK_HOURS_CLAUDE_DIRS` or `extra.work_hours_claude_dirs` in `.agent/harness.json`.
+  **macOS sessions are still invisible**: that filesystem is not reachable from
+  WSL, and only a sweep run on the Mac itself would see them.
+- Classifies each session as desk work or automation. The recorded `entrypoint`
+  no longer separates them — the desktop app drives scheduled runs, branch
+  sub-sessions and the owner's own chats through `sdk-cli` alike, and writes the same
+  UI markers to all of them (measured: 2,862 of 2,869). So the test is the shape
+  of the opening prompt plus the typed-turn count, in this order:
+  1. opening prompt matches `AUTO_PROMPT_RE` (`[scheduled run …`, `You are a
+     branch of the session …`, autonomous-loop) → **automation**
+  2. two or more human-typed minutes → **desk work**
+  3. one typed prompt and ≥ `WORK_HOURS_MIN_DESK_MIN` (10) activity minutes →
+     **desk work** (the owner gives one instruction and watches it run; 428 such
+     sessions were misfiled as cron before 20 Sep 2026)
+  4. otherwise → **automation**
+- **Automation counts as parallel output, never as desk time.** Cron sweeps,
+  headless runs and branch sub-sessions land in the `automation` lane: they add
+  to `effective_h`, `human_equiv_h` and the leverage numerator, and they touch
+  neither `actual_h`, nor `attention_h`, nor the day's start/end span — a 03:00
+  sweep is not the owner at the desk. A day made of automation alone is not a workday
+  and is not emitted. They are rolled up to one row per runtime (`runs`, `top`),
+  because a busy day has 300+ and one row each would add ~115 KB/day to the state
+  file the dashboard fetches whole. Kill switch: `WORK_HOURS_COUNT_AUTOMATION=0`.
+- Subagent transcripts under `<session-uuid>/` inherit the parent session, by
+  design: N agents inside one session share that session's wall clock, so
+  counting them separately would multiply the same minutes. Parallelism shows up
+  between **sessions**, and concurrent sessions do each count.
 - Meetings from `journal/fathom_registry.json` (recorded = attendance verified)
   merged with Google Calendar (`gcal_manager.py --profile work`, cached per day in
   state). Declined and solo events (focus blocks) are skipped; scheduled meetings
@@ -23,13 +51,17 @@ and what the leverage was (parallel output / actual hours).
 - Per day (04:00 WIB boundary — late-night work counts to the day it started;
   calendar events are bucketed by workday too, so a 02:00 WIB call lands on the
   right day):
-  - `actual_h` — union of all activity (jam kerja beneran)
-  - `effective_h` — sum of per-stream hours (parallel counted N times)
+  - `actual_h` — union of the activity the owner drove (jam kerja beneran); automation
+    is not in this union
+  - `effective_h` — sum of per-stream hours, automation included (parallel counted
+    N times, so two concurrent sessions really do count twice)
+  - `automation_h` / `auto_runs_counted` — the machine half, reported apart from
+    `ai_h` so the two are never blended into one unattributed number
   - `leverage` — effective ÷ actual (measured parallelism)
   - `attention_h` — human-typed prompt clusters + meetings, bounded by actual
     (hands-on floor, always ≤ actual_h)
   - `human_equiv_h` / `output_x` — meetings 1:1 + AI hours × AI-speed factor
-    (default **2.5**, research-calibrated: see `research_ai_speed_factor.md` —
+    (default **2.5**, research-calibrated: see [`research_ai_speed_factor.md`](research_ai_speed_factor.md) —
     blended ×2-2.5 conservative-defensible for the owner's mix, ×3 optimistic edge,
     coding closer to ×1-2. Override: `--ai-speed N` or env `WORK_HOURS_AI_SPEED`.
     Still an estimate; the UI labels it "assumed". Revisit ~quarterly, capability
@@ -37,7 +69,7 @@ and what the leverage was (parallel output / actual hours).
 - Overlapping meeting entries merge into one stream (the owner is one person —
   double-booked slots and one recording spanning two events never count twice);
   strictly back-to-back meetings stay separate.
-- Lanes: Meetings / Work PM / You / Other AI. Stream labels from the session's
+- Lanes: Meetings / Work PM / You / Other AI / Automation. Stream labels from the session's
   `aiTitle` (fallback: slash command or first prompt).
 - **Antigravity reader**: harvests `~/.gemini/antigravity-cli/conversations/*.db`
   (one SQLite file per conversation, opened read-only) alongside the Claude Code
@@ -84,9 +116,17 @@ python3 .agent/skills/work-hours/scripts/work_hours.py show  --date 2026-07-16
 ## Refresh
 
 **Self-refreshing via the dashboard**: `GET /api/work-hours` spawns a detached
-`sweep --backfill 2` whenever the state file is older than 15 min (flock +
-debounce, single-flight). With the Hours tab open, the 60s frontend poll keeps
-the data current — no cron required.
+`sweep` whenever the state file is older than 15 min (flock + debounce,
+single-flight). With the Hours tab open, the 60s frontend poll keeps the data
+current -- no cron required. The backfill window follows how stale the file is
+(`age in days + 2`, floor 2, cap 30), so opening the tab after a week away
+rebuilds the whole gap instead of only the last two days.
+
+**No WSL, no cron: this path is the whole answer.** Cron is a convenience for a
+machine that runs headless, not a requirement. On macOS or Windows native the
+dashboard's own sweep keeps the tab current while it is open, and the System tab
+carries a "Run now" button for an on-demand sweep. `flock` is skipped where it
+does not exist; the 120s in-process debounce is the lock there.
 
 Optional cron (background freshness with the dashboard closed; needs the owner to
 install it, a session permission gate blocks agents from editing crontab):

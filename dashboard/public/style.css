@@ -2043,6 +2043,7 @@ a.ticket-chip:hover { border-color: var(--border-active); color: var(--text-acce
 .hours-key[data-lane="work"]    { background: var(--cat-2); }
 .hours-key[data-lane="you"]   { background: var(--cat-3); }
 .hours-key[data-lane="other"]    { background: var(--cat-4); }
+.hours-key[data-lane="automation"] { background: var(--cat-5); }
 .hours-key[data-series="eff"]    { background: var(--cat-1); }
 .hours-key[data-series="act"]    { background: hsl(235, 12%, 52%); }
 
@@ -2080,6 +2081,9 @@ a.ticket-chip:hover { border-color: var(--border-active); color: var(--text-acce
 .hours-block[data-lane="work"]    { background: var(--cat-2); }
 .hours-block[data-lane="you"]   { background: var(--cat-3); }
 .hours-block[data-lane="other"]    { background: var(--cat-4); }
+/* automation is machine time, not desk time: same width rules, lower contrast
+   so a 20h automation band never reads as 20h of the owner at the keyboard */
+.hours-block[data-lane="automation"] { background: var(--cat-5); opacity: .55; }
 .hours-block.is-scheduled { opacity: .5; }
 /* hit target bigger than the mark: invisible padding around every block */
 .hours-block::after { content: ''; position: absolute; inset: -4px -3px; }

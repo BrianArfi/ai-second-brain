@@ -891,6 +891,34 @@ def create_channel(token, name, private=False):
     print(f"Channel created: #{ch.get('name')} ({ch.get('id')})")
     return ch.get("id")
 
+def rename_channel(token, channel_id, name):
+    """
+    Renames a channel (conversations.rename).
+
+    A rename keeps the history, the members and every existing link, so it is
+    reversible in a way create and archive are not. It is still visible to
+    everyone in the channel the moment it happens, so it carries the same
+    --approved gate as post, invite and create_channel.
+
+    Slack enforces the naming rules itself (lowercase, no spaces, 80 chars),
+    and rejects rather than fixes a bad name, so normalise here first and say
+    what was used.
+    """
+    normalised = re.sub(r"[^a-z0-9_-]+", "-", name.strip().lstrip("#").lower()).strip("-")[:80]
+    response = make_slack_request("conversations.rename", token, {"channel": channel_id, "name": normalised})
+    if not response.get("ok"):
+        err = response.get("error")
+        if err == "name_taken":
+            print(f"Error: a channel named #{normalised} already exists.", file=sys.stderr)
+        elif err == "not_in_channel":
+            print(f"Error: you must be a member of {channel_id} to rename it. Join it first.", file=sys.stderr)
+        else:
+            print(f"Error renaming channel: {err}", file=sys.stderr)
+        return None
+    ch = response.get("channel", {})
+    print(f"Channel renamed: {channel_id} -> #{ch.get('name')}")
+    return ch.get("name")
+
 def set_channel_purpose(token, channel_id, purpose=None, topic=None):
     """Sets purpose and/or topic on a channel. Not gated: it writes metadata on
     a channel that already exists and notifies nobody."""
@@ -933,12 +961,12 @@ def leave_channel(token, channel_id):
 
 def main():
     parser = argparse.ArgumentParser(description="Slack Connector Helper")
-    parser.add_argument("--action", required=True, choices=["list_channels", "list_joined_channels", "history", "list_users", "user_info", "channel_members", "search", "channel_info", "file_info", "download", "upload", "post", "update", "delete", "lookup", "find_dm", "invite", "join", "leave", "create_channel", "set_purpose"], help="Action to perform")
+    parser.add_argument("--action", required=True, choices=["list_channels", "list_joined_channels", "history", "list_users", "user_info", "channel_members", "search", "channel_info", "file_info", "download", "upload", "post", "update", "delete", "lookup", "find_dm", "invite", "join", "leave", "create_channel", "rename_channel", "set_purpose"], help="Action to perform")
     parser.add_argument("--token", help="Explicit Slack token. Default for all actions is SLACK_USER_TOKEN (xoxp, the owner's), falling back to SLACK_BOT_TOKEN. Use --bot to force the bot token.")
     parser.add_argument("--channel", help="Channel ID for history, channel_members, upload, post, lookup, invite, join, and leave actions")
     parser.add_argument("--user", help="User ID/Name for user_info or lookup action")
     parser.add_argument("--users", help="User IDs (comma-separated) for invite and find_dm actions")
-    parser.add_argument("--name", help="Channel name for create_channel action")
+    parser.add_argument("--name", help="Channel name for create_channel and rename_channel actions")
     parser.add_argument("--private", action="store_true", help="Create a private channel instead of a public one (create_channel)")
     parser.add_argument("--purpose", help="Channel purpose (create_channel, set_purpose)")
     parser.add_argument("--topic", help="Channel topic (create_channel, set_purpose)")
@@ -1119,6 +1147,15 @@ def main():
             sys.exit(1)
         if args.purpose or args.topic:
             set_channel_purpose(token, cid, args.purpose, args.topic)
+    elif args.action == "rename_channel":
+        if not args.channel or not args.name:
+            print("Error: --channel and --name are required for rename_channel action.", file=sys.stderr)
+            sys.exit(1)
+        require_send_approval("rename a Slack channel", args.approved)
+        if not rename_channel(token, args.channel, args.name):
+            sys.exit(1)
+        if args.purpose or args.topic:
+            set_channel_purpose(token, args.channel, args.purpose, args.topic)
     elif args.action == "set_purpose":
         if not args.channel or not (args.purpose or args.topic):
             print("Error: --channel and --purpose/--topic are required for set_purpose action.", file=sys.stderr)

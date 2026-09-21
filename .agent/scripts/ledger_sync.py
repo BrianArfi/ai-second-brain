@@ -54,7 +54,6 @@ Safety
 
 import argparse
 import contextlib
-import fcntl
 import hashlib
 import json
 import os
@@ -276,6 +275,10 @@ def _next_seq_at(ledger, ref):
         return None
     return val if isinstance(val, int) else None
 
+# Marks a problem as "this checkout is behind", which is not a deletion and must
+# never block a commit or send anyone to the recovery instructions.
+STALE_PREFIX = 'behind origin/main:'
+
 def check_deletions(ledger):
     """Records that vanished while still live, compared against HEAD and
     origin/main. Returns a list of human-readable problems; empty is good.
@@ -292,12 +295,34 @@ def check_deletions(ledger):
         current = _records_at(ledger, None)
         if current is None:
             return []
+        head_was = _records_at(ledger, 'HEAD') or {}
+        behind = behind_count()
         for ref in ('HEAD', 'origin/main'):
             was = _records_at(ledger, ref)
             if not was:
                 continue
             lost = [(rid, st) for rid, st in was.items()
                     if rid not in current and st not in terminal]
+            if ref == 'origin/main' and behind > 0:
+                # A checkout that is behind has never held the records added
+                # upstream since it last pulled, and absent-because-stale looks
+                # exactly like deleted from here. Reporting it as a deletion is
+                # worse than silence: the recovery line below says to re-add the
+                # records, which would duplicate ids that already exist. So ids
+                # this disk has never seen (not in HEAD either) become a
+                # pull-first notice, and only ids that WERE in local history
+                # stay classed as deletions. Hit on WSL 17 Sep 2026, 32 commits
+                # behind with no network, so refresh_before_read could not run.
+                unseen = [(rid, st) for rid, st in lost if rid not in head_was]
+                lost = [(rid, st) for rid, st in lost if rid in head_was]
+                if unseen:
+                    unseen.sort()
+                    ids = ', '.join(rid for rid, _ in unseen[:8])
+                    more = f' and {len(unseen) - 8} more' if len(unseen) > 8 else ''
+                    problems.append(
+                        f'{STALE_PREFIX} this checkout is {behind} commit(s) behind, '
+                        f'so {len(unseen)} record(s) in origin/main have never '
+                        f'reached it: {ids}{more}')
             if lost:
                 lost.sort()
                 shown = ', '.join(f'{rid} ({st or "no status"})' for rid, st in lost[:8])
@@ -305,6 +330,8 @@ def check_deletions(ledger):
                 problems.append(
                     f'{len(lost)} live record(s) present in {ref} are missing from '
                     f'{ledger}.json: {shown}{more}')
+            if ref == 'origin/main' and behind > 0:
+                continue          # so is a next_seq that upstream has moved on
             before = _next_seq_at(ledger, ref)
             now = _next_seq_at(ledger, None)
             if before is not None and now is not None and now < before:
@@ -320,6 +347,19 @@ def report_deletions(ledger, problems):
     """Print the refusal and record it. Returns True when the commit must stop."""
     if not problems:
         return False
+
+    # Behind-the-remote notices are not deletions. Say what they are, point at
+    # the pull, and never block: there is nothing wrong with the file on disk.
+    stale = [p for p in problems if p.startswith(STALE_PREFIX)]
+    problems = [p for p in problems if not p.startswith(STALE_PREFIX)]
+    if stale:
+        sys.stderr.write('\n'.join(
+            [f'[ledger_sync] NOTE: {s[len(STALE_PREFIX):].strip()}' for s in stale]
+            + ['  Nothing was deleted. Pull before reading these records: '
+               'python3 .agent/scripts/ledger_sync.py refresh']) + '\n')
+    if not problems:
+        return False
+
     warn_only = guard_warn_only()
     head = ('WARNING (warn-only)' if warn_only
             else 'REFUSING TO COMMIT')
@@ -356,12 +396,16 @@ def render_derived(verbose=False):
     no lock (they invoke the ledgers' read-only `report`), so this is safe to
     call from inside a process already holding a ledger lock."""
     problems = []
+    # The renderers print emoji. On Windows the child inherits a cp1252 stdout
+    # and dies with UnicodeEncodeError, so force UTF-8 on every renderer.
+    render_env = dict(os.environ, PYTHONIOENCODING='utf-8')
     for cmd, label in RENDERERS:
         if not os.path.exists(cmd[1]):
             continue
         try:
             p = subprocess.run(cmd, cwd=BASE_DIR, capture_output=True,
-                               text=True, timeout=120)
+                               text=True, timeout=120, env=render_env,
+                               encoding='utf-8', errors='replace')
             if p.returncode != 0:
                 problems.append(f'{label}: exit {p.returncode} {p.stderr.strip()[:200]}')
             elif verbose:
@@ -1119,6 +1163,11 @@ def _bg_child():
 @contextlib.contextmanager
 def bg_lock():
     """Exclusive, non-blocking. Yields False when another sync already holds it."""
+    # Same POSIX/Windows shim the ledger locks use, imported here rather than at
+    # module scope so `ledger_sync` keeps importing on a box where the sibling
+    # script is missing.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from ledger_lock import _try_lock, _unlock
     try:
         os.makedirs(os.path.dirname(BG_LOCK), exist_ok=True)
         fh = open(BG_LOCK, 'w')
@@ -1127,7 +1176,7 @@ def bg_lock():
         return
     try:
         try:
-            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _try_lock(fh)
         except OSError:
             yield False
             return
@@ -1135,7 +1184,7 @@ def bg_lock():
             yield True
         finally:
             try:
-                fcntl.flock(fh, fcntl.LOCK_UN)
+                _unlock(fh)
             except OSError:
                 pass
     finally:

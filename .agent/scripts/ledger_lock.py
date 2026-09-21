@@ -37,13 +37,45 @@ or as a context manager around a narrower section:
 
 The lock is advisory (fcntl.flock), so it only protects processes that ask
 for it. Any new writer to journal/state/*.json must call this too.
+
+On Windows there is no `fcntl`, so the primitive is `msvcrt.locking` over a
+one-byte range instead. Same semantics for our purposes: exclusive, advisory,
+non-blocking, released when the handle closes. Without this shim every ledger
+command run from a Windows session died at import with ModuleNotFoundError,
+which is how the Stop hook started failing on 16 Sep 2026.
 """
 import contextlib
 import errno
-import fcntl
 import os
 import sys
 import time
+
+try:
+    import fcntl
+    msvcrt = None
+except ImportError:                                  # Windows
+    fcntl = None
+    import msvcrt
+
+# Windows raises EACCES or EDEADLOCK for "somebody else holds it"; POSIX raises
+# EAGAIN or EACCES. Treating the union as contention keeps one retry loop.
+_BUSY = {errno.EAGAIN, errno.EACCES, getattr(errno, 'EDEADLOCK', 36),
+         getattr(errno, 'EDEADLK', 36)}
+
+def _try_lock(fh):
+    """Take the exclusive lock, non-blocking. Raises OSError if it is held."""
+    if fcntl is not None:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    else:
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+
+def _unlock(fh):
+    if fcntl is not None:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    else:
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
 
 LOCK_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
@@ -92,10 +124,10 @@ def ledger_lock(name, timeout=DEFAULT_TIMEOUT, verbose=False):
     waited = False
     while True:
         try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _try_lock(fh)
             break
         except OSError as exc:
-            if exc.errno not in (errno.EAGAIN, errno.EACCES):
+            if exc.errno not in _BUSY:
                 fh.close()
                 raise
             if time.time() - start > timeout:
@@ -120,7 +152,7 @@ def ledger_lock(name, timeout=DEFAULT_TIMEOUT, verbose=False):
     finally:
         _HELD.discard(name)
         try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            _unlock(fh)
         finally:
             fh.close()
 
@@ -141,10 +173,10 @@ def hold_ledger_lock(name, timeout=DEFAULT_TIMEOUT):
     start = time.time()
     while True:
         try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _try_lock(fh)
             break
         except OSError as exc:
-            if exc.errno not in (errno.EAGAIN, errno.EACCES):
+            if exc.errno not in _BUSY:
                 raise
             if time.time() - start > timeout:
                 sys.stderr.write(

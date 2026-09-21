@@ -2,7 +2,7 @@
   "_comment": "agy-bridge config. Tasks resolve a CAPABILITY -> ordered candidate models (or an explicit chain override). The bridge tries each; first success wins; if all fail it exits 3 with a claude_fallback sentinel. Every model has a per-Mtok price (model_prices) so cost/savings are computed honestly for ALL backends, including subscription ones (NOT $0).",
   "_agy_note": "agy ids = EXACT `agy models` display strings; agy SILENTLY routes an unknown id to a default, so run.py refuses any id not in known_agy_models. agy token usage is NOT exposed by the CLI -> agy token counts are ESTIMATED (chars/4, flagged). agy auth is flaky per-call (auth-blip -> run.py retries once).",
   "_zai_note": "zai = z.ai GLM Coding Plan (subscription, Anthropic-compatible). Token in ZAI_API_TOKEN or token.env. Real server -> exact usage in response, and it ERRORS on a bad model id (no silent fallback).",
-  "_agy_models_seen": "2026-06-24: Gemini 3.5 Flash (Low/Med/High), Gemini 3.1 Pro (Low/High), GPT-OSS 120B (Medium), Claude Sonnet 4.6 (Thinking), Claude Opus 4.6 (Thinking).",
+  "_agy_models_seen": "2026-09-16 (refreshed from `agy models`): Gemini 3.8 / 3.7 / 3.6 Flash (High/Medium/Low), Gemini 3.1 Pro (Low/High), GPT-OSS 120B (Medium), Claude Sonnet 4.6 (Thinking), Claude Opus 4.6 (Thinking). Gemini 3.5 Flash is GONE from agy as of this refresh; its model_prices entries are kept so historical log rows still price correctly on replay.",
   "time_routing": "off",
   "_time_routing_note": "off by default: time routing may only be turned on once peak_wib is filled from measured data (`--analyze`). 'advisory' logs the reorder it would do without applying it.",
   "backends": {
@@ -63,6 +63,16 @@
       "max_tokens": 8192,
       "credential_hint": "Free tier: create a key at https://console.groq.com/keys, then `echo 'GROQ_API_KEY=...' >> .env` in the workspace root",
       "_note": "Free tier, very fast. Model ids move faster here than at other vendors, so confirm with `run.py --setup`, which lists what the key can actually see rather than trusting the id below."
+    },
+    "ollama": {
+      "type": "openai-compatible",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "base_url_env": "OLLAMA_BASE_URL",
+      "no_auth": true,
+      "flat_rate": true,
+      "max_tokens": 4096,
+      "credential_hint": "Local Ollama, no token. Start it with `ollama serve` and pull the model with `ollama pull gpt-oss:120b`. Running in WSL or on another box: set OLLAMA_BASE_URL=http://<host>:11434/v1",
+      "_note": "Ollama's OpenAI-compatible endpoint (/v1), NOT /api/generate. /v1 is what returns parsed content and a tool_calls array; the native path leaves the model's raw harmony JSON in the body, which is how tool calls end up printed as text instead of executed. Local weights, so marginal cost is 0: flat_rate records actual_usd=0 and keeps the published gpt-oss rate in metered_equiv_usd for the counterfactual. LAST in every chain on purpose. A local 120B is the fallback for when nothing else is reachable, not the lead."
     }
   },
   "known_agy_models": [],
@@ -98,10 +108,6 @@
         1.5,
         9.0
       ],
-      "gemini-2.5-flash": [
-        1.5,
-        9.0
-      ],
       "llama-3.3-70b-versatile": [
         0.59,
         0.79
@@ -109,6 +115,22 @@
       "openai/gpt-oss-120b": [
         0.04,
         0.1
+      ],
+      "gpt-oss:120b": [
+        0.04,
+        0.1
+      ],
+      "gpt-oss:20b": [
+        0.04,
+        0.1
+      ],
+      "gemini-3.8-flash": [
+        0.75,
+        3.75
+      ],
+      "Gemini 3.8 Flash (High)": [
+        0.75,
+        3.75
       ]
     },
     "by_family": {
@@ -131,6 +153,18 @@
       "GPT-OSS": [
         0.04,
         0.1
+      ],
+      "Gemini 3.8 Flash": [
+        0.75,
+        3.75
+      ],
+      "Gemini 3.7 Flash": [
+        0.75,
+        3.75
+      ],
+      "Gemini 3.6 Flash": [
+        0.75,
+        3.75
       ]
     },
     "estimated_models": [
@@ -139,9 +173,10 @@
       "kimi-latest",
       "kimi",
       "ag/gemini-3-flash",
-      "gemini-2.5-flash",
       "llama-3.3-70b-versatile",
-      "openai/gpt-oss-120b"
+      "openai/gpt-oss-120b",
+      "gpt-oss:120b",
+      "gpt-oss:20b"
     ],
     "claude_tiers": {
       "haiku": [
@@ -160,7 +195,8 @@
         5.0,
         25.0
       ]
-    }
+    },
+    "_gemini_38_price_note": "gemini-3.8-flash at the INTRODUCTORY rate $0.75/$3.75 per Mtok, published, valid through 2026-12-31. Standard $1.50/$7.50 takes effect 2027-01-01: bump it then, or every saving figure against Claude reads 2x too good. Source: ai.google.dev/gemini-api/docs/pricing"
   },
   "subscriptions": {
     "_note": "Flat monthly outlay in USD for each subscription backend, shown on the dashboard as context and NEVER folded into per-call cost. Zeros here mean 'not subscribed'. Put your real figures in models.local.json, which is gitignored."
@@ -172,7 +208,7 @@
     "_note": "capability -> ordered backend+model candidates, grounded in model strengths/context. Tasks reference one of these. Cost is NOT the only axis here (context window + lineage matter); the cost dashboard reveals where a choice does/doesn't save vs its claude_fallback so chains can be retuned from data.",
     "_bulk_cheap_note": "OWNER DECISION 2026-07-04: Gemini Flash stays lead for harvest even though the cost log shows GLM is cheaper per-call. Reason: the Gemini (agy) subscription is rarely used otherwise, so subscription utilization outweighs the per-call savings. Do NOT 'optimize' this back to GLM-first based on agy_usage_log alone.",
     "bulk-cheap": [
-      "Gemini 3.5 Flash (High)",
+      "Gemini 3.8 Flash (High)",
       "Gemini 3.1 Pro (Low)",
       {
         "backend": "9router",
@@ -180,11 +216,15 @@
       },
       {
         "backend": "gemini",
-        "model": "gemini-2.5-flash"
+        "model": "gemini-3.8-flash"
       },
       {
         "backend": "groq",
         "model": "llama-3.3-70b-versatile"
+      },
+      {
+        "backend": "ollama",
+        "model": "gpt-oss:120b"
       }
     ],
     "reasoning": [
@@ -192,7 +232,7 @@
       "GPT-OSS 120B (Medium)",
       {
         "backend": "gemini",
-        "model": "gemini-2.5-flash"
+        "model": "gemini-3.8-flash"
       }
     ],
     "cross-lineage": [
@@ -205,18 +245,26 @@
       {
         "backend": "groq",
         "model": "openai/gpt-oss-120b"
+      },
+      {
+        "backend": "ollama",
+        "model": "gpt-oss:120b"
       }
     ],
     "long-context": [
       "Gemini 3.1 Pro (High)",
-      "Gemini 3.5 Flash (High)"
+      "Gemini 3.8 Flash (High)"
     ],
     "draft": [
-      "Gemini 3.5 Flash (High)",
+      "Gemini 3.8 Flash (High)",
       "Gemini 3.1 Pro (High)",
       {
         "backend": "gemini",
-        "model": "gemini-2.5-flash"
+        "model": "gemini-3.8-flash"
+      },
+      {
+        "backend": "ollama",
+        "model": "gpt-oss:120b"
       }
     ],
     "_draft_flash_note": "OWNER DECISION 2026-07-22: Gemini 3.5 Flash promoted to HEAD of the draft chain (was glm-5.2-first), same rationale as bulk-cheap -> utilize the idle Gemini/agy subscription. glm-5.2 stays fallback #2. reasoning/critic intentionally NOT changed: GLM keeps the lead there for reasoning depth + cross-lineage diversity.",

@@ -272,7 +272,18 @@ def main():
     os.makedirs(rec_dir, exist_ok=True)
     base = os.path.join(rec_dir, f"{now_stamp()}_{slugify(args.title)}")
     marker = base + ".recording"
-    open(marker, "w").close()
+    # The marker carries this process's pid, not just its existence.
+    #
+    # The app decides whether a leftover marker is a live capture or the debris of a crash. Without
+    # a pid the only way to ask is to scan the whole process table for "recorder.py", which cannot
+    # say WHICH recording an answer belongs to: one live capture then protects every stale marker
+    # beside it, and on Windows the scan reports its own failure as "alive", which turns the app's
+    # Stop button into a silent no-op. One integer removes all of that.
+    #
+    # Still just a file whose presence is the contract -- an older app reads the same marker, sees
+    # it exists, and behaves exactly as it did before.
+    with open(marker, "w") as fh:
+        fh.write(str(os.getpid()))
     start = datetime.datetime.now(datetime.timezone.utc)
     screen = None
     if args.video:

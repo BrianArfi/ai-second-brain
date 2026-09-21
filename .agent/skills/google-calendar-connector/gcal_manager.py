@@ -327,6 +327,15 @@ def list_events(days_back=7, days_forward=7, profile='default', as_json=False):
                 }
                 for a in event.get('attendees', [])
             ],
+            # Carried through so a session can verify a pre-read actually
+            # attached, rather than trusting that the patch reported success.
+            'attachments': [
+                {
+                    'title': f.get('title', ''),
+                    'fileUrl': f.get('fileUrl', ''),
+                }
+                for f in event.get('attachments', [])
+            ],
         })
         if not as_json:
             print(f"{start} - {summary}")
@@ -555,7 +564,44 @@ def run_mcp_server(profile='default'):
 
     server.run(transport="stdio")
 
-def create_event(summary, start_time, end_time, description=None, profile='default', attendees=None, add_meet=True, tz='Asia/Jakarta'):
+_DRIVE_MIME_BY_PATH = {
+    '/document/': 'application/vnd.google-apps.document',
+    '/spreadsheets/': 'application/vnd.google-apps.spreadsheet',
+    '/presentation/': 'application/vnd.google-apps.presentation',
+    '/forms/': 'application/vnd.google-apps.form',
+}
+
+def build_attachments(spec):
+    """Turn a --attach string into Calendar API attachment objects.
+
+    Entries are separated by a semicolon, not a comma, because the title of a
+    document routinely contains a comma and splitting on it cut the title in
+    half and turned the tail into a second, broken attachment. Each entry is a
+    Drive URL or a bare Drive file id, with an optional title after a pipe:
+    `<url>|Finance sign-off doc`. Without a title Google shows the raw link,
+    which tells the reader nothing, so pass the title every time.
+    """
+    attachments = []
+    for raw in spec.split(';'):
+        entry = raw.strip()
+        if not entry:
+            continue
+        url, _, title = entry.partition('|')
+        url = url.strip()
+        title = title.strip()
+        if not url.startswith('http'):
+            url = f'https://drive.google.com/open?id={url}'
+        item = {'fileUrl': url}
+        if title:
+            item['title'] = title
+        for path, mime in _DRIVE_MIME_BY_PATH.items():
+            if path in url:
+                item['mimeType'] = mime
+                break
+        attachments.append(item)
+    return attachments
+
+def create_event(summary, start_time, end_time, description=None, profile='default', attendees=None, add_meet=True, tz='Asia/Jakarta', attach=None):
     """Create a new calendar event. By default attaches a Google Meet link."""
     creds = authenticate(profile)
     if not creds:
@@ -587,12 +633,16 @@ def create_event(summary, start_time, end_time, description=None, profile='defau
             }
         }
 
+    if attach:
+        event['attachments'] = build_attachments(attach)
+
     try:
         event_result = service.events().insert(
             calendarId='primary',
             body=event,
             sendUpdates='all',
             conferenceDataVersion=1 if add_meet else 0,
+            supportsAttachments=True,
         ).execute()
         print(f"Event created: {event_result.get('htmlLink')}")
         meet_link = event_result.get('hangoutLink')
@@ -608,7 +658,7 @@ def create_event(summary, start_time, end_time, description=None, profile='defau
 
 def update_event(event_id, profile='default', summary=None, start_time=None,
                  end_time=None, description=None, attendees=None, notify=True,
-                 tz='Asia/Jakarta'):
+                 tz='Asia/Jakarta', attach=None):
     """Patch an existing event in place. Only the fields passed are touched.
 
     Kept separate from create_event so that fixing a typo or adding a pre-read
@@ -632,9 +682,11 @@ def update_event(event_id, profile='default', summary=None, start_time=None,
         body['end'] = {'dateTime': end_time, 'timeZone': tz}
     if attendees:
         body['attendees'] = [{'email': e.strip()} for e in attendees.split(',')]
+    if attach:
+        body['attachments'] = build_attachments(attach)
 
     if not body:
-        print("Nothing to update: pass at least one of --summary/--start/--end/--desc/--attendees.")
+        print("Nothing to update: pass at least one of --summary/--start/--end/--desc/--attendees/--attach.")
         return None
 
     try:
@@ -643,6 +695,7 @@ def update_event(event_id, profile='default', summary=None, start_time=None,
             eventId=event_id,
             body=body,
             sendUpdates='all' if notify else 'none',
+            supportsAttachments=True,
         ).execute()
         print(f"Event updated: {result.get('htmlLink')}")
         print(f"Fields changed: {', '.join(sorted(body))}")
@@ -767,6 +820,7 @@ def main():
     create_parser.add_argument('--attendees', help='Comma-separated emails of attendees')
     create_parser.add_argument('--desc', help='Description')
     create_parser.add_argument('--no-meet', action='store_true', help='Do NOT attach a Google Meet link (default: attach)')
+    create_parser.add_argument('--attach', help="Drive files to attach, separated by ';': '<url or file id>|<title>'. The title is what the chip shows, so pass it.")
     create_parser.add_argument('--profile', default='default', choices=['default', 'work', 'secondary'], help='Authentication profile to use')
 
     # Update command
@@ -779,6 +833,7 @@ def main():
     update_parser.add_argument('--attendees', help='Comma-separated emails, REPLACES the current list')
     update_parser.add_argument('--desc', help='New description')
     update_parser.add_argument('--no-notify', action='store_true', help='Do NOT email attendees about the change')
+    update_parser.add_argument('--attach', help="Drive files separated by ';', REPLACES the current attachment list: '<url or file id>|<title>'")
     update_parser.add_argument('--profile', default='default', choices=['default', 'work', 'secondary'], help='Authentication profile to use')
 
     # RSVP command: answer an invite. Never use `update --attendees` for this;
@@ -817,11 +872,11 @@ def main():
     elif args.command == 'mcp':
         run_mcp_server(args.profile)
     elif args.command == 'create':
-        create_event(args.summary, args.start, args.end, args.desc, args.profile, args.attendees, add_meet=not args.no_meet, tz=args.tz)
+        create_event(args.summary, args.start, args.end, args.desc, args.profile, args.attendees, add_meet=not args.no_meet, tz=args.tz, attach=args.attach)
     elif args.command == 'update':
         update_event(args.event_id, args.profile, args.summary, args.start,
                      args.end, args.desc, args.attendees, notify=not args.no_notify,
-                     tz=args.tz)
+                     tz=args.tz, attach=args.attach)
     elif args.command == 'rsvp':
         rsvp_event(args.event_id, args.response, args.profile, args.find)
     else:

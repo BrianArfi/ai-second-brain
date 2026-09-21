@@ -25,7 +25,7 @@ Usage:
 
 Auth reuses the same token as gdocs_create.py (per --account).
 """
-import os, sys, argparse
+import os, sys, argparse, json
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
@@ -125,8 +125,14 @@ def solve_widths(demands, total, min_pt=MIN_COL_PT, max_pt=None):
     return [w * total / s for w in widths] if s > 0 else [total / ncols] * ncols
 
 def svc(account):
+    # Load with the scopes the token was ACTUALLY granted, not the ones this
+    # script would like. google-auth replays the credential's scope list on
+    # refresh, so forcing SCOPES here made Google reject a drive-only token
+    # with invalid_scope. The drive scope already covers the Docs API, so the
+    # documents scope is optional. Caught 11 Sep 2026 on the work token.
     tok = ACCOUNTS[account]
-    c = Credentials.from_authorized_user_file(tok, SCOPES)
+    granted = json.load(open(tok)).get('scopes') or SCOPES
+    c = Credentials.from_authorized_user_file(tok, granted)
     if not c.valid and c.expired and c.refresh_token:
         c.refresh(Request()); open(tok, 'w').write(c.to_json())
     return build('docs', 'v1', credentials=c)

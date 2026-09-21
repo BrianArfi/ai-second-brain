@@ -32,6 +32,7 @@ other way half the ledger disappears.
 """
 
 import json
+import re
 
 # Ranked so a merge can tell "more advanced" from "less". A record only ever
 # moves up this list, never down, which is what makes the merge safe to apply in
@@ -47,6 +48,26 @@ def _num(value):
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+def _strip_markup(text):
+    """Slack's own formatting marks, removed so two copies compare on words.
+
+    Also flattens `<url|label>` to `<url>`. Records written by the older sweep
+    dropped the label, so the same link reads differently on the two sides and a
+    byte comparison diverges at the first URL in the message.
+    """
+    text = re.sub(r'<([^>|]+)\|[^>]*>', r'<\1>', text)
+    return re.sub(r'\s+', ' ', re.sub(r'[*_~`]', '', text)).strip()
+
+def _is_cut_copy(shorter, longer):
+    """True when `shorter` is `longer` stopped early, rather than a real edit.
+
+    A plain prefix test is not enough on its own. Some records were normalised on
+    the way in and lost Slack's `*bold*` marks, so the stored copy of Teammate's 14
+    Sep message diverges from the refetched one at character 16 while still being
+    the same sentence. Compare on words, not on bytes.
+    """
+    return _strip_markup(longer).startswith(_strip_markup(shorter))
 
 def _merge_item(a, b):
     """One item id present on both sides. The more advanced record wins."""
@@ -68,6 +89,18 @@ def _merge_item(a, b):
     for key in ('context', 'permalink', 'channel_name', 'thread_ts', 'text'):
         if not merged.get(key) and loser.get(key):
             merged[key] = loser[key]
+    # A cut copy of the message is never the better one. Records written before
+    # 15 Sep 2026 hold `text[:600]`, and `rehydrate_texts.py` refetches the whole
+    # message, so the two copies differ only in that one stops early. The status
+    # tie-break above has no opinion about that and would keep whichever side
+    # happened to win, which silently threw the refetch away. Prefix means
+    # truncation, so take the longer one. Anything else is a real edit, and there
+    # the winner's own text stands.
+    text_a, text_b = a.get('text') or '', b.get('text') or ''
+    if text_a and text_b and text_a != text_b:
+        longer, shorter = (text_a, text_b) if len(text_a) > len(text_b) else (text_b, text_a)
+        if _is_cut_copy(shorter, longer):
+            merged['text'] = longer
     # The earliest sighting is the true one; a second machine seeing it later
     # does not make it newer.
     first_seen = [x.get('first_seen') for x in (a, b) if x.get('first_seen')]

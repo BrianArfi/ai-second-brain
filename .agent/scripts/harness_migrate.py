@@ -520,17 +520,25 @@ def cmd_check(args):
 def cmd_link_memory(args):
     root = repo_root()
     slug = slugify_cwd(root)
-    mem = os.path.join(PROJECTS_DIR, slug, 'memory')
-    repo_mem = os.path.join(root, REPO_MEMORY_REL)
+    mem = os.path.normpath(os.path.join(PROJECTS_DIR, slug, 'memory'))
+    # normpath, because a mixed separator path ("C:/x\y") makes cmd mklink read
+    # the second component as a switch and fail with 'Invalid switch - "Users"'.
+    repo_mem = os.path.normpath(os.path.join(root, REPO_MEMORY_REL))
     dry = args.dry_run
 
     def say(msg):
         print(('would ' if dry else '') + msg)
 
+    # Already pointing at the repo? Say so and stop. This tests realpath rather
+    # than islink() because a Windows directory junction, which is what the
+    # fallback below creates, reports islink() == False. On 16 Sep 2026 that
+    # made a re-run treat its own junction as a plain directory, move it to
+    # .pre-link, and leave a junction nested inside the restored copy.
+    if os.path.realpath(mem) == os.path.realpath(repo_mem):
+        print(f'already linked: {mem} -> {repo_mem}')
+        return 0
+
     if os.path.islink(mem):
-        if os.path.realpath(mem) == os.path.realpath(repo_mem):
-            print(f'already linked: {mem} -> {repo_mem}')
-            return 0
         print(f'ERROR: {mem} is a symlink to {os.path.realpath(mem)}, not to the repo.')
         print('Remove it by hand first; refusing to guess which side is authoritative.')
         return 1
@@ -540,6 +548,7 @@ def cmd_link_memory(args):
         os.makedirs(repo_mem, exist_ok=True)
 
     moved = kept = 0
+    backup = None
     if os.path.isdir(mem):
         for name in sorted(os.listdir(mem)):
             src, dst = os.path.join(mem, name), os.path.join(repo_mem, name)
@@ -567,7 +576,27 @@ def cmd_link_memory(args):
             print(f'original directory kept at {backup} until you are satisfied')
 
     if not dry:
-        os.symlink(repo_mem, mem)
+        try:
+            os.symlink(repo_mem, mem)
+        except OSError:
+            # Windows refuses os.symlink without SeCreateSymbolicLinkPrivilege
+            # (WinError 1314), which needs admin or developer mode. A directory
+            # junction needs neither and reads the same to every tool, so fall
+            # back to one rather than leaving this machine with NO memory dir:
+            # the store was already moved to .pre-link above, so a bare raise
+            # here un-learns every lesson on this box. Hit 16 Sep 2026.
+            if os.name != 'nt':
+                raise
+            rc = subprocess.call(['cmd', '/c', 'mklink', '/J', mem, repo_mem],
+                                 stdout=subprocess.DEVNULL)
+            if rc != 0 or not os.path.isdir(mem):
+                if backup:
+                    shutil.move(backup, mem)   # put the store back, then fail loudly
+                    print(f'ERROR: could not link {mem}; original restored.')
+                else:
+                    print(f'ERROR: could not link {mem}.')
+                return 1
+            print('used a directory junction (Windows symlinks need admin)')
     say(f'symlink {mem} -> {repo_mem}')
     print()
     print(f'{moved} file(s) moved, {kept} already present.')

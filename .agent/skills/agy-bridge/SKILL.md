@@ -20,7 +20,9 @@ configuring a backend would take. The rest of this file describes the (optional)
 
 Call **non-Claude models as a co-processor** from inside this Claude Code harness, **prove the
 cost savings**, and route by **model expertise + time of day**. Two backends:
-- **agy**: Gemini 3.5 Flash / Gemini 3.1 Pro / GPT-OSS 120B via the Antigravity CLI.
+- **agy**: Gemini 3.8 Flash / Gemini 3.1 Pro / GPT-OSS 120B via the Antigravity CLI.
+  Model ids move. `agy models` had dropped Gemini 3.5 Flash by 2026-09-16 while three chains still
+  led with it, so re-run `--setup --write` whenever a chain entry starts failing.
 - **zai**: GLM 5.2 via the z.ai GLM Coding Plan. **RETIRED 2026-07-27** (subscription ended; live
   calls error out). Removed from every chain, backend definition kept for cost-history replay and
   a one-line restore. Do NOT pass `--backend zai` or re-add it to a chain without a passing
@@ -37,6 +39,7 @@ other model. Every task ends in a `claude_fallback` tier so quality never silent
 | `groq` | openai-compatible | **free tier** | `GROQ_API_KEY` |
 | `agy` | cli | Antigravity subscription | install `agy`, run once to authenticate |
 | `9router` | openai-compatible | local, no key | run the daemon on `127.0.0.1:20128` |
+| `ollama` | openai-compatible | local, no key | `ollama serve` on `127.0.0.1:11434`; override host with `OLLAMA_BASE_URL` |
 | `kimi` | anthropic-compatible | paid | `KIMI_CODE_TOKEN` |
 | `zai` | anthropic-compatible | RETIRED 2026-07-27 | see below |
 
@@ -54,10 +57,10 @@ A task resolves a **capability** → an ordered candidate list in `models.json` 
 
 | `--task` | capability | chain (head → fallback) | claude_fallback |
 | :-- | :-- | :-- | :-- |
-| `harvest` | bulk-cheap | Gemini 3.5 Flash (High) → Gemini 3.1 Pro (Low) | haiku |
+| `harvest` | bulk-cheap | Gemini 3.8 Flash (High) → Gemini 3.1 Pro (Low) | haiku |
 | `critic` | cross-lineage | GPT-OSS 120B → Gemini 3.1 Pro (High) → kimi-latest | sonnet |
 | `research` | reasoning | Gemini 3.1 Pro (High) → GPT-OSS 120B | main-loop |
-| `draft` | draft | Gemini 3.5 Flash (High) → Gemini 3.1 Pro (High) | sonnet |
+| `draft` | draft | Gemini 3.8 Flash (High) → Gemini 3.1 Pro (High) | sonnet |
 
 Capability candidates are grounded in model strengths/context: GPT-OSS (128K) is excluded from
 long-context/bulk; Flash (1M, fast) leads bulk and draft; Gemini Pro leads reasoning; GPT-OSS
@@ -173,8 +176,25 @@ default and that guard needs to be per-account rather than inherited.
   it forwards the audio first -- `meeting-recorder/transcribe.py --verify-providers` is that proof,
   and exists because of this.
 
+- **ollama** (`type: openai-compatible`): local weights on `127.0.0.1:11434/v1`. No token, no cloud,
+  no quota. It exists so a weak open model has a job it can actually do: one narrow prompt in, text
+  out, no tools.
+
+  **Use the `/v1` path, never `/api/generate`.** The native path returns the model's raw tool-call
+  JSON inside the message body. Nothing parses it, so the app prints it as the reply, which is how
+  a gpt-oss session ends up showing `{"file_path": ...}` blocks on screen instead of reading a file.
+  The `/v1` endpoint returns parsed content and a real `tool_calls` array.
+
+  The daemon is not always on loopback: it may run in WSL, in a container, or on another machine.
+  Set `OLLAMA_BASE_URL` rather than editing `models.json`, because the same config is read from all
+  three checkouts. `--doctor` and `--setup` report whether it is reachable.
+
+  It is the LAST candidate in `bulk-cheap`, `cross-lineage` and `draft`, and is deliberately absent
+  from `reasoning`. A local 120B is what you fall back to when nothing else is reachable, not what
+  you lead with, and it never gets the tasks where the reasoning is the deliverable.
+
 Adding any OpenAI-compatible endpoint is now a `models.json` entry, not code: set `type`,
-`base_url`, and either `token_env` or `no_auth`.
+`base_url`, and either `token_env` or `no_auth`. Add `base_url_env` when the host can move.
 
 ## Usage
 
