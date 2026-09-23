@@ -106,6 +106,8 @@ A web chat forgets you the moment you close the tab. A second brain does the opp
    →  it asks before every send, without being reminded
 ```
 
+**The rules it starts with.** A fresh copy does not start blank. [`CLAUDE.md.template`](CLAUDE.md.template) ships a **Standing Rules** section carried over from months of daily use: do the work instead of reporting on it, never claim an action that has not happened, verify before reporting, treat a question as a question, answer first and stop. Each rule is there because leaving it out caused a real failure that repeated. The desktop app reads the same block, so both start from the same lessons.
+
 Over weeks this adds up. Your voice, your formatting, the people who own what, the decisions already made, the mistakes it should never repeat. The brain you use in month three is measurably better tuned to you than the one you started with, because it kept every lesson along the way.
 
 ---

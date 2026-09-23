@@ -94,6 +94,22 @@ CLAUDE_SKIP_DIRS = {'shell-snapshots', 'plugins', 'cache', 'session-env',
                     'file-history', 'telemetry', 'downloads', 'ide', 'backups',
                     'sessions'}
 
+# Produced content never travels, only the record of the work: notes, config,
+# and transcripts. Decided by the owner 23 Sep 2026, after the ASB workspace turned
+# out to be 3.5 GB of rendered videos out of 3.9 GB. Media is either reproducible
+# from its project or already published, and a bundle this size is one nobody
+# moves. Matched by extension, so a video under notes/ is skipped too.
+CONTENT_EXTS = {
+    # video
+    '.mp4', '.mov', '.mkv', '.webm', '.avi', '.m4v',
+    # audio
+    '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.opus',
+    # images
+    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.heic', '.psd',
+    # archives and installers
+    '.zip', '.tar', '.gz', '.tgz', '.7z', '.rar', '.dmg', '.exe', '.msi', '.appimage',
+}
+
 # ---------------------------------------------------------------------------
 # credentials
 #
@@ -297,6 +313,12 @@ def slugify_cwd(path):
     return re.sub(r'[^A-Za-z0-9]', '-', os.path.abspath(path))
 
 def asb_dir():
+    # Explicit override first, so a test can point at an empty sandbox instead of
+    # the real app data: without it the migrate test archived this machine's live
+    # ASB workspace (3.9 GB) and timed out.
+    override = os.environ.get('ASB_DIR')
+    if override is not None:
+        return override if os.path.isdir(override) else None
     for c in ASB_DIR_CANDIDATES:
         if os.path.isdir(c):
             return c
@@ -673,6 +695,7 @@ def cmd_export(args):
                 'and send the passphrase over a different channel than the bundle.')
 
     added = []
+    skipped_content = []
 
     def add(src, arc):
         if not os.path.exists(src):
@@ -688,6 +711,9 @@ def cmd_export(args):
         if parts & CLAUDE_SKIP_DIRS:
             return None
         if base in ('.DS_Store', '.lock'):
+            return None
+        if info.isfile() and os.path.splitext(base)[1].lower() in CONTENT_EXTS:
+            skipped_content.append(info.size)
             return None
         # `memory` is a symlink into the repo once link-memory has run, so git
         # already carries its contents. Archiving the link would restore a
@@ -740,6 +766,12 @@ def cmd_export(args):
         if ad:
             for f in ASB_STATE_FILES:
                 add(os.path.join(ad, f), f'asb/{f}')
+            # The app's own chat transcripts. sessions.json above carries only
+            # titles and costs; this is what was actually said, and it was the
+            # one thing the bundle never carried.
+            if not args.no_transcripts and os.path.isdir(os.path.join(ad, 'transcripts')):
+                add(os.path.join(ad, 'transcripts'), 'asb/transcripts')
+                print('  + ASB chat transcripts')
             bundled = os.path.join(ad, 'workspace')
             if os.path.isdir(bundled):
                 add(bundled, 'asb/workspace')
@@ -747,6 +779,9 @@ def cmd_export(args):
 
     size = os.path.getsize(bundle)
     print()
+    if skipped_content:
+        print(f'left out {len(skipped_content)} media/content file(s), '
+              f'{human(sum(skipped_content))}: content does not travel, transcripts do')
     print(f'done: {bundle} ({human(size)})')
     print(f'{len(added)} tree(s) included. On the target machine:')
     print(f'  python3 .agent/scripts/harness_migrate.py import --bundle {os.path.basename(bundle)} \\')
@@ -829,12 +864,13 @@ def restore_asb_state(staging, bundle, ad, src_repo, target_repo, dry):
                 shutil.copy2(d, d + '.pre-import')
             shutil.copy2(s, d)
 
-    bundled = os.path.join(s_asb, 'workspace')
-    if os.path.isdir(bundled):
-        d = os.path.join(ad, 'workspace')
-        print(f'  asb/workspace -> {d}')
-        if not dry:
-            shutil.copytree(bundled, d, dirs_exist_ok=True)
+    for sub in ('workspace', 'transcripts'):
+        src = os.path.join(s_asb, sub)
+        if os.path.isdir(src):
+            d = os.path.join(ad, sub)
+            print(f'  asb/{sub} -> {d}')
+            if not dry:
+                shutil.copytree(src, d, dirs_exist_ok=True)
 
 def restore_credentials(staging, target_repo, manifest, args):
     """Decrypt and lay the credential files back down inside the target repo.

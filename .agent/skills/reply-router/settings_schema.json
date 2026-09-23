@@ -6,14 +6,6 @@
   "config_key": "auto_reply_drafts",
   "state_path": "journal/state/reply_router_state.json",
   "health_command": ".agent/skills/reply-router/scripts/reply_router.py health",
-  "job": "reply-router",
-  "depends_on": {
-    "kind": "app_setting",
-    "id": "scheduled_runs",
-    "label": "Scheduled runs",
-    "where": "Settings, Routines",
-    "help": "This automation is a scheduled routine. With scheduled runs switched off it never fires, no matter what its own switch says."
-  },
   "settings": [
     {
       "key": "enabled",
@@ -58,7 +50,10 @@
       "key": "quiet_hours_wib",
       "label": "Quiet hours (WIB)",
       "type": "hour_range",
-      "default": [0, 6],
+      "default": [
+        0,
+        6
+      ],
       "help": "No drafts are written inside this window. Messages arriving here are held and drafted once the window ends."
     },
     {
@@ -82,9 +77,15 @@
       "key": "sources",
       "label": "Sources",
       "type": "enum",
-      "options": ["slack", "gmail"],
-      "default": ["slack"],
+      "options": [
+        "slack",
+        "gmail"
+      ],
+      "default": [
+        "slack"
+      ],
       "help": "Which inboxes are watched. A source switched off means its messages are held, and they are drafted if it is switched back on."
     }
-  ]
+  ],
+  "_hosted_by": "The ASB app's own ticker (src-tauri/src/auto_drafts.rs), switched by journal/state/automation_config.json auto_reply_drafts.enabled. Not a routines.json job since 19 Sep 2026, so it names no job and no scheduled_runs parent: that switch does not gate it."
 }

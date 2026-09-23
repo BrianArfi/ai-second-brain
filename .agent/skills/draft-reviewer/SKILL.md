@@ -28,6 +28,7 @@ The caller provides: the draft text, the draft type (PRD / MOM / Slack / weekly 
    - over 200 characters with no fact that could not be dropped, or content that should have been two short messages
    - a heading, a table, a bold lead-in, three or more bullets, or a sign-off
    - an ask written as an instruction with no question mark and no softener ("ya", "right?", "can you")
+   - a `ya?` on anything that is not a yes/no confirmation question. The softener is bare `ya` with no question mark; `ya?` asks the recipient to confirm, so on a statement or a hand-over it reads as unsure or passive-aggressive. Quote the line and give the fix (drop the question mark).
    - `Please find`, `Kindly`, `As discussed`, `Circling back`, `Additionally`, `Furthermore`, `That said`, `Moving forward`, `Best regards`
    - a closing line that recaps the message, or the other person's message restated back to them before the answer
    - English written to somebody the owner speaks Indonesian with in that thread

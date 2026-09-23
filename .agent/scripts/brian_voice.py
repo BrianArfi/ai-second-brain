@@ -23,8 +23,9 @@ FALLBACK = (
     "HOW OWNER WRITES ON SLACK\n"
     "His median Slack message is 61 characters and 75% are under 200. Write short. One "
     "message, one thing. Lowercase is normal. Soften every ask with a sentence-final "
-    "'ya', a question, or 'right?'. Ask rather than instruct. No em-dash, no heading, no "
-    "bold, no table, no sign-off, no closing recap."
+    "'ya' (no question mark), a question, or 'right?'. 'ya?' with a question mark is only "
+    "for a yes/no confirmation, never on a statement or an instruction. Ask rather than "
+    "instruct. No em-dash, no heading, no bold, no table, no sign-off, no closing recap."
 )
 
 _cache = None

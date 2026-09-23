@@ -41,6 +41,14 @@ from datetime import datetime, timedelta, timezone
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
 
+# Windows' cp1252 console can't print the priority flag emoji or non-ASCII names in a checkout.
+# Force UTF-8 on the streams instead of stripping them.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8')
+    except (AttributeError, ValueError):
+        pass
+
 # Slack sends `<@<SLACK_ID>>`, not `@Teammate`. Without this, every "Original:" line below quotes a
 # message that names nobody, which is what the owner was reading on 25 Aug 2026. Shared with the rest
 # of the harness, and behaviourally identical to the Rust half in the ASB app's slackpush.rs.
@@ -49,6 +57,7 @@ from slack_text import render as slack_render  # noqa: E402
 from brian_voice import voice_block  # noqa: E402
 STATE_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'reply_queue.json')
 LEDGER_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'slack_mention_ledger.json')
+AUTOMATION_CONFIG_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'automation_config.json')
 TOKEN_ENV = os.path.join(BASE_DIR, '.agent', 'skills', 'slack-connector', 'token.env')
 AGY_BRIDGE = os.path.join(BASE_DIR, '.agent', 'skills', 'agy-bridge', 'run.py')
 OUTPUT_DIR = os.path.join(BASE_DIR, 'journal')
@@ -79,22 +88,36 @@ VOICE_PROMPT_HEADER = (
 
 def load_state():
     if os.path.exists(STATE_PATH):
-        with open(STATE_PATH) as f:
+        with open(STATE_PATH, encoding='utf-8') as f:
             return json.load(f)
     return {'items': {}, 'last_run': None}
 
 def save_state(state):
     os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
     tmp = STATE_PATH + '.tmp'
-    with open(tmp, 'w') as f:
+    with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(state, f, indent=1, ensure_ascii=False)
     os.replace(tmp, STATE_PATH)
 
 def load_ledger():
     if not os.path.exists(LEDGER_PATH):
         return {'items': {}, 'user_names': {}}
-    with open(LEDGER_PATH) as f:
+    with open(LEDGER_PATH, encoding='utf-8') as f:
         return json.load(f)
+
+def auto_reply_drafts_off():
+    """Same toggle reply_router.py checks (journal/state/automation_config.json,
+    key auto_reply_drafts). One switch, both drafting paths. Returns a reason
+    string if off, else None."""
+    if not os.path.exists(AUTOMATION_CONFIG_PATH):
+        return None
+    with open(AUTOMATION_CONFIG_PATH, encoding='utf-8') as f:
+        cfg = json.load(f).get('auto_reply_drafts', {})
+    if not cfg.get('enabled', True):
+        return 'Auto reply drafts is off (toggle it in ASB Settings > Routines).'
+    if not cfg.get('sources', {}).get('slack', True):
+        return 'Auto reply drafts is off for Slack (toggle it in ASB Settings > Routines).'
+    return None
 
 def text_hash(text):
     return hashlib.sha256((text or '').encode('utf-8')).hexdigest()[:16]
@@ -132,7 +155,7 @@ def run_agy_bridge(prompt_text):
     """Returns (rc, stdout). rc==0 -> stdout is the model's answer text.
     rc==3 -> stdout is the {"status":"fallback_to_claude",...} sentinel JSON."""
     tmp = os.path.join(os.path.dirname(__file__), '.reply_queue_prompt.txt')
-    with open(tmp, 'w') as f:
+    with open(tmp, 'w', encoding='utf-8') as f:
         f.write(prompt_text)
     import subprocess
     out = subprocess.run(
@@ -243,7 +266,7 @@ def write_output(md_text, date_str=None):
     path = output_path(date_str)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + '.tmp'
-    with open(tmp, 'w') as f:
+    with open(tmp, 'w', encoding='utf-8') as f:
         f.write(md_text)
     os.replace(tmp, path)
     return path
@@ -251,6 +274,11 @@ def write_output(md_text, date_str=None):
 # --------------------------------------------------------------- commands --
 
 def cmd_draft(args):
+    off_reason = auto_reply_drafts_off()
+    if off_reason:
+        print(f'{off_reason} Nothing drafted.')
+        return
+
     ledger = load_ledger()
     state = load_state()
     open_items = open_items_sorted(ledger)[:max(1, args.limit)]

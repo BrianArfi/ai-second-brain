@@ -5,7 +5,16 @@ argument-hint: "[optional: the specific lesson, or 'promote' to graduate a recur
 
 Memory dir: `$HOME/.claude/projects/$(printf %s "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}" | tr '/' '-')/memory/`
 
-Note: memory files are per-machine and not in git, so memories saved on macOS do not exist on WSL, and vice versa.
+Note: that directory is a link to `journal/memory/` in the repo, so memory files ARE tracked in git
+and DO travel between Windows, WSL and macOS. A memory saved on one machine reaches the others on
+the next pull. Two things follow:
+
+- **Links inside `MEMORY.md` are relative** (`feedback_x.md`), never absolute. An absolute path
+  names one machine's layout and is dead on the other two. This is the one place the repo's
+  absolute-path rule is inverted, and it is inverted on purpose.
+- **Check for an existing memory with a Windows path**, not `/mnt/c/...` through `wsl.exe`, which
+  fails silently and reads as "the file is not here". That mistake produced a duplicate memory on
+  22 Sep 2026.
 
 1. Read `MEMORY.md` (the index) first so you do not duplicate existing memories.
 2. Review THIS session for extractable patterns:

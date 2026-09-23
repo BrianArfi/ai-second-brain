@@ -24,6 +24,7 @@ Usage:
 """
 import argparse
 import base64
+import html
 import json
 import os
 import re
@@ -135,6 +136,36 @@ def _body_text(payload):
         stack.extend(p.get('parts') or [])
     return '\n'.join(out)
 
+ON_BEHALF_RE = re.compile(
+    r"for the following (?:people|person)\s*:(.*?)(?:Manage sharing|$)",
+    re.I | re.S)
+
+def _beneficiaries(body, asker):
+    """Who actually needs the access.
+
+    Google sends two shapes. "X is requesting access to the following document"
+    means X needs it. "X is requesting access to a document for the following
+    people: a@, b@" means X already has it and a@ and b@ do not. Reading the
+    first email in the body gets the second shape wrong every time, which is how
+    Raouf Cherkawi's 22 Sep ask stayed invisible: Ines Zoubir asked on his
+    behalf, she was granted, and the record closed with him still locked out.
+
+    Returns a list of (email, asked_by_or_None).
+    """
+    text = html.unescape(re.sub(r'<[^>]+>', ' ', body or ''))
+    m = ON_BEHALF_RE.search(text)
+    if m:
+        named = [e.lower() for e in EMAIL_RE.findall(m.group(1))
+                 if not any(s in e.lower() for s in SKIP_SENDERS)]
+        seen, out = set(), []
+        for e in named:
+            if e not in seen:
+                seen.add(e)
+                out.append((e, asker))
+        if out:
+            return out
+    return [(asker, None)]
+
 def drive_requests(days):
     """Share-request emails whose requester STILL has no permission on the file."""
     svc = _gmail()
@@ -159,11 +190,18 @@ def drive_requests(days):
                if not any(s in e.lower() for s in SKIP_SENDERS)]
         if not who:
             continue
-        requester = who[0].lower()
+        for requester, asked_by in _beneficiaries(body, who[0].lower()):
+            _collect(drive, perm_cache, seen, ignore, pending,
+                     fid, requester, asked_by, subject, full)
+    pending.sort(key=lambda r: r['asked_at'])
+    return pending
+
+def _collect(drive, perm_cache, seen, ignore, pending,
+             fid, requester, asked_by, subject, full):
         if (fid, requester) in seen:
-            continue
+            return
         if fid in ignore or f'{fid}::{requester}' in ignore:
-            continue
+            return
         seen.add((fid, requester))
         if fid not in perm_cache:
             try:
@@ -178,17 +216,18 @@ def drive_requests(days):
                 perm_cache[fid] = (None, [], str(e)[:120])
         meta, perms, err = perm_cache[fid]
         if err:
-            continue
+            return
         granted = {(p.get('emailAddress') or '').lower() for p in perms}
         anyone = any(p['type'] == 'anyone' for p in perms)
         domain = {p.get('domain') for p in perms if p['type'] == 'domain'}
         req_domain = requester.split('@')[-1]
         if anyone or requester in granted or req_domain in domain:
-            continue
+            return
         ts = int(full.get('internalDate', '0')) / 1000
         pending.append({
             'source': 'drive',
             'requester': requester,
+            'asked_by': asked_by,
             'doc': meta.get('name'),
             'file_id': fid,
             'shared_drive': bool(meta.get('driveId')),
@@ -197,8 +236,6 @@ def drive_requests(days):
             'grant_cmd': (f"python3 .agent/skills/access-watch/scripts/access_watch.py "
                           f"grant --file {fid} --email {requester} --approved"),
         })
-    pending.sort(key=lambda r: r['asked_at'])
-    return pending
 
 def grant(file_id, email, role='commenter', message=None):
     drive = _drive()
@@ -264,7 +301,8 @@ def cmd_report(args):
         print('**Google Drive share requests** (verified: requester still has no permission)\n')
         for r in drive:
             where = ' *(shared drive, external users blocked by policy)*' if r['shared_drive'] else ''
-            print(f"- **{r['doc']}** · {r['requester']} · {age(r['asked_at'])} ago{where}")
+            via = f" *(asked on his/her behalf by {r['asked_by']})*" if r.get('asked_by') else ''
+            print(f"- **{r['doc']}** · {r['requester']} · {age(r['asked_at'])} ago{via}{where}")
             print(f"  `{r['grant_cmd']}`")
         print()
     if slack:
