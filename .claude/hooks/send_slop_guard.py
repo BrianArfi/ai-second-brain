@@ -178,6 +178,11 @@ VOICE_STRUCTURE = [
     (re.compile(r'(?m)^\s{0,3}\*[^*\n]{1,60}\*\s*:'), 'a bold label opening a paragraph'),
 ]
 
+# The softener is bare "ya". "ya?" asks the recipient to confirm something, so it belongs
+# only on a sentence whose whole point is a yes/no confirmation. Warn on every one and let
+# the writer keep it when the sentence really is asking; a wrong one reads as unsure.
+YA_QUESTION = re.compile(r'(?i)(?<![\w\'])ya\s*\?')
+
 def voice_notes(text, command):
     """Ways an outbound Slack draft does not read like the owner, per the measured model."""
     if 'slack_client.py' not in command:
@@ -186,6 +191,10 @@ def voice_notes(text, command):
     for rx, label in VOICE_STRUCTURE:
         if rx.search(text):
             notes.append(label)
+    if YA_QUESTION.search(text):
+        notes.append('"ya?" - the softener is bare "ya" with no question mark. Keep the '
+                     'question mark only if that sentence is asking for a yes/no '
+                     'confirmation, otherwise drop it')
     bullets = len(re.findall(r'(?m)^\s{0,3}[-*•]\s+\S', text))
     if bullets >= 3:
         notes.append('%d bullets (he uses a list in 8%% of messages, and only for '

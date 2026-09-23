@@ -171,16 +171,6 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/drive_verify.py\"",
-            "timeout": 10
-          }
-        ]
-      },
-      {
         "matcher": "Write|Edit",
         "hooks": [
           {

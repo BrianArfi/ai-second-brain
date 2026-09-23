@@ -49,6 +49,7 @@ import argparse
 import copy
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -149,8 +150,15 @@ def _run_detect(script, timeout=30):
     path = os.path.join(SCRIPT_DIR, script)
     if not os.path.isfile(path):
         return {}
+    # Resolve bash through PATH explicitly. A bare "bash" on Windows goes through
+    # CreateProcess, which searches System32 BEFORE PATH and so finds WSL's
+    # bash.exe: the script then runs inside Linux against a Windows path, exits
+    # nonzero, and every field of the config silently becomes "unknown". That is
+    # why the SessionStart routing hook printed "Session model: unknown" on every
+    # Windows session. shutil.which follows PATH order, which finds Git Bash.
+    bash = shutil.which("bash") or "bash"
     try:
-        out = subprocess.run(["bash", path], capture_output=True, text=True,
+        out = subprocess.run([bash, path], capture_output=True, text=True,
                              timeout=timeout, cwd=REPO_ROOT)
     except Exception:
         return {}

@@ -17,9 +17,9 @@ import run  # noqa: E402  (sibling module)
 PROBE_PROMPT = "Reply with exactly one word: PONG"
 # One cheap, representative model per backend.
 PROBE_TARGETS = [
-    ("agy", "Gemini 3.5 Flash (Low)"),
-    # ("zai", "glm-5.2"),  # retired 2026-07-27: subscription ended, every probe
-    # would log a guaranteed error row and poison --analyze's error-rate stats.
+    # 3.5 Flash is gone from agy (2026-09-16 refresh); 3.8 is the current cheap tier.
+    ("agy", "Gemini 3.8 Flash (Low)"),
+    ("zai", "glm-5.3-flash"),  # resubscribed + probed OK 2026-09-21
 ]
 
 def main():

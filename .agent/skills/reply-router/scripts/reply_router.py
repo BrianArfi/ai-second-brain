@@ -566,6 +566,117 @@ def closed_by_app():
         out[session_id] = path
     return out
 
+# ------------------------------------------------------------- dead dispatch
+# A dispatch is real only once the APP has a chat for it. Writing the request
+# file is not the same thing, and on 21 Sep 2026 two of them came apart: the
+# requests written at 15:21 and 15:31 WIB left the queue without ever becoming
+# a chat. `branches.json` has no entry for either, the transcript folder has no
+# file for either, and neither request reached `.asb/branches/processed` the way
+# the ten healthy ones that day did. The router meanwhile had already recorded
+# both conversations as open, one of them with a claimed session id.
+#
+# An open conversation is never re-dispatched, by design: that is what stops a
+# second chat appearing for the same thread. So a dispatch that dies on the app
+# side is permanent. Teammate's question sat in a thread file nobody would open
+# again, and the only reason it surfaced is that the owner went looking for it.
+#
+# The check below is the missing half of the handshake. Only the machine running
+# the app can perform it, so every other host leaves the conversation alone.
+APP_STATE_DIRS = [
+    os.path.join(os.environ.get("APPDATA", ""), "com.aisecondbrain.desktop"),
+    os.path.expanduser("~/Library/Application Support/com.aisecondbrain.desktop"),
+    os.path.expanduser("~/.config/com.aisecondbrain.desktop"),
+]
+# Long enough that a slow app tick is never mistaken for a dead one: the ticker
+# fires every 5 minutes, and a chat appears within a minute of being picked up.
+DEAD_DISPATCH_SECONDS = 900
+# A conversation the app keeps failing to open is a real fault, not something to
+# retry forever. After this many revivals it stays put and `status` reports it.
+MAX_REVIVALS = 2
+
+def app_state_dir():
+    """The ASB app's own state directory on THIS machine, or None if it has none."""
+    override = os.environ.get("REPLY_ROUTER_APP_STATE")
+    if override:
+        return override if os.path.isdir(override) else None
+    for d in APP_STATE_DIRS:
+        if d and os.path.isdir(d):
+            return d
+    return None
+
+def app_has_chat(conv_key, session_id, opened_at, app_dir):
+    """Did the app actually open a chat for this dispatch?
+
+    Three independent proofs, because any one of them can be absent for an
+    innocent reason: a transcript is written only once the session speaks, a
+    claimed session id arrives only after the session's first command, and
+    `branches.json` is the app's own registry, which is the earliest signal.
+    """
+    if session_id:
+        transcript = os.path.join(app_dir, "transcripts", session_id + ".jsonl")
+        if os.path.exists(transcript):
+            return True
+    branches = _load_json(os.path.join(app_dir, "branches.json"), None)
+    if not isinstance(branches, list):
+        return None  # cannot tell; never guess a chat is dead
+    for entry in branches:
+        if session_id and entry.get("childSessionId") == session_id:
+            return True
+        # No session id yet: match the conversation key the brief carries, and
+        # only on a branch created at or after this dispatch, so an earlier chat
+        # for the same DM cannot vouch for a later one.
+        if conv_key and conv_key in str(entry.get("brief", "")) \
+                and entry.get("createdAtMs", 0) / 1000.0 >= opened_at - 60:
+            return True
+    return False
+
+def revive_dead_dispatches(state, now):
+    """Re-open conversations whose chat never appeared, so the next run redraws them.
+
+    Returns the list of (conversation key, session id) revived. Removing the
+    conversation record is what does the work: its messages leave the "already
+    in a chat" set and become candidates again on this same run.
+    """
+    app_dir = app_state_dir()
+    if not app_dir:
+        return []
+    revived = []
+    convs = state.get("conversations", {})
+    for key in list(convs):
+        conv = convs[key]
+        if conv.get("status") != "open":
+            continue
+        opened_at = conv.get("opened_at", now)
+        if now - opened_at < DEAD_DISPATCH_SECONDS:
+            continue
+        session_id = conv.get("session_id")
+        if app_has_chat(key, session_id, opened_at, app_dir) is not False:
+            continue
+        if conv.get("revivals", 0) >= MAX_REVIVALS:
+            continue
+        convs.pop(key)
+        for msg in conv.get("messages", []):
+            state.get("processed", {}).pop("{}:{}".format(msg[0], msg[1]), None)
+        state.setdefault("revivals", {})[key] = conv.get("revivals", 0) + 1
+        revived.append((key, session_id))
+    return revived
+
+def stuck_dispatches(state, now):
+    """Open conversations with no chat that have used up their revivals."""
+    app_dir = app_state_dir()
+    if not app_dir:
+        return []
+    out = []
+    for key, conv in state.get("conversations", {}).items():
+        if conv.get("status") != "open" or conv.get("revivals", 0) < MAX_REVIVALS:
+            continue
+        opened_at = conv.get("opened_at", now)
+        if now - opened_at < DEAD_DISPATCH_SECONDS:
+            continue
+        if app_has_chat(key, conv.get("session_id"), opened_at, app_dir) is False:
+            out.append(key)
+    return out
+
 def reap(state, ledger, now, cfg):
     """Close conversations the ledger says are finished, the ones the app closed, plus dead ones."""
     statuses = ledger_status_map(ledger)
@@ -685,7 +796,18 @@ def _run(args):
     for key, wrote in closed:
         print("[reply-router] closed {}{}".format(
             key, "" if wrote else " (no session id claimed, chat stays in the sidebar)"))
-    if closed and not args.dry_run:
+
+    # Before deciding what is new, take back what the app dropped. A dispatch
+    # with no chat behind it is not "in progress", it is lost, and leaving the
+    # conversation open is what makes the loss permanent.
+    revived = [] if args.dry_run else revive_dead_dispatches(state, now)
+    for key, session_id in revived:
+        print("[reply-router] no chat ever appeared for {} (session {}), re-dispatching".format(
+            key, session_id or "never claimed"))
+    for key in stuck_dispatches(state, now):
+        print("[reply-router] {} failed to open a chat {} times; left alone, fix the app side".format(
+            key, MAX_REVIVALS))
+    if (closed or revived) and not args.dry_run:
         # persist now: a run with nothing new to dispatch returns early below
         _atomic_write(STATE_PATH, state)
 
@@ -786,6 +908,9 @@ def _run(args):
             "messages": [[m["channel"], m["ts"]] for m in msgs],
             "thread_file": os.path.relpath(path, BASE_DIR),
             "pending_followups": 0,
+            # Carried across a revival so a conversation the app keeps dropping
+            # stops being retried and gets reported instead.
+            "revivals": state.get("revivals", {}).get(key, 0),
         }
 
     # Persist the dispatch BEFORE the request files exist. The lock already
@@ -930,6 +1055,13 @@ def cmd_status(args):
     print("  conversations: {} open, {} closed, {} pending follow-up msg(s)".format(
         len(open_convs), len(convs) - len(open_convs),
         sum(c.get("pending_followups", 0) for c in open_convs)))
+    if app_state_dir():
+        stuck = stuck_dispatches(state, time.time())
+        if stuck:
+            print("  NO CHAT: {} conversation(s) the app failed to open {} times: {}".format(
+                len(stuck), MAX_REVIVALS, ", ".join(stuck)))
+    else:
+        print("  chat check: skipped, the ASB app does not run on this machine")
     if state.get("baselined_at"):
         print("  baselined: {} item(s) at {}".format(
             sum(1 for r in state["processed"].values() if r.get("reason") == "baselined"),

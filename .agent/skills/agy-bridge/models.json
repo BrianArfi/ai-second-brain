@@ -34,8 +34,8 @@
         "promo_until": "2026-09-30",
         "_promo_note": "Off-peak charged 1x (not 2x) through end of Sep 2026; after that set offpeak to 2x. Peak is always 3x."
       },
-      "retired": true,
-      "_retired_note": "Subscription ended; retired from all chains 2026-07-27. Kept for cost-history replay and easy restore."
+      "retired": false,
+      "_retired_note": "Retired 2026-07-27 when the first subscription lapsed. RESTORED 2026-09-21: the owner resubscribed, and glm-5.3 / glm-5.3-flash / glm-5.2 all probed OK (PONG, ~2.4s) through run_entry before any chain re-added them. Retire again only on repeated probe failures."
     },
     "9router": {
       "type": "openai-compatible",
@@ -85,6 +85,14 @@
         2.5
       ],
       "glm-5.2": [
+        0.6,
+        2.2
+      ],
+      "glm-5.3": [
+        0.6,
+        2.2
+      ],
+      "glm-5.3-flash": [
         0.6,
         2.2
       ],
@@ -169,6 +177,8 @@
     },
     "estimated_models": [
       "glm-5.2",
+      "glm-5.3",
+      "glm-5.3-flash",
       "glm",
       "kimi-latest",
       "kimi",
@@ -228,6 +238,10 @@
       }
     ],
     "reasoning": [
+      {
+        "backend": "zai",
+        "model": "glm-5.3"
+      },
       "Gemini 3.1 Pro (High)",
       "GPT-OSS 120B (Medium)",
       {
@@ -235,9 +249,14 @@
         "model": "gemini-3.8-flash"
       }
     ],
+    "_reasoning_glm_note": "GLM restored to the reasoning lead 2026-09-21, per the 2026-07-22 owner decision that GLM keeps the reasoning lead for depth + lineage diversity. Full glm-5.3, not the flash variant, for reasoning depth.",
     "cross-lineage": [
       "GPT-OSS 120B (Medium)",
       "Gemini 3.1 Pro (High)",
+      {
+        "backend": "zai",
+        "model": "glm-5.3-flash"
+      },
       {
         "backend": "kimi",
         "model": "kimi-latest"
@@ -269,7 +288,7 @@
     ],
     "_draft_flash_note": "OWNER DECISION 2026-07-22: Gemini 3.5 Flash promoted to HEAD of the draft chain (was glm-5.2-first), same rationale as bulk-cheap -> utilize the idle Gemini/agy subscription. glm-5.2 stays fallback #2. reasoning/critic intentionally NOT changed: GLM keeps the lead there for reasoning depth + cross-lineage diversity.",
     "image": "NOT handled by the bridge -> use the gemini-image skill. Default image model is gemini-3-pro-image ('Nano Banana', pro 3.1 tier; set 2026-07-22); imagen-4.0 only when true aspect-ratio control is needed.",
-    "_zai_retired_note": "z.ai / glm-5.2 REMOVED from every chain 2026-07-27: the GLM Coding Plan subscription is no longer active and live probes return an error, so leaving it in a chain only bought a guaranteed failed attempt before the Gemini fallback answered. Gemini via agy now heads every capability. The zai backend definition is kept under backends.zai so re-subscribing is a one-line restore, but do NOT re-add it to a chain without a passing --doctor probe first."
+    "_zai_restored_note": "z.ai RESTORED 2026-09-21 after the owner resubscribed: glm-5.3 leads reasoning, glm-5.3-flash re-entered cross-lineage, both after passing live probes. The 2026-07-27 retirement (subscription lapsed, guaranteed failed attempts) is the precedent: retire again only on repeated probe failures, and never re-add without a passing probe first."
   },
   "tasks": {
     "harvest": {

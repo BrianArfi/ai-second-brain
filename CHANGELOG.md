@@ -11,6 +11,53 @@ version, and the rule is in [`docs/VERSIONING.md`](docs/VERSIONING.md).
 
 ## Unreleased
 
+### Standing rules ship with the template
+
+`CLAUDE.md.template` had not changed since July, so a fork started without the
+rules the private harness had learned since. It now carries a **Standing Rules**
+section: do the work instead of reporting on it, fix what is broken, never claim
+an action that has not happened, verify before you report, treat a question as a
+question, done means done, answer first and stop, record it where it is tracked
+in the same turn, link every file you name, read a shared document before you
+replace it, never act on a garbled instruction, and offer to save a correction as
+a rule. Each one is there because leaving it out caused a failure that repeated.
+The block sits between two markers, so the desktop app exports the same text and
+a rule learned once reaches both.
+
+### The session model is detected on Windows
+
+The startup routing hook printed "Session model: unknown" on every Windows
+session, so the delegation table never had a real tier to work from. Two causes,
+stacked. The transcript lookup replaced only `/` when it built the project
+directory name, while Claude Code replaces every character that is not a letter,
+a digit or `-`, so a path with a drive colon never matched. And Python's bare
+`bash` resolves to WSL's `System32\bash.exe` before PATH, so the detection script
+ran inside Linux against a Windows path. Both are fixed, with a regression test.
+
+### A leaner CLAUDE.md, and one less process per command
+
+Incident history, command lists and kill switches moved out of the always-loaded
+`CLAUDE.md` into `docs/harness_reference.md`, word for word, under five new
+anchors. Each rule stays in `CLAUDE.md` as one line plus a link. The no-op
+`drive_verify` hook, which started a Python process after every Bash call and did
+nothing, is unregistered.
+
+### Moving machines: the record travels, content does not
+
+`harness_migrate.py export` now leaves video, audio, images, archives and
+installers behind wherever they sit, and prints how much it skipped. The first
+real run found 3.5 GB of rendered video in a 3.9 GB bundle. The desktop app's own
+chat transcripts, which the bundle never carried, now travel and are restored on
+import. The migrate test runs in a sandbox instead of reading the real app data.
+
+### Tests that failed for the wrong reason
+
+Three tests failed while the code under them was right: one fed Windows paths
+unquoted, one used 1970 timestamps that a newer staleness rule reads as ancient,
+and one asserted a routine that had been deliberately removed. The last one hid
+a real bug: the reply-router settings schema still said a "Scheduled runs"
+switch gated it, which it does not. All fixed.
+
 ### Seven new commands, six retired, and the list says what each group is for
 
 The command set had grown to 32 with flat descriptions, which reads as one long
@@ -493,8 +540,8 @@ ships.
   access to your tools and assembles your `CLAUDE.md` for you. Phase-based, resumable
   (`/setup resume`), and it never asks you to paste a secret into the chat. It drives the
   mechanical steps in `docs/SETUP.md` rather than duplicating them.
-- **Indonesian connection kit** in `docs/workshop/`: `MULAI_DARI_SINI.md` (start here),
-  `PANDUAN_KONEKSI.md` (step-by-step tool connection guide), matching PDFs, and illustrated
+- **Indonesian connection kit** in `docs/workshop/`: [`MULAI_DARI_SINI.md`](docs/workshop/MULAI_DARI_SINI.md) (start here),
+  [`PANDUAN_KONEKSI.md`](docs/workshop/PANDUAN_KONEKSI.md) (step-by-step tool connection guide), matching PDFs, and illustrated
   screenshots (`img/`) for the Google, Slack, and Jira setup flows. Token values in every
   illustration are masked; no real credentials are shown.
 

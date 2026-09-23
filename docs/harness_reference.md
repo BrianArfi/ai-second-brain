@@ -241,9 +241,9 @@ Use `pdftotext`, not the `Read` tool. Use `Read` only when the user directly ask
 ### Operational / Dashboard automation
 - **Command Queue** -- [`.agent/skills/command-queue/scripts/command_queue.py`](../.agent/skills/command-queue/scripts/command_queue.py): routes the owner's dashboard ticket task-comments to auto-dispatched headless `claude -p` workers, triaging by model+effort per CLAUDE.md. `scan` (enqueue), `dispatch --live` (spawn workers), `report` (queue status).
 - **Inbox Hub** -- [`.agent/skills/inbox-hub/scripts/inbox_sweep.py`](../.agent/skills/inbox-hub/scripts/inbox_sweep.py): unified inbound-inquiry hub aggregating Slack mentions, Gmail, GDoc comments, Jira into dashboard inbox with AI triage and per-item drafts.
-- **Interview Assistant** -- [`.agent/skills/interview-assistant/`](../.agent/skills/interview-assistant/): automates candidate pre-interview prep (CV analysis, question banks, custom rubrics by role) and post-interview assessment (Fathom transcript grading, scorecards, onboarding SLAs).
-- **Proactive Assistant** -- [`.agent/skills/proactive-assistant/`](../.agent/skills/proactive-assistant/): the owner's autonomous Product Operations system syncing Dashboard, todo, and the PM ledgers (commitments/waiting_on); surfaces management mandates and team workload imbalances.
-- **Project Tracking Update** -- [`.agent/skills/project-tracking-update/`](../.agent/skills/project-tracking-update/): Triple-Check protocol keeping Dashboard, todo.md, and the PM ledgers synchronized on task completion and overdue detection. `master_followup_tracker.md` is a generated view over the ledgers, rendered by `render_followup_tracker.py`, never hand-edited.
+- **Interview Assistant** -- [`.agent/skills/interview-assistant/`](../.agent/skills/interview-assistant/SKILL.md): automates candidate pre-interview prep (CV analysis, question banks, custom rubrics by role) and post-interview assessment (Fathom transcript grading, scorecards, onboarding SLAs).
+- **Proactive Assistant** -- [`.agent/skills/proactive-assistant/`](../.agent/skills/proactive-assistant/SKILL.md): the owner's autonomous Product Operations system syncing Dashboard, todo, and the PM ledgers (commitments/waiting_on); surfaces management mandates and team workload imbalances.
+- **Project Tracking Update** -- [`.agent/skills/project-tracking-update/`](../.agent/skills/project-tracking-update/SKILL.md): Triple-Check protocol keeping Dashboard, todo.md, and the PM ledgers synchronized on task completion and overdue detection. [`master_followup_tracker.md`](../journal/master_followup_tracker.md) is a generated view over the ledgers, rendered by `render_followup_tracker.py`, never hand-edited.
 
 ### Analytics / observability
 - **Dashboard Sync** -- [`.agent/skills/dashboard-updater/scripts/dashboard_sync.py`](../.agent/skills/dashboard-updater/scripts/dashboard_sync.py): calendar+Drive+Slack -> `Dashboard.md`.
@@ -325,3 +325,165 @@ banners anything escalated into the morning update. The ASB app Settings pane is
 the app-side half and is not built yet; the schema is ready for it. Design notes:
 [`journal/plans/plan_automation_settings_surface.md`](../journal/plans/plan_automation_settings_surface.md).
 Contract test: `python3 tests/test_automation_settings.py`.
+
+---
+
+<!-- Sections below were moved verbatim from CLAUDE.md on 23 Sep 2026 to cut the
+     always-loaded context. CLAUDE.md keeps each rule as one line plus a link here. -->
+
+## slack-mechanics
+
+*Slack mechanics (moved from CLAUDE.md ## PM Partner Rules)*
+
+**Every person named in a Slack message carries their handle.** Slack posts a bare "Teammate" as plain text: no ping, no badge, no notification, so the message waits until somebody scrolls past it. Resolve the ids before the send with `python3 .agent/scripts/slack_mentions.py check --file <draft>`, or rewrite the draft in place with `apply --file <draft> --in-place` (it mentions the first occurrence of each person and leaves later references as plain text). `send_slop_guard.py` refuses a send that still names a resolvable person without a handle; `SLOP_GUARD_ALLOW_PLAIN_NAMES=1` is the override for a person talked about rather than addressed. A name matching two live accounts is reported, never guessed: pick the id and record it on that person's page in `Clients/Work/People/`. The index rebuilds from `users.list` weekly inside the daily sweep, or on demand with `slack_mentions.py refresh`.
+
+**One conversation, one session. Check the claim before you draft.** The reply-router opens a session per Slack conversation and records the owner in `journal/state/reply_router_state.json`. Nothing enforced that record until 20 Sep 2026, when two sessions worked the same thread: one filed ABC-123 plus a reply draft, the other drafted a second reply and came within one command of a duplicate ticket. `.claude/hooks/conversation_claim_guard.py` (PreToolUse, Bash) now resolves the conversation key from `--channel` and `--thread-ts` on any `slack_client.py --action post` and **denies** the send when a different session holds an open claim, naming the session that owns it. A conversation closed inside the last seven days downgrades to an ask, with the closing summary shown, because a closed conversation usually means the reply already went out. Reads, probes, and a command that merely quotes a send are untouched. It fails open, so a guard that cannot read its own state never blocks a real reply. See who owns what with `reply_router.py list`; off switch `CLAIM_GUARD_DISABLE=1`. Regression test: `python3 tests/test_conversation_claim_guard.py`.
+
+## repo-mechanics
+
+*Repo mechanics (moved from CLAUDE.md ## PM Partner Rules and ## Repo & Platform)*
+
+**A dirty working tree no longer strands a session on a stale repo.** `.claude/hooks/session_git_sync.py` used to stop at the first uncommitted file and leave the session running against whatever the checkout last saw, which is the other half of the 20 Sep duplicate: that session opened 16 commits behind and could not see the ticket already filed. It now stashes, pulls, and restores. A rebase conflict aborts and puts the edits straight back; a conflicting stash pop says so loudly and leaves the stash in `git stash list` rather than dropping it.
+
+### The whole working tree auto-commits now, not just the ledgers
+
+`.claude/hooks/worktree_commit.py` runs on **Stop** and pushes everything else the turn produced: Dashboard.md, `Clients/`, journal notes, the harness itself. Before this, only the four state ledgers auto-committed, which is how 11 Aug ended with 49 uncommitted paths while `ledger_sync status` reported healthy. Credential-shaped files are screened out and named in the output instead of being pushed; run `python3 .agent/scripts/worktree_sync.py status` to see what a turn would commit. Off switch: `WORKTREE_SYNC_DISABLE=1`.
+
+**Auto-memory lives in the repo.** `~/.claude/projects/<slug>/memory/` is a symlink to `journal/memory/`, so learned facts travel with git instead of dying on one laptop. New machine, once: `python3 .agent/scripts/harness_migrate.py link-memory`.
+
+**Sessions must start from the repo root.** A session whose working directory is outside a git repo produces work that no push can reach. Ten sessions on 10 and 11 Aug ran against the ASB app's bundled template workspace and stranded 21 real notes there, including a live exposed API key. Audit any machine with `python3 .agent/scripts/harness_migrate.py check`; moving machines, session history included, is `harness_migrate.py export` then `import`, and `--with-credentials` carries the gitignored tokens too, encrypted under a passphrase (the ASB app does the same move from Settings, Your files). Full runbook: [`docs/multi_machine.md`](multi_machine.md).
+
+### State ledgers are lock-protected. Keep it that way.
+
+`journal/state/{commitments,decisions,waiting_on,chase_queue}.json` are written by 7 cron jobs plus live sessions. They write atomically (`os.replace`), which prevents corrupt files but **not** lost updates: two overlapping read-modify-write cycles silently drop whichever record was written first. That is how 3 waiting-on records and 4 commitments disappeared on 3 Aug.
+
+**Any new writer to `journal/state/*.json` MUST take the lock:**
+```python
+sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'scripts'))
+from ledger_lock import hold_ledger_lock
+hold_ledger_lock('commitments')   # or decisions | waiting_on | chase_queue
+```
+Read-only commands skip it so long reports cannot block writers. Rationale and the reproduction test live in `.agent/scripts/ledger_lock.py`.
+
+## ledger-mechanics
+
+*Ledger mechanics (moved from CLAUDE.md ## Ledger Discipline)*
+
+### Propagation is automatic. Do not hand-roll it.
+
+`.agent/scripts/ledger_sync.py` runs inside all four ledger CLIs. One CLI call now does the whole chain:
+
+```
+write the record (under the lock)
+  -> re-render journal/state/*.index.json          (what harvest + briefing agents read first)
+  -> re-render journal/master_followup_tracker.md  (the generated view)
+  -> commit journal/state + the tracker
+  -> pull --rebase if origin moved, then push
+```
+
+So the correct way to update a tracker is to update its ledger. Nothing else is needed, and nothing else is correct.
+
+- **Never hand-edit `journal/state/*.json`.** It skips the lock (an overlapping cron sweep can drop it) and skips propagation (no other session sees it). Use the CLI. If an edit really has to stand, run `python3 .agent/scripts/ledger_sync.py sync --reason "<what changed>"` immediately after.
+- **Never hand-edit `journal/master_followup_tracker.md`.** Generated since 2026-07-24; the next render overwrites it.
+- **Reading a ledger after a while? It may be behind.** A session open for two hours has been reading two hours of other people's writes late. `.claude/hooks/ledger_freshness.py` fetches (throttled to once per 45s) before any ledger command and pulls when it is safe. To check by hand: `ledger_sync.py refresh`.
+- **`journal/state/work_tree.json` is not one of the four.** It is the domain hierarchy behind the dashboard Work tab, hand-maintained per reporting window, no CLI and no lock. Its per-action equivalent is the ledger record, so do not try to update it on every send. Update the affected node's `moved` bullets in the same turn only when something moved at initiative level (a drop shipped, a risk turned real, a client signed), and refresh `period` when the window rolls.
+
+### Every id the owner sees is a link
+
+`WAIT-0274` on its own says nothing about what the item is. The dashboard serves every record at a permalink, so any ledger id written for the owner ships with that link attached:
+
+```
+[`WAIT-0274`](http://localhost:3737/#find/WAIT-0274)
+```
+
+That covers chat replies, briefings, MoMs, weekly reports, reply drafts, `Dashboard.md` sections: anywhere the owner himself reads an id. It does **not** cover messages leaving the machine (Slack, email, client docs -- `localhost` is meaningless to the recipient), and it never touches Jira keys (`MP-`, `MPS-`, `MSP-`, `MBA-`, `STOR-`), which stay Jira links.
+
+Generated views do this themselves -- `journal/master_followup_tracker.md` linkifies on render. Everywhere else, use the helper instead of typing the URL:
+
+```bash
+python3 .agent/scripts/ledger_link.py --md WAIT-0274      # one id -> markdown link
+python3 .agent/scripts/ledger_link.py < draft.md          # linkify a whole file (idempotent)
+```
+
+The link opens that record's card: owner, status, SLA, escalation path, opened and due, last nudge, breach, the notes timeline, and the source permalink. A dead link means the dashboard is down, so run `bash .agent/scripts/ensure_dashboard.sh`, which health-checks and replaces a broken server rather than trusting that the port is bound.
+
+### Commands
+
+```bash
+python3 .agent/scripts/ledger_sync.py status                      # when each ledger last synced
+python3 .agent/scripts/ledger_sync.py check                       # report drift, change nothing (exit 1 = drift)
+python3 .agent/scripts/ledger_sync.py refresh                     # pull newer ledger commits before reading
+python3 .agent/scripts/ledger_sync.py sync --reason "<what>"      # force the full chain
+```
+
+Kill switches, for when the network is down or a migration is mid-flight: `LEDGER_SYNC_OFFLINE=1` (skip git, still render) and `LEDGER_SYNC_DISABLE=1` (skip everything). Both leave the lock in force.
+
+### The lock is single-machine. The guard is what spans both.
+
+`ledger_lock.py` stops two processes on ONE filesystem dropping each other's records. It cannot see across machines, because `fcntl` is a single-filesystem primitive. On 17 Aug two records added on macOS were deleted fourteen minutes later by the WSL cron sweep, which read a `waiting_on.json` that had never seen them and wrote its whole snapshot back.
+
+Two things in `ledger_sync.py` close that, and both are automatic:
+
+- **`refresh_before_read`** pulls newer ledger commits *before* a command reads the file. Interactive sessions were already covered by `.claude/hooks/ledger_freshness.py`; cron was not, and cron is what deleted the records.
+- **`check_deletions`** compares record ids on disk against `HEAD` and `origin/main` before committing, and refuses when one has vanished. Git is the only layer that spans both machines, so it catches cron, a hand-edit, the headless worker, and the other machine, none of which a lock or a hook can reach.
+
+**The exemption is the record's status, not the command.** `waiting_watchdog.cmd_sweep` calls `prune()` every hour, deleting `answered` and `dropped` items past retention. So a command allowlist would have to include `sweep`, which is exactly what deleted `WAIT-0342`. A record may only disappear if it was already terminal: `done`/`dropped` for commitments, `answered`/`dropped` for waiting_on, `decided`/`superseded` for decisions.
+
+Kill switches: `LEDGER_GUARD_WARN_ONLY=0` makes the guard actually block (it warns only, for now); `LEDGER_GUARD_DISABLE=1` turns it off. Regression test, including the real incident and the sweep-prune false positive: `python3 tests/test_ledger_guard.py`.
+
+## work-tree-mechanics
+
+*Work-tree enforcement and commands (moved from CLAUDE.md ## Every Ticket Belongs To A Work-Tree Node)*
+
+### Enforcement
+
+Three layers, because any single one gets bypassed:
+
+1. **CLI**, the real gate. `--node` required on `add` in all four ledger CLIs; unknown ids rejected with the closest matches printed. `--node ?` plus a search string prints candidate nodes.
+2. **Stop hook**, the safety net. `.claude/hooks/ledger_guard.py` blocks the end of a turn that created an unfiled record.
+3. **Sweep**, the drift check. `work_tree_link.py --check` reports unfiled and orphaned-node counts; the count goes in the morning update and in `/weekly-planning`.
+
+### Commands
+
+```bash
+python3 .agent/scripts/work_tree.py find "apple store"        # which node is this?
+python3 .agent/scripts/work_tree.py show apple-uat            # one node in full
+python3 .agent/scripts/work_tree.py add-node --id x --label "..." --kind item --parent apple
+python3 .agent/scripts/work_tree.py coverage                  # how much is filed, what is not
+python3 .agent/scripts/work_tree.py validate                  # id + alias drift
+python3 .agent/scripts/work_tree.py alias --list              # portfolio initiative -> node
+python3 .agent/scripts/work_tree_backfill.py                  # dry run over the ledgers
+<ledger>.py add ... --node <id>                               # required on every add
+<ledger>.py refile <ID> --node <id>                           # triage an unfiled record
+```
+
+Linkage lives **on the record**, not on the tree. `work_tree.json.refs` is derived from the records by `work_tree_link.py`, never hand-curated. Hand-curating refs is what let 659 records drift out of the tree unnoticed.
+
+## quality-gate-mechanics
+
+*Quality-gate mechanics (moved from CLAUDE.md ## Quality Gates)*
+
+**Two hooks back this up, at different moments.** `.claude/hooks/emdash_guard.py` warns when an em-dash lands in a repo `.md`/`.txt` on the way IN. `.claude/hooks/send_slop_guard.py` checks the text on the way OUT, on any Bash call to `slack_client.py` (`--text`, `--text-file`), `gmail_manager.py` (`--body`, `--body-file`), or `gdoc_comment.py` (`text` inside `--items`).
+- **Blocks:** an em-dash, and a `fathom.video/calls/` link (that URL is Fathom-internal, so the recipient asks the owner for access instead; the refusal prints the public share link from `journal/state/fathom_share_links.json`, or get one with `fathom_client.py --action share-link --id <call id>`).
+- **Warns:** banned words, slop phrases, over-budget length, an unrequested rationale section.
+- **Overrides:** `SLOP_GUARD_ALLOW_EMDASH=1` when quoting someone verbatim, `SLOP_GUARD_ALLOW_FATHOM_CALLS=1`. It blocks rather than asks because this repo runs `defaultMode: bypassPermissions`, where an ask never reaches a prompt.
+- **Write the draft in one Bash call and send it in the next one.** The guard is PreToolUse, so a draft written and sent in the same call did not exist when the guard looked. Regression test: `python3 tests/test_send_gate_file_timing.py`.
+- Unguarded: everything with no machine check (wordlists, patterns, active voice), and any Jira comment posted through an MCP tool, which never touches Bash.
+
+**A document that names a file gives the reader a way to open it.** `.claude/hooks/link_guard.py` runs on **PostToolUse (Write|Edit)** over repo `.md` files and reports four things: a markdown link whose local target does not exist, **a link that points at a folder** (the app opens files, never directories, and says "is not a file"), **a relative link inside a document the owner opens in the app** (`journal/`, `Clients/`, `inbox/`, where the app resolves from the workspace root and the link dies even though the file exists), and a repo file named in prose (including inside backticks) that could have been linked and was not. Backticks are not a link, and nobody can click one. Warning-only, because a document may legitimately name a file that does not exist yet.
+
+**Existence is not openability.** Both failures on 19 and 20 September passed the old guard, which only checked that something was there: `journal/batches/README.md` linked its siblings relatively, and a reply linked `journal/escalations/`. Every target existed. Neither opened. Regression test: `python3 tests/test_link_guard_openable.py`.
+
+**`--fix` repairs the two classes that can be repaired without guessing**, a relative link in an app-facing file and a link written for another machine's checkout: `python3 .claude/hooks/link_guard.py --fix journal/ Clients/`. A link with no real target anywhere is left alone, because there is nothing to point it at.
+
+Run it by hand before anything leaves the machine, on one file or a whole tree. Exit code 1 when something is wrong, so it can gate a send:
+
+```bash
+python3 .claude/hooks/link_guard.py Clients/Work/meetings/MOM_x.md
+python3 .claude/hooks/link_guard.py journal/
+```
+
+**A local file path is always absolute, and absolute for the machine this session runs on.** Never `../folder/file.png`: the viewer app resolves a relative link from the **session workspace root**, not from the folder the file sits in. A relative path is allowed only inside a repo file read through GitHub or an editor, like this `CLAUDE.md` pointing at `docs/harness_reference.md`.
+
+The roots differ per checkout: Windows `C:/Users/you/.gemini/antigravity/scratch/product-second-brain/...`, WSL `./...`, macOS `./...`. Run `bash .agent/scripts/detect_platform.sh` for the root, or `bash .agent/scripts/artifact_link.sh <path>` for the clickable form. `link_guard.py` knows all three, names a link written for another machine, and flags `file://~/...` links, which are dead on macOS and are the largest class of broken link here. It does not fetch `http(s)` links, because a hook must not make network calls on every write. Full rule: memory `feedback-absolute-paths-in-links`.
+

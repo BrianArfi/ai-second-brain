@@ -112,6 +112,33 @@ def tier_of(model):
             return "mid"
     return "unknown"
 
+def _claude_project_dir(root, repo_root):
+    """The project dir by Claude Code's actual rule: every character that is not
+    a letter, digit or "-" becomes "-".
+
+    The "/"-only slug below never matched on Windows, where the path carries a
+    drive colon and backslashes (C:\\Users\\x\\.foo -> C--Users-x--foo), so every
+    Windows session reported MODEL=unknown. Git Bash also hands us the MSYS form
+    (/c/Users/...) when CLAUDE_PROJECT_DIR is unset, so that is folded back to
+    C:/Users/... first. The drive letter's case is not guaranteed either way,
+    hence the case-insensitive comparison on Windows."""
+    path = repo_root
+    if os.name == "nt":
+        m = re.match(r"^/([a-zA-Z])(/|$)", path)
+        if m:
+            path = m.group(1) + ":" + path[2:]
+    slug = re.sub(r"[^A-Za-z0-9-]", "-", path)
+    exact = os.path.join(root, slug)
+    if os.path.isdir(exact):
+        return exact
+    if os.name != "nt":
+        return None
+    try:
+        hits = [n for n in os.listdir(root) if n.lower() == slug.lower()]
+    except OSError:
+        return None
+    return os.path.join(root, hits[0]) if len(hits) == 1 else None
+
 def _fuzzy_project_dir(root, repo_root):
     """Locate this repo's project dir when the naive "/"-only slug misses.
 
@@ -153,7 +180,9 @@ def claude_transcript():
     root = os.path.expanduser("~/.claude/projects")
     if not REPO_ROOT:
         return None
-    pdir = os.path.join(root, REPO_ROOT.replace(os.sep, "-"))
+    pdir = _claude_project_dir(root, REPO_ROOT)
+    if not pdir:
+        pdir = os.path.join(root, REPO_ROOT.replace(os.sep, "-"))
     if not os.path.isdir(pdir):
         pdir = _fuzzy_project_dir(root, REPO_ROOT)
     if not pdir or not os.path.isdir(pdir):

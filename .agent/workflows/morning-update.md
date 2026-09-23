@@ -105,7 +105,7 @@ After the owner aligns on priorities, any **focus block** created/refreshed on t
 Rules:
 - Always hyperlink cited docs/threads (per [[feedback_always_link_cited_docs]]); never leave a source as plain text.
 - Resolve every Slack ID to a name before writing it (per [[feedback_no_guessing_names]]).
-- `gcal_manager.py` has **no `update`** action and MCP Calendar points at Secondary — so the rich `--desc` must be set at **create** time. For an existing block that can't be edited, surface the enriched brief in the Dashboard `(Pagi)` section instead and flag that the calendar copy is terse.
+- `gcal_manager.py update --event-id <id> --profile work` patches an existing block in place (`--summary`, `--desc`, `--start`, `--end`, `--attendees`, `--attach`). Add `--no-notify` on a work block so nobody is mailed. Get the id from `list --json`. MCP Calendar still points at Secondary, so never use it for Work. This line used to claim there was no `update` action at all, which left wrong descriptions standing on blocks earlier runs had written; corrected 22 Sep 2026.
 
 ## Quality Rubric (Morning Subset)
 

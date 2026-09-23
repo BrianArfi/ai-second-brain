@@ -78,6 +78,16 @@ THREAD_REPLY_MAX_CALLS = 220               # ceiling on conversations.replies pe
 THREAD_IDLE_DAYS = 21                      # forget a thread with no activity this long
 THREAD_SEED_LOOKBACK_DAYS = 14             # first-run backfill of the owner's own threads
 THREAD_STALE_DAYS = 7                      # a thread reply older than this is dead on arrival
+# A thread enters the registry only when its ROOT appears in `conversations.history` after
+# the channel watermark. Slack does not bump a root when somebody replies, so a thread the owner
+# JOINS whose root is older than the watermark never registers, and no reply in it is ever
+# seen. `seed_participating_threads` is the pass that closes that, by walking the owner's own
+# recent messages, and until 21 Sep 2026 it was gated on `not thread_pass_seeded`: it ran
+# once, on 4 Sep, and never again. Seventeen days later the registry held 40 threads and the
+# newest thread_followup item was three days old. So it runs on a timer now, with a short
+# lookback, which is one `search.messages` page per sweep.
+THREAD_RESEED_SECONDS = 3600
+THREAD_RESEED_LOOKBACK_DAYS = 3
 
 # Auto-dismiss noise so the queue only holds real "waiting on the owner" items.
 # CONSERVATIVE by design: a false-dismiss (hiding a real ask) is worse than a
@@ -290,14 +300,21 @@ def workspace_permalink(state, channel_id, ts, thread_ts=None):
         url += f'?thread_ts={thread_ts}&cid={channel_id}'
     return url
 
-def seed_participating_threads(token, state, brian_id):
-    """One-time backfill. The thread registry only ever grew from messages seen
-    in conversations.history since the last watermark, so threads the owner was
-    already in before the pass existed would never be registered and never
-    checked. Walk his own recent messages once and register their threads."""
-    since = time.time() - THREAD_SEED_LOOKBACK_DAYS * 86400
+def seed_participating_threads(token, state, brian_id,
+                               lookback_days=THREAD_SEED_LOOKBACK_DAYS, max_pages=5):
+    """Register threads from the owner's OWN recent messages.
+
+    The registry otherwise only ever grows from roots seen in conversations.history
+    since the last watermark, and a reply never bumps its root, so a thread the owner
+    joins after its root scrolled past is invisible: not a mention, not a DM, not in
+    history. This walk is the only pass that sees those.
+
+    Ran once as a backfill until 21 Sep 2026, which left it blind to every thread he
+    joined afterwards. It now also runs on a timer with a short lookback, which is
+    what `max_pages` is for: the periodic pass needs one page, the backfill five."""
+    since = time.time() - lookback_days * 86400
     seeded, page = 0, 1
-    while page <= 5:
+    while page <= max_pages:
         resp = slack('search.messages', token, {
             'query': 'from:me', 'sort': 'timestamp', 'sort_dir': 'desc',
             'count': 100, 'page': page})
@@ -697,8 +714,14 @@ def _sweep(args):
     n_mentions = sweep_mentions(token, state, brian_id)
     n_digest, n_dm, _ = sweep_channels(token, state, brian_id)
     n_seed = 0
-    if args.reseed_threads or not state.get('thread_pass_seeded'):
+    seeded_at = float(state.get('thread_pass_seeded') or 0)
+    if args.reseed_threads or not seeded_at:
         n_seed = seed_participating_threads(token, state, brian_id)
+    elif time.time() - seeded_at > THREAD_RESEED_SECONDS:
+        # The catch-up pass, not the backfill: three days back, one page.
+        n_seed = seed_participating_threads(
+            token, state, brian_id,
+            lookback_days=THREAD_RESEED_LOOKBACK_DAYS, max_pages=1)
     n_thread = sweep_thread_replies(token, state, brian_id)
     n_answered = resolve_open_items(token, state, brian_id)
     n_noise = sweep_noise_backlog(state)
