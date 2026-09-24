@@ -1103,7 +1103,8 @@ def main():
     elif args.action == "post":
         text = args.text
         if args.text_file:
-            with open(args.text_file) as _tf:
+            # utf-8-sig: Windows defaults to cp1252 (turns "•" into "â€¢") and PowerShell writes a BOM.
+            with open(args.text_file, encoding='utf-8-sig') as _tf:
                 text = _tf.read().strip()
         if not args.channel or not text:
             print("Error: --channel and (--text or --text-file) are required for post action.", file=sys.stderr)
@@ -1113,7 +1114,7 @@ def main():
     elif args.action == "update":
         text = args.text
         if args.text_file:
-            with open(args.text_file) as _tf:
+            with open(args.text_file, encoding='utf-8-sig') as _tf:
                 text = _tf.read().strip()
         if not args.channel or not args.message_ts or not text:
             print("Error: --channel, --ts and (--text or --text-file) are required for update action.", file=sys.stderr)
