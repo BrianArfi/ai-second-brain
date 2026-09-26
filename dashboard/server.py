@@ -2141,21 +2141,26 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             data = json.loads(WORK_TREE_PATH.read_text(encoding='utf-8'))
 
             def roll(node):
+                # An archived node and everything under it drop out of the
+                # counts, the same way the Work tab hides them.
                 r = {'threads': 0, 'attn': 0, 'blocked': 0, 'moved': 0, 'owner': 0}
-                if node.get('kind') == 'thread':
-                    r['threads'] = 1
-                if node.get('owner') or node.get('status') == 'critical':
-                    r['attn'] = 1
-                if node.get('status') == 'critical':
-                    r['blocked'] = 1
-                if node.get('moved'):
-                    r['moved'] = 1
-                if node.get('owner'):
-                    r['owner'] = 1
+                archived = node.get('status') == 'archived'
+                if not archived:
+                    if node.get('kind') == 'thread':
+                        r['threads'] = 1
+                    if node.get('owner') or node.get('status') == 'critical':
+                        r['attn'] = 1
+                    if node.get('status') == 'critical':
+                        r['blocked'] = 1
+                    if node.get('moved'):
+                        r['moved'] = 1
+                    if node.get('owner'):
+                        r['owner'] = 1
                 for c in node.get('children', []):
                     cr = roll(c)
-                    for k in r:
-                        r[k] += cr[k]
+                    if not archived:
+                        for k in r:
+                            r[k] += cr[k]
                 node['roll'] = r
                 return r
 
@@ -3521,6 +3526,17 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 cmd += ['--escalation-path', str(body['escalation_path'])]
             if body.get('source_url'):
                 cmd += ['--source', str(body['source_url'])]
+            else:
+                cmd += ['--no-link-why', 'added from the dashboard form without a link']
+            # The CLI has required --node since the work-tree rule, and --done-when
+            # since 26 Sep 2026; this form sent neither, so every add here failed.
+            if body.get('node'):
+                cmd += ['--node', str(body['node'])]
+            else:
+                cmd += ['--node', 'unfiled', '--node-why', 'dashboard form; triage in the morning update']
+            cmd += ['--done-when', str(body.get('done_when') or f'{owner} answers: {what}')[:300]]
+            if body.get('done_ticket'):
+                cmd += ['--done-ticket', str(body['done_ticket'])]
             proc = subprocess.run(cmd, cwd=str(BASE_DIR), capture_output=True, text=True, timeout=30)
             if proc.returncode != 0:
                 self._send_json(500, json.dumps({'error': 'waiting_watchdog add failed',

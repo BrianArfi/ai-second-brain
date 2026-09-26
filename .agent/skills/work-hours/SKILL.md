@@ -17,8 +17,16 @@ and what the leverage was (parallel output / actual hours).
   (2,040 Windows transcripts in a 7-day window against 166 WSL ones), which is why
   a day with a dozen sessions reported one. Override the list with
   `WORK_HOURS_CLAUDE_DIRS` or `extra.work_hours_claude_dirs` in `.agent/harness.json`.
-  **macOS sessions are still invisible**: that filesystem is not reachable from
-  WSL, and only a sweep run on the Mac itself would see them.
+  macOS is not reachable from WSL, so every machine sweeps what it can see.
+- **Per-machine shards (25 Sep 2026).** Each sweep writes what its host saw to
+  `journal/state/work_hours_hosts/<host>.json` (tracked, one writer per file, so
+  git never conflicts), then computes the days from the union of every shard,
+  deduped by session id. `work_hours.json` and the parse cache are host-local and
+  gitignored: each machine builds its own from the shards. The ASB app runs the
+  sweep as a `kind: script` routine (`work-hours` in `journal/state/routines.json`)
+  on whichever machine has the app open. A second concurrent sweep on one host
+  exits 75 on the `work_hours` ledger lock. Host id: platform tag + hostname,
+  override with `WORK_HOURS_HOST`.
 - Classifies each session as desk work or automation. The recorded `entrypoint`
   no longer separates them — the desktop app drives scheduled runs, branch
   sub-sessions and the owner's own chats through `sdk-cli` alike, and writes the same

@@ -449,6 +449,8 @@ Three layers, because any single one gets bypassed:
 python3 .agent/scripts/work_tree.py find "apple store"        # which node is this?
 python3 .agent/scripts/work_tree.py show apple-uat            # one node in full
 python3 .agent/scripts/work_tree.py add-node --id x --label "..." --kind item --parent apple
+python3 .agent/scripts/work_tree.py archive-node x --why "shipped"   # hidden from the Work tab, id still resolves
+python3 .agent/scripts/work_tree.py unarchive-node x                 # restores the status it had before
 python3 .agent/scripts/work_tree.py coverage                  # how much is filed, what is not
 python3 .agent/scripts/work_tree.py validate                  # id + alias drift
 python3 .agent/scripts/work_tree.py alias --list              # portfolio initiative -> node

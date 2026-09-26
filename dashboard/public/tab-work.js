@@ -366,13 +366,14 @@ window.Tabs = window.Tabs || {};
      fact carries its provenance: `refs` auto-link by prefix, `sources` are
      explicit meeting/doc/Slack links. */
 
-  const WT_STATUS_KIND = { critical: 'serious', risk: 'warn', ok: 'good', plan: 'muted' };
-  const WT_STATUS_LABEL = { critical: 'blocked', risk: 'at risk', ok: 'on track', plan: 'planning' };
+  const WT_STATUS_KIND = { critical: 'serious', risk: 'warn', ok: 'good', plan: 'muted', archived: 'muted' };
+  const WT_STATUS_LABEL = { critical: 'blocked', risk: 'at risk', ok: 'on track', plan: 'planning', archived: 'archived' };
   const WT_FILTERS = [
     { key: 'all', label: 'All' },
     { key: 'owner', label: 'Needs the owner' },
     { key: 'blocked', label: 'Blocked' },
     { key: 'moved', label: 'Moved' },
+    { key: 'archived', label: 'Archived' },
   ];
 
   /* ledger IDs have no URL — they deep-link into quickfind instead */
@@ -418,9 +419,16 @@ window.Tabs = window.Tabs || {};
     if (f === 'owner') return !!n.owner;
     if (f === 'blocked') return n.status === 'critical';
     if (f === 'moved') return !!n.moved;
+    if (f === 'archived') return n.status === 'archived';
     return true;
   }
   function wtVisible(n) {
+    // An archived node leaves every view except its own filter. Its id keeps
+    // resolving for old records; it just stops cluttering the live tree.
+    if (state.wtFilter === 'archived') {
+      return n.status === 'archived' || (n.children || []).some(wtVisible);
+    }
+    if (n.status === 'archived') return false;
     if (state.wtFilter === 'all') return true;
     if (n.kind === 'thread') return wtMatch(n);
     return (n.children || []).some(wtVisible);

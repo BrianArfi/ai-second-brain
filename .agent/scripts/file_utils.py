@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import argparse
 import glob
@@ -267,6 +268,51 @@ def find_by_pattern(base_dir, patterns, exclude_dirs=None, limit=None):
         
     for path in matches:
         print(path)
+
+# ASCII diagram guard (the owner, 24 Sep 2026). A tree or box drawn with text
+# characters renders in a Google Doc as a monospace block with broken line
+# joins. Diagrams go in as Mermaid, rendered to an inline image by
+# scripts/embed_mermaid_in_gdoc.py. Override for one call: GDOC_ALLOW_ASCII_DIAGRAM=1.
+_BOX_CHARS = re.compile('[─-╿]')
+_ASCII_ART = re.compile(r'^\s*(\+[-=]{2,}|\|[-=]{2,}|`--|\\--|[-=]{3,}\+|.*\.{4,}\s*P\d)')
+_CODE_LANGS = {'python', 'py', 'bash', 'sh', 'shell', 'json', 'js', 'javascript', 'ts',
+               'sql', 'yaml', 'yml', 'gherkin', 'html', 'css', 'xml', 'csv', 'http'}
+
+def find_ascii_diagrams(md_text):
+    """Return [(line_no, reason)] for text-drawn diagrams and raw mermaid fences."""
+    hits, fence, lang = [], False, ''
+    for i, line in enumerate(md_text.splitlines(), 1):
+        st = line.strip()
+        if st.startswith('```'):
+            if not fence:
+                fence, lang = True, st[3:].strip().lower()
+                if lang == 'mermaid':
+                    hits.append((i, 'raw mermaid fence: put a [[PLACEHOLDER]] here and embed the image'))
+            else:
+                fence, lang = False, ''
+            continue
+        if fence and lang in _CODE_LANGS | {'mermaid'}:
+            continue
+        if _BOX_CHARS.search(line):
+            hits.append((i, 'box-drawing characters'))
+        elif fence and _ASCII_ART.match(line):
+            hits.append((i, 'ASCII art inside an untyped code block'))
+    return hits
+
+def assert_no_ascii_diagram(md_text, label='document'):
+    """Refuse to convert markdown that carries a text-drawn diagram."""
+    if os.environ.get('GDOC_ALLOW_ASCII_DIAGRAM') == '1':
+        return
+    hits = find_ascii_diagrams(md_text)
+    if not hits:
+        return
+    print(f"[ASCII DIAGRAM] {label}: {len(hits)} line(s) would render as a text diagram in Google Docs.")
+    for n, why in hits[:10]:
+        print(f"  line {n}: {why}")
+    print("  Redraw it as Mermaid (.agent/skills/diagram-gen/SKILL.md), put [[PLACEHOLDER]] in the markdown,")
+    print("  and embed it with scripts/embed_mermaid_in_gdoc.py after the convert. "
+          "Override once: GDOC_ALLOW_ASCII_DIAGRAM=1.")
+    sys.exit(1)
 
 def main():
     parser = argparse.ArgumentParser(description="Cross-platform file utility.")

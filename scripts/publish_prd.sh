@@ -11,6 +11,8 @@
 #   scripts/publish_prd.sh --file <path.md> --id <DOC_ID> [--account work]
 #   scripts/publish_prd.sh --file <path.md> --title "PRD: ..." [--account work]   # first publish
 #   scripts/publish_prd.sh --file <path.md> --id <DOC_ID> --share Teammate@examplevendor.com
+#   scripts/publish_prd.sh --file <path.md> --id <DOC_ID> --images <map.json>   # screenshots
+#     map.json: {"[[TOKEN]]": "relative/or/absolute.png"}; embedded after the Mermaid step
 #
 # Options:
 #   --no-restrict   skip the domain restriction (only for a doc meant to stay public)
@@ -19,7 +21,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-FILE=""; ID=""; TITLE=""; ACCOUNT="work"; SHARE=""; RESTRICT=1; GATE_ONLY=0
+# Windows Python prints with cp1252 and crashed on a unicode glyph inside the
+# embed and restrict steps (25 Sep 2026), which also killed the safety restrict.
+export PYTHONIOENCODING=utf-8 PYTHONUTF8=1
+
+FILE=""; ID=""; TITLE=""; ACCOUNT="work"; SHARE=""; RESTRICT=1; GATE_ONLY=0; IMAGES=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --file) FILE="$2"; shift 2;;
@@ -27,6 +33,7 @@ while [[ $# -gt 0 ]]; do
     --title) TITLE="$2"; shift 2;;
     --account) ACCOUNT="$2"; shift 2;;
     --share) SHARE="$2"; shift 2;;
+    --images) IMAGES="$2"; shift 2;;
     --no-restrict) RESTRICT=0; shift;;
     --gate-only) GATE_ONLY=1; shift;;
     *) echo "unknown arg: $1" >&2; exit 2;;
@@ -85,7 +92,9 @@ trap 'exit 143' TERM
 trap 'exit 129' HUP
 
 echo "==> [1/6] Readability gate on source"
-python3 scripts/readability_gate.py --source "$FILE" || {
+SRC_GATE_ARGS=(--source "$FILE")
+[[ -n "$IMAGES" ]] && SRC_GATE_ARGS+=(--images "$IMAGES")
+python3 scripts/readability_gate.py "${SRC_GATE_ARGS[@]}" || {
   echo ""
   echo "BLOCKED. Fix the SOURCE markdown, never the Google Doc by hand." >&2
   exit 1
@@ -137,6 +146,17 @@ elif [[ $EMBED_RC -ne 0 ]]; then
   echo "WARNING: continuing to the format pass and the restrict step." >&2
 fi
 
+if [[ -n "$IMAGES" ]]; then
+  echo "==> [3b/6] Embedding screenshots from $IMAGES"
+  IMG_RC=0
+  IMG_OUT=$(python3 scripts/embed_png_in_gdoc.py --id "$ID" --map "$IMAGES" --account "$ACCOUNT" 2>&1) || IMG_RC=$?
+  echo "$IMG_OUT"
+  if [[ $IMG_RC -ne 0 ]]; then
+    EMBED_PROBLEM="${EMBED_PROBLEM:+$EMBED_PROBLEM; }one or more screenshots failed to embed (rc=$IMG_RC)"
+    echo "WARNING: screenshot embed failed, continuing to the restrict step." >&2
+  fi
+fi
+
 echo "==> [4/6] Formatting pass"
 python3 .agent/skills/gdocs-create/format_pass.py "$ID" --account "$ACCOUNT"
 
@@ -171,7 +191,8 @@ fi
 
 echo ""
 echo "==> Verifying published doc"
-GATE_ARGS=(--doc "$ID" --account "$ACCOUNT")
+GATE_ARGS=(--doc "$ID" --account "$ACCOUNT" --source "$FILE")
+[[ -n "$IMAGES" ]] && GATE_ARGS+=(--images "$IMAGES")
 [[ $RESTRICT -eq 0 ]] && GATE_ARGS+=(--allow-public)
 python3 scripts/readability_gate.py "${GATE_ARGS[@]}" || {
   echo "Published doc failed verification. Investigate before sharing the link." >&2

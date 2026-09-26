@@ -30,6 +30,7 @@ REPO_ROOT = os.path.join(SKILL_DIR, '..', '..', '..')
 sys.path.insert(0, os.path.join(REPO_ROOT, '.agent', 'scripts'))
 from file_utils import assert_drive_result  # Drive Operation Verification (CLAUDE.md)
 from file_utils import apply_visibility, add_visibility_arg, resolve_visibility  # sharing (CLAUDE.md LANDMINE)
+from file_utils import assert_no_ascii_diagram  # text diagrams render broken in Docs
 
 ACCOUNTS = {
     'work':    os.path.join(REPO_ROOT, '.agent/skills/work-drive-connector'),
@@ -252,6 +253,7 @@ def create_doc(args):
     if args.html:
         html = raw
     else:
+        assert_no_ascii_diagram(raw, args.title)
         html = md_to_html(raw, title=args.title)
 
     # Use explicit parent-id if given, else fall back to account default (may be None)
