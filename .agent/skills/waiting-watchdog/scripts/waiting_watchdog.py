@@ -229,6 +229,16 @@ def cmd_add(args):
             since = float(args.since)
         except ValueError:
             sys.exit(f'--since must be an epoch timestamp, got: {args.since}')
+    # Since 26 Sep 2026 a record says what "done" looks like and links the ask, so
+    # autoclose_check.py can verify it without a human. See docs/ledger_hygiene.md.
+    unattended = bool(args.node_why)
+    if not (args.done_when or args.done_ticket) and not unattended:
+        sys.exit('--done-when is required: what exactly counts as answered '
+                 '(for example "Teammate posts the ABC-123 estimate"). '
+                 'Add --done-ticket KEY when a ticket reaching Done is the answer.')
+    if not args.source and not args.no_link_why and not unattended:
+        sys.exit('--source is required: the Slack permalink (or ticket/doc link) of the ask. '
+                 'If the ask was made in a meeting with no link, pass --no-link-why "<where>".')
     item_id = next_id(state)
     source = {}
     if args.source:
@@ -254,7 +264,9 @@ def cmd_add(args):
         'last_nudge_at': None,
         'first_seen': time.time(),
         'closed_at': None,
-        'notes': '',
+        'notes': '' if not args.no_link_why else f' | no link: {args.no_link_why}',
+        'done_when': args.done_when or (f'{args.done_ticket} reaches Done' if args.done_ticket else None),
+        'done_ticket': (args.done_ticket or '').upper() or None,
     }
     save_state(state)
     print(f'added: {item_id} - waiting on {args.owner} for "{args.what}" (SLA {args.sla_hours}h)')
@@ -406,6 +418,19 @@ def cmd_drop(args):
     save_state(state)
     print(f'dropped: {args.item_id}')
 
+def cmd_set_done(args):
+    if not (args.done_when or args.done_ticket):
+        sys.exit('give --done-when and/or --done-ticket')
+    state = load_state()
+    it = state['items'].get(args.item_id)
+    if not it:
+        sys.exit(f'item not found: {args.item_id}')
+    if args.done_ticket:
+        it['done_ticket'] = args.done_ticket.upper()
+    it['done_when'] = args.done_when or it.get('done_when') or f"{it['done_ticket']} reaches Done"
+    save_state(state)
+    print(f"set-done: {args.item_id} done_when={it['done_when']!r} done_ticket={it.get('done_ticket')}")
+
 def cmd_touch(args):
     state = load_state()
     it = state['items'].get(args.item_id)
@@ -466,6 +491,17 @@ def main():
                     help='work-tree node id; find one with work_tree.py find <text>')
     ap.add_argument('--node-why', default=None,
                     help='only with --node unfiled, and only for unattended runs')
+    ap.add_argument('--done-when', default=None,
+                    help='what exactly counts as answered; required (autoclose_check reads it)')
+    ap.add_argument('--done-ticket', default=None,
+                    help='Jira/Linear key whose Done state IS the answer; closes automatically')
+    ap.add_argument('--no-link-why', default=None,
+                    help='only when the ask has no link (said in a meeting): where it was asked')
+
+    sd = sub.add_parser('set-done', help='add or change done_when / done_ticket on a record')
+    sd.add_argument('item_id')
+    sd.add_argument('--done-when', default=None)
+    sd.add_argument('--done-ticket', default=None)
 
     rf = sub.add_parser('refile', help='move a record to a different work-tree node')
     rf.add_argument('item_id')
@@ -500,7 +536,8 @@ def main():
     args = p.parse_args()
     {'add': cmd_add, 'sweep': cmd_sweep, 'report': cmd_report,
      'close': cmd_close, 'drop': cmd_drop, 'touch': cmd_touch,
-     'reopen': cmd_reopen, 'link': cmd_link, 'refile': cmd_refile}.get(
+     'reopen': cmd_reopen, 'link': cmd_link, 'refile': cmd_refile,
+     'set-done': cmd_set_done}.get(
         args.cmd or 'sweep', cmd_sweep)(args)
 
 READONLY_CMDS = {'report', 'list', 'show'}

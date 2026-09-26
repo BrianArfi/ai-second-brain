@@ -548,6 +548,16 @@ def scan_once(cfg, state):
 HEARTBEAT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "watcher_heartbeat.json")
 
+# A second copy goes into the recordings folder. The workspace copy is gitignored, so when the
+# watcher runs in WSL and the app on Windows (two checkouts) the app never saw a beat at all; the
+# recordings drive is the one folder both sides share.
+SHARED_BEAT_NAME = ".watcher_heartbeat.json"
+
+# How long a cron `--once` run vouches for the next one: the cron cadence (10 min) plus slack.
+# The process exits between runs, so without this every gap read as a dead watcher and the app
+# said "nothing is transcribing it" about meetings already transcribed (25 Sep 2026).
+ONCE_VALID_FOR_S = 15 * 60
+
 # The beat runs on its own thread, NOT on the poll loop. `scan_once` transcribes synchronously and
 # one meeting can hold it for an hour, so a beat written by the loop would go stale during exactly
 # the work it is meant to prove -- and the app would report "the transcriber is not running" about
@@ -563,36 +573,45 @@ def set_busy(name):
     with _busy_lock:
         _busy = name
 
-def write_heartbeat(cfg, interval):
+def write_heartbeat(cfg, interval, valid_for=None):
     """One line of proof that this process is alive. Atomic: the reader polls it every few
-    seconds and a half-written file would read as a dead watcher."""
+    seconds and a half-written file would read as a dead watcher. `valid_for` is set by a
+    `--once` run: the beat stays live that long after it is written, covering the cron gap."""
     with _busy_lock:
         busy = _busy
+    now = time.time()
+    rec_dir = cfg.get("machine", {}).get("recordings_dir")
     row = {
         "pid": os.getpid(),
-        "at": round(time.time(), 3),
+        "at": round(now, 3),
         "interval_s": interval,
         "tick_s": HEARTBEAT_TICK_S,
         "device": cfg.get("machine", {}).get("name") or platform.node(),
-        "recordings_dir": cfg.get("machine", {}).get("recordings_dir"),
+        "recordings_dir": rec_dir,
         "busy": busy,
     }
-    tmp = HEARTBEAT_PATH + ".tmp"
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(row, f, indent=1)
-        os.replace(tmp, HEARTBEAT_PATH)
-    except OSError:
-        pass            # a missed beat is a stale reading, never a reason to stop working
+    if valid_for:
+        row["valid_until"] = round(now + valid_for, 3)
+    targets = [HEARTBEAT_PATH]
+    if rec_dir and os.path.isdir(os.path.expanduser(rec_dir)):
+        targets.append(os.path.join(os.path.expanduser(rec_dir), SHARED_BEAT_NAME))
+    for path in targets:
+        tmp = path + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(row, f, indent=1)
+            os.replace(tmp, path)
+        except OSError:
+            pass        # a missed beat is a stale reading, never a reason to stop working
 
-def start_heartbeat(cfg, interval):
+def start_heartbeat(cfg, interval, valid_for=None):
     """Beats until the process exits. Daemon, so Ctrl-C still ends the watcher at once."""
     def beat():
         while True:
-            write_heartbeat(cfg, interval)
+            write_heartbeat(cfg, interval, valid_for)
             time.sleep(HEARTBEAT_TICK_S)
 
-    write_heartbeat(cfg, interval)
+    write_heartbeat(cfg, interval, valid_for)
     threading.Thread(target=beat, daemon=True, name="watcher-heartbeat").start()
 
 def report_status(state):
@@ -633,7 +652,9 @@ def main():
         process(path, cfg, state)
         return
     if args.once:
+        start_heartbeat(cfg, args.interval, ONCE_VALID_FOR_S)
         scan_once(cfg, state)
+        write_heartbeat(cfg, args.interval, ONCE_VALID_FOR_S)
         return
     print(f"[watcher] polling {cfg['machine'].get('recordings_dir')} "
           f"every {args.interval}s (Ctrl-C to stop)")

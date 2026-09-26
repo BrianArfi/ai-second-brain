@@ -53,6 +53,7 @@ REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '..', '..', '..'))
 sys.path.insert(0, os.path.join(REPO_ROOT, '.agent', 'scripts'))
 from file_utils import assert_drive_result  # Drive Operation Verification (CLAUDE.md)
 from file_utils import apply_visibility, add_visibility_arg, resolve_visibility  # sharing (CLAUDE.md LANDMINE)
+from file_utils import assert_no_ascii_diagram  # text diagrams render broken in Docs
 
 # Full drive access for Work's shared drive
 SCOPES = ['https://www.googleapis.com/auth/drive']
@@ -138,6 +139,7 @@ def update_file(file_id, file_path, convert_to_docs=False, visibility='domain'):
 
             with open(file_path, 'r', encoding='utf-8') as f:
                 md_content = f.read()
+                assert_no_ascii_diagram(md_content, file_path)
 
             # Clean up existing titles and metadata in the source markdown
             md_content = re.sub(r'(?i)^#\s+.*?\n+', '', md_content.lstrip())
@@ -268,6 +270,7 @@ def upload_file(file_path, folder_id=None, convert_to_docs=False, visibility='do
             import re
             with open(file_path, 'r', encoding='utf-8') as f:
                 md_content = f.read()
+                assert_no_ascii_diagram(md_content, file_path)
 
             base_title = os.path.splitext(file_name)[0]
             clean_title = base_title.replace('_', ' ').replace('—', '-').replace('--', '-')

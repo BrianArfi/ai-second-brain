@@ -61,8 +61,18 @@ Antigravity reader: what it gives us, and what it does NOT:
       protobuf with no step table. It is NOT parsed; it is only counted and
       reported, because a timestamp scan over it returns noise, not minutes.
 
-State:  journal/state/work_hours.json        (served at /api/work-hours)
-Cache:  journal/state/work_hours_cache.json  (per-file parse cache, incremental)
+Every machine sweeps, and no machine sees everything. WSL reads its own store
+plus the mounted Windows one; Windows reads its own; macOS reads only macOS.
+So each sweep writes what IT saw to a per-host shard, and the day stats are
+computed from the union of every shard in the repo (deduped by session id,
+because WSL and Windows both see the Windows transcripts). Shards are the only
+tracked output: one writer per file, so git never conflicts on them. The merged
+state and the parse cache are host-local and gitignored (25 Sep 2026, when the
+app was reading a file frozen on 20 Sep because only WSL ever swept).
+
+Shards: journal/state/work_hours_hosts/<host>.json   (tracked, one per machine)
+State:  journal/state/work_hours.json        (host-local merge, served at /api/work-hours)
+Cache:  journal/state/work_hours_cache.json  (host-local per-file parse cache)
 
 CLI:
   work_hours.py sweep [--backfill N] [--date YYYY-MM-DD] [--no-calendar]
@@ -84,6 +94,8 @@ BASE_DIR = Path(__file__).resolve().parents[4]
 CLAUDE_PROJECTS = Path.home() / '.claude' / 'projects'   # this host's own store
 STATE_PATH = BASE_DIR / 'journal' / 'state' / 'work_hours.json'
 CACHE_PATH = BASE_DIR / 'journal' / 'state' / 'work_hours_cache.json'
+SHARD_DIR = BASE_DIR / 'journal' / 'state' / 'work_hours_hosts'
+SHARD_KEEP_DAYS = 35       # minutes older than this drop out of a shard
 FATHOM_REGISTRY = BASE_DIR / 'journal' / 'fathom_registry.json'
 GCAL = BASE_DIR / '.agent' / 'skills' / 'google-calendar-connector' / 'gcal_manager.py'
 
@@ -283,6 +295,124 @@ def save_json_atomic(path, data):
         json.dump(data, f, indent=1, ensure_ascii=False)
     os.replace(tmp, str(path))
 
+# ---------- host shards ----------
+
+def host_id():
+    """Stable per-machine id: platform tag + hostname. WSL and Windows share a
+    hostname, so the tag is what keeps their shards apart."""
+    override = os.environ.get('WORK_HOURS_HOST')
+    if override:
+        return re.sub(r'[^A-Za-z0-9_.-]+', '-', override)
+    if sys.platform == 'win32':
+        tag = 'windows'
+    elif sys.platform == 'darwin':
+        tag = 'macos'
+    else:
+        try:
+            tag = 'wsl' if 'microsoft' in Path('/proc/version').read_text().lower() else 'linux'
+        except OSError:
+            tag = 'linux'
+    import socket
+    name = socket.gethostname().split('.')[0] or 'host'
+    return re.sub(r'[^A-Za-z0-9_.-]+', '-', f'{tag}-{name}').lower()
+
+def to_runs(mins):
+    """Sorted epoch minutes -> [[start, count], ...]. Keeps shards small."""
+    runs = []
+    for m in sorted(mins):
+        if runs and m == runs[-1][0] + runs[-1][1]:
+            runs[-1][1] += 1
+        else:
+            runs.append([m, 1])
+    return runs
+
+def from_runs(runs):
+    out = set()
+    for start, n in runs or ():
+        out.update(range(start, start + n))
+    return out
+
+# What a merged session needs. The automation verdict is decided once, on the
+# host that parsed the transcript, and stored as `auto`: the fields it is read
+# from (opening prompt, entrypoint, UI markers) were three quarters of the
+# shard's size and are needed for nothing else.
+SHARD_META = ('lane', 'label', 'runtime', 'turns', 'auto')
+
+def update_host_shard(sessions, gcal_days, now):
+    """Fold this sweep's sessions into this host's shard and prune old minutes.
+
+    A sweep only scans files touched inside its backfill window, so the shard
+    accumulates: a session seen now replaces its old entry, one not seen now is
+    kept until its minutes age out."""
+    host = host_id()
+    path = SHARD_DIR / f'{host}.json'
+    shard = load_json(path, {})
+    floor = int(now.timestamp()) // 60 - SHARD_KEEP_DAYS * 1440
+    stored = shard.get('sessions') or {}
+    for sid, e in sessions.items():
+        entry = {'lane': e.get('lane') or 'other', 'label': (e.get('label') or '')[:80]}
+        if (e.get('runtime') or 'claude-code') != 'claude-code':
+            entry['runtime'] = e['runtime']
+        if e.get('turns'):
+            entry['turns'] = e['turns']
+        if is_automated(e):
+            entry['auto'] = True
+        entry['act'] = to_runs(m for m in e['act'] if m >= floor)
+        entry['hum'] = to_runs(m for m in e['hum'] if m >= floor)
+        stored[sid] = entry
+    for sid in list(stored):
+        e = stored[sid]
+        e['act'] = to_runs(m for m in from_runs(e.get('act')) if m >= floor)
+        e['hum'] = to_runs(m for m in from_runs(e.get('hum')) if m >= floor)
+        if not e['act']:
+            del stored[sid]
+    gcal = shard.get('gcal') or {}
+    gcal.update(gcal_days)
+    keep_from = (now - timedelta(days=SHARD_KEEP_DAYS)).strftime('%Y-%m-%d')
+    gcal = {d: v for d, v in gcal.items() if d >= keep_from}
+    shard = {'host': host, 'swept_at_wib': now.isoformat(timespec='seconds'),
+             'roots': [str(r) for r in CLAUDE_PROJECT_ROOTS if r.is_dir()],
+             'sessions': stored, 'gcal': gcal}
+    # compact: shards are committed on every sweep, and indentation alone was
+    # a quarter of the bytes
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = str(path) + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(shard, f, ensure_ascii=False, separators=(',', ':'))
+    os.replace(tmp, str(path))
+    return host
+
+def merge_shards():
+    """Union every host shard. Returns (sessions, gcal_by_day, hosts).
+
+    Sessions merge by id: minutes are unioned, metadata comes from the most
+    recently swept host that has it. Calendar days come from the most recently
+    swept host that has events for that day."""
+    shards = []
+    for p in sorted(SHARD_DIR.glob('*.json')):
+        s = load_json(p, None)
+        if isinstance(s, dict) and isinstance(s.get('sessions'), dict):
+            shards.append(s)
+    shards.sort(key=lambda s: s.get('swept_at_wib') or '')
+    sessions, gcal, hosts = {}, {}, {}
+    for s in shards:        # oldest first, so fresher metadata wins
+        hosts[s.get('host') or '?'] = {'swept_at_wib': s.get('swept_at_wib'),
+                                       'sessions': len(s['sessions'])}
+        for sid, e in s['sessions'].items():
+            cur = sessions.setdefault(sid, {'act': set(), 'hum': set(), 'lane': 'other',
+                                            'label': None, 'runtime': 'claude-code',
+                                            'auto': False})
+            for k in SHARD_META:
+                if e.get(k) not in (None, ''):
+                    cur[k] = e[k]
+            cur['auto'] = bool(e.get('auto'))
+            cur['act'] |= from_runs(e.get('act'))
+            cur['hum'] |= from_runs(e.get('hum'))
+        for d, events in (s.get('gcal') or {}).items():
+            if events:
+                gcal[d] = events
+    return sessions, gcal, hosts
+
 def clean_label(text):
     """First human message -> short stream label, or None to keep looking."""
     t = (text or '').strip()
@@ -404,6 +534,8 @@ def scan_file(path, cached):
             'act': sorted(act), 'hum': sorted(hum)}
 
 def is_automated(entry):
+    if 'auto' in entry:
+        return entry['auto']   # decided on the host that parsed it, see SHARD_META
     if entry.get('runtime') == 'antigravity':
         # Antigravity records no entrypoint, so this is INFERRED from user-turn
         # count, not read off the session. See the module docstring: one-shot
@@ -1114,6 +1246,14 @@ def cmd_sweep(args):
                 for i in range(max(args.backfill, 1))]
     days.sort()
 
+    # Single-flight per host: the app's scheduler, the dashboard's self-refresh
+    # and a manual run can all start a sweep. A second one exits 75 at once
+    # rather than queueing behind a scan that is already doing the same work.
+    sys.path.insert(0, str(BASE_DIR / '.agent' / 'scripts'))
+    from ledger_lock import hold_ledger_lock
+    hold_ledger_lock('work_hours', timeout=5)
+
+    fetched_ok = {}
     state = load_json(STATE_PATH, {})
     state.setdefault('days', {})
     state.setdefault('gcal_cache', {})
@@ -1136,6 +1276,7 @@ def cmd_sweep(args):
                     blanked.append(d)
                     continue
                 state['gcal_cache'][d] = got
+                fetched_ok[d] = got
             state['calendar_ok'] = True
             state.pop('calendar_error', None)
             if blanked:
@@ -1156,6 +1297,27 @@ def cmd_sweep(args):
                  'one_shot': 0, 'multi_turn': 0}
     if not args.no_antigravity:
         sessions.update(collect_agy_sessions(wstart_min, cache, agy_stats))
+
+    # What this host saw goes to its shard; the days are computed from every
+    # host's shard, so a machine that cannot see a store still counts it.
+    host = update_host_shard(sessions, fetched_ok, t0)
+    sessions, merged_gcal, hosts = merge_shards()
+    for d, events in merged_gcal.items():
+        if d not in fetched_ok:
+            state['gcal_cache'][d] = events
+    # Recompute every day the shards cover, not only the backfill window:
+    # another host's shard may have brought minutes for a day swept earlier.
+    floor = int(t0.timestamp()) // 60 - SHARD_KEEP_DAYS * 1440
+    covered = set()
+    for e in sessions.values():
+        mins = [m for m in e['act'] if m >= floor]
+        if mins:
+            d0 = datetime.fromtimestamp(min(mins) * 60, WIB) - timedelta(hours=BOUNDARY_HOUR)
+            d1 = datetime.fromtimestamp(max(mins) * 60, WIB) - timedelta(hours=BOUNDARY_HOUR)
+            while d0.date() <= d1.date():
+                covered.add(d0.strftime('%Y-%m-%d'))
+                d0 += timedelta(days=1)
+    days = sorted(set(days) | covered)
 
     for d in days:
         day = assemble_day(d, sessions, state['gcal_cache'].get(d), ai_speed=args.ai_speed)
@@ -1201,6 +1363,8 @@ def cmd_sweep(args):
     cache = {k: v for k, v in cache.items() if v.get('mtime', 0) >= cutoff}
 
     state['last_sweep_wib'] = t0.isoformat(timespec='seconds')
+    state['swept_by'] = host
+    state['hosts'] = hosts
     state['boundary_hour'] = BOUNDARY_HOUR
     state['ai_speed_factor'] = args.ai_speed
     state['sources'] = describe_sources(agy_stats)

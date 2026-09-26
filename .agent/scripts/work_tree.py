@@ -29,6 +29,7 @@ Command line:
     python3 .agent/scripts/work_tree.py add-node --id promo-p2 --label "Phase 2" \
         --kind phase --parent promo --summary "..."
     python3 .agent/scripts/work_tree.py archive-node apple-stc --why "shipped"
+    python3 .agent/scripts/work_tree.py unarchive-node apple-stc   # restores the old status
     python3 .agent/scripts/work_tree.py alias --initiative mp-exampleprogram-eshop --node exampleprogram
     python3 .agent/scripts/work_tree.py validate
 """
@@ -53,7 +54,7 @@ VALID_KINDS = {"domain", "world", "client", "drop", "track", "item", "thread",
                "domain-note"}
 
 def wib_now():
-    return (datetime.datetime.utcnow() + datetime.timedelta(hours=7)).strftime(
+    return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7))).strftime(
         "%Y-%m-%dT%H:%M+07:00")
 
 # ------------------------------------------------------------------ loading
@@ -262,12 +263,33 @@ def cmd_archive_node(args):
         print(f"unknown node '{args.node_id}'", file=sys.stderr)
         return 1
     n = idx[args.node_id]["node"]
+    if n.get("status") != "archived":
+        n["status_before_archive"] = n.get("status")
     n["status"] = "archived"
     n["archived_wib"] = wib_now()
     if args.why:
         n["archived_why"] = args.why
     save_tree(tree)
     print(f"archived {args.node_id} (id kept; records pointing at it still resolve)")
+    return 0
+
+def cmd_unarchive_node(args):
+    """Undo archive-node. Archiving is only safe to do in bulk if it is cheap
+    to reverse, so the reverse is a command, not a hand edit of the JSON."""
+    tree = load_tree()
+    idx = node_index(tree)
+    if args.node_id not in idx:
+        print(f"unknown node '{args.node_id}'", file=sys.stderr)
+        return 1
+    n = idx[args.node_id]["node"]
+    if n.get("status") != "archived":
+        print(f"node '{args.node_id}' is not archived (status: {n.get('status', '-')})")
+        return 0
+    n["status"] = args.status or n.get("status_before_archive") or "active"
+    for k in ("archived_wib", "archived_why", "status_before_archive"):
+        n.pop(k, None)
+    save_tree(tree)
+    print(f"unarchived {args.node_id} -> status {n['status']}")
     return 0
 
 def cmd_alias(args):
@@ -395,6 +417,10 @@ def main():
     ar.add_argument("node_id")
     ar.add_argument("--why")
 
+    ua = sub.add_parser("unarchive-node", help="undo archive-node")
+    ua.add_argument("node_id")
+    ua.add_argument("--status", help="status to restore; default: the one it had before")
+
     al = sub.add_parser("alias", help="portfolio initiative id <-> node id")
     al.add_argument("--initiative")
     al.add_argument("--node")
@@ -409,6 +435,7 @@ def main():
     args = p.parse_args()
     fn = {"find": cmd_find, "show": cmd_show, "list": cmd_list,
           "add-node": cmd_add_node, "archive-node": cmd_archive_node,
+          "unarchive-node": cmd_unarchive_node,
           "alias": cmd_alias, "validate": cmd_validate,
           "coverage": cmd_coverage}.get(args.cmd)
     if not fn:

@@ -52,6 +52,7 @@ TOKEN_FILE = os.path.join(SCRIPT_DIR, 'token.json')
 REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '..', '..', '..'))
 sys.path.insert(0, os.path.join(REPO_ROOT, '.agent', 'scripts'))
 from file_utils import assert_drive_result  # Drive Operation Verification (CLAUDE.md)
+from file_utils import assert_no_ascii_diagram  # text diagrams render broken in Docs
 
 # Full drive access for Secondary's drive
 SCOPES = ['https://www.googleapis.com/auth/drive']
@@ -118,6 +119,7 @@ def upload_file(file_path, folder_id=None, convert_to_docs=False, share=False):
             import re
             with open(file_path, 'r', encoding='utf-8') as f:
                 md_content = f.read()
+                assert_no_ascii_diagram(md_content, file_path)
 
             title_match = re.search(r'(?m)^#\s+(.*)', md_content)
             if title_match:
@@ -238,6 +240,7 @@ def update_file(file_id, file_path, convert_to_docs=False):
             import re
             with open(file_path, 'r', encoding='utf-8') as f:
                 md_content = f.read()
+                assert_no_ascii_diagram(md_content, file_path)
 
             title_match = re.search(r'(?m)^#\s+(.*)', md_content)
             if title_match:

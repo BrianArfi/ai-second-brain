@@ -44,6 +44,8 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
+sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'scripts'))
+from cheap_llm import ask_json  # noqa: E402  Gemini Flash -> GLM -> Haiku
 STATE_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'commitments.json')
 TOKEN_ENV = os.path.join(BASE_DIR, '.agent', 'skills', 'slack-connector', 'token.env')
 AGY_BRIDGE = os.path.join(BASE_DIR, '.agent', 'skills', 'agy-bridge', 'run.py')
@@ -744,13 +746,12 @@ def sweep_fathom(state):
             if key in state['processed_sources']:
                 continue
             state['processed_sources'][key] = True
-            create_item(
-                state, text=ai.get('description', ''), to='',
+            queue_meeting_candidate(
+                state, key=key, text=ai.get('description', ''),
                 permalink=ai.get('recording_playback_url', ''),
-                project=reg_meta.get('project'),
-                source_type='fathom',
+                project=reg_meta.get('project'), source_type='fathom',
                 source_ref=m.get('url') or reg_meta.get('fathom_url', ''),
-                confidence='high',
+                meeting_date=reg_meta.get('date_wib'),
             )
             new_items += 1
     state['processed_fathom_ids'] = sorted(processed)
@@ -929,10 +930,11 @@ def sweep_local(state):
             if key in state['processed_sources']:
                 continue
             state['processed_sources'][key] = True
-            create_item(
-                state, text=captured, to='',
-                permalink=relpath, source_type='meeting-local',
-                source_ref=relpath, confidence='high',
+            mdate = re.search(r'(\d{4}-\d{2}-\d{2})', relpath)
+            queue_meeting_candidate(
+                state, key=key, text=captured, permalink=relpath,
+                source_type='meeting-local', source_ref=relpath,
+                meeting_date=mdate.group(1) if mdate else None,
             )
             new_items += 1
     state['local_watermark'] = newest
@@ -965,6 +967,21 @@ def sweep_auto_close(token, state):
                 break
     return closed
 
+def queue_meeting_candidate(state, key, text, permalink, source_type, source_ref,
+                            project=None, meeting_date=None):
+    """A meeting action line is a CANDIDATE, not a commitment (26 Sep 2026).
+
+    Until then every MoM line naming the owner became an open commitment with no
+    recipient and no due date: 172 of 331 open commitments had no recipient. Now
+    `extract` asks a cheap model whether the line is a real promise to a named
+    person, with a date and a done condition, and only those become records.
+    The rest stay in the MoM, where they already are."""
+    state.setdefault('meeting_candidates', []).append({
+        'key': key, 'text': text, 'permalink': permalink, 'source_type': source_type,
+        'source_ref': source_ref, 'project': project, 'meeting_date': meeting_date,
+        'added_at': time.time(),
+    })
+
 def heartbeat(job, status, summary):
     try:
         subprocess.run([sys.executable, HEARTBEAT, '--job', job, '--status', status,
@@ -983,6 +1000,8 @@ def prune(state):
     # long ago (>14d unconsumed = stale, likely superseded)
     cand_cutoff = time.time() - CLOSED_RETENTION_DAYS * 86400
     state['pending_candidates'] = [c for c in state['pending_candidates']
+                                   if c.get('added_at', 0) >= cand_cutoff]
+    state['meeting_candidates'] = [c for c in state.get('meeting_candidates', [])
                                    if c.get('added_at', 0) >= cand_cutoff]
     return len(dead)
 
@@ -1011,7 +1030,8 @@ def cmd_sweep(args):
         summary = (f'+{n_fathom} fathom, +{n_cand} slack candidates, +{n_local} local-meeting, '
                    f'{n_closed} auto-closed, {n_pruned} pruned -> {len(open_items)} OPEN')
         print(f'sweep done in {time.time()-t0:.0f}s: {summary}, '
-              f'{len(state["pending_candidates"])} pending extraction')
+              f'{len(state["pending_candidates"])} slack + '
+              f'{len(state.get("meeting_candidates", []))} meeting candidates pending extraction')
         heartbeat('commitment-ledger', 'ok', summary)
     except SystemExit:
         raise
@@ -1026,9 +1046,11 @@ def cmd_extract(args):
     extracts structure (to/due/is_commitment) - it never decides open/closed."""
     _wib_timestamp_header('extract')
     state = load_state()
+    extract_meeting_candidates(state, args.limit)
     candidates = state.get('pending_candidates', [])
     if not candidates:
-        print('no pending candidates, nothing to extract')
+        save_state(state)
+        print('no pending slack candidates, nothing more to extract')
         return
     batch = candidates[:args.limit]
     prompt = (
@@ -1048,32 +1070,18 @@ def cmd_extract(args):
         + '\n'.join(json.dumps({'ts': c['ts'], 'channel': c['channel_name'],
                                 'text': c['text']}, ensure_ascii=False) for c in batch)
     )
-    tmp_dir = os.path.join(BASE_DIR, 'journal', 'state')
-    prompt_path = os.path.join(tmp_dir, 'commitment_extract_prompt.txt')
-    with open(prompt_path, 'w') as f:
-        f.write(prompt)
-    out = subprocess.run([sys.executable, AGY_BRIDGE, '--task', 'harvest',
-                          '--prompt-file', prompt_path, '--timeout', '180'],
-                         capture_output=True, text=True)
-    if out.returncode == 3:
-        print('FALLBACK_TO_CLAUDE: agy-bridge exhausted its chain; '
-              f'{len(batch)} candidates left pending for Claude to extract manually.')
-        print(out.stdout.strip())
-        return   # rc 3 is NOT a failure - candidates stay pending, exit 0
-    if out.returncode != 0 or not out.stdout.strip():
-        print(f'extract failed (rc={out.returncode}); candidates kept for retry.\n'
-              f'{out.stderr[:500]}', file=sys.stderr)
-        sys.exit(1)
+    # Gemini Flash, then GLM 5.3 Flash, then Haiku (cheap_llm). Before 26 Sep a
+    # failed agy chain left every candidate for a human to extract by hand.
+    rows, meta = ask_json(prompt, required=('ts', 'is_commitment'), lines=True,
+                          label='commitment-extract', timeout=180)
+    if rows is None:
+        save_state(state)
+        print('FALLBACK_TO_CLAUDE: every model in the cheap chain failed '
+              f'({meta["tried"]}); {len(batch)} candidates left pending.')
+        return
     created, by_ts = 0, {c['ts']: c for c in batch}
     consumed_ts = set()
-    for line in out.stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            row = json.loads(line)
-        except Exception:
-            continue
+    for row in rows:
         ts = row.get('ts')
         cand = by_ts.get(ts)
         if not cand:
@@ -1097,6 +1105,66 @@ def cmd_extract(args):
     print(f'extract: {len(batch)} candidates -> {created} new commitments, '
           f'{len(consumed_ts)} triaged, {len(state["pending_candidates"])} still pending')
 
+MEETING_PROMPT = (
+    'You triage action items from meeting notes for Your Name (Product Director, '
+    'Work). Each line below is one action item, with the meeting date. For EACH line output '
+    'ONE JSON line: {"key": "<key>", "is_commitment": true|false, "to": "<the named person '
+    'the owner promised it to, or empty>", "due": "<YYYY-MM-DD or null>", "done_when": "<what '
+    'counts as delivered, 15 words or fewer>", "text": "<what the owner will do, 20 words or '
+    'fewer>"}. is_commitment=true ONLY when the owner himself promised a concrete deliverable to a '
+    'named person or group. false for: someone else\'s action, team-wide chores, vague '
+    'intentions ("look into", "think about"), attending a meeting, anything already done in the '
+    'meeting. Resolve relative dates against the meeting date, never today. A due date before '
+    'the meeting date is null. Output ONLY JSON lines, no prose.'
+)
+
+def extract_meeting_candidates(state, limit):
+    """Meeting candidates -> real commitments, only when the model finds a recipient."""
+    cands = state.get('meeting_candidates', [])
+    if not cands:
+        return 0
+    batch = cands[:limit]
+    prompt = MEETING_PROMPT + '\n\n' + '\n'.join(json.dumps(
+        {'key': c['key'], 'meeting_date': c.get('meeting_date'), 'text': c['text']},
+        ensure_ascii=False) for c in batch)
+    rows, meta = ask_json(prompt, required=('key', 'is_commitment'), lines=True,
+                          label='commitment-extract-meeting', timeout=180)
+    if rows is None:
+        print(f'meeting extract: every model failed ({meta["tried"]}); '
+              f'{len(batch)} candidates kept for the next run')
+        return 0
+    by_key = {c['key']: c for c in batch}
+    consumed, created, skipped = set(), 0, 0
+    for row in rows:
+        cand = by_key.get(row.get('key'))
+        if not cand:
+            continue
+        consumed.add(cand['key'])
+        to = (row.get('to') or '').strip()
+        if not row.get('is_commitment') or not to:
+            skipped += 1
+            continue
+        due = row.get('due') or None
+        if not due and cand.get('meeting_date'):
+            try:
+                due = (datetime.fromisoformat(cand['meeting_date'][:10]) + timedelta(days=7)).strftime('%Y-%m-%d')
+            except ValueError:
+                due = None
+        it = create_item(
+            state, text=row.get('text') or cand['text'], to=to, due=due,
+            permalink=cand.get('permalink', ''), project=cand.get('project'),
+            source_type=cand['source_type'], source_ref=cand.get('source_ref', ''),
+            confidence='high',
+        )
+        if isinstance(it, dict) and not it.get('done_when'):
+            it['done_when'] = row.get('done_when') or None
+        created += 1
+    state['meeting_candidates'] = [c for c in cands if c['key'] not in consumed]
+    print(f'meeting extract [{meta["model"]}]: {len(batch)} candidates -> {created} commitments, '
+          f'{skipped} left in the MoM (no named recipient or not a promise), '
+          f'{len(state["meeting_candidates"])} still pending')
+    return created
+
 # ---------------------------------------------------------------------- CLI --
 
 def cmd_add(args):
@@ -1105,14 +1173,42 @@ def cmd_add(args):
     except UnknownNode as e:
         print(str(e), file=sys.stderr)
         sys.exit(2)
+    # Since 26 Sep 2026: a commitment names who it is for, when, and what "done"
+    # looks like, or it stays in the MoM. See docs/ledger_hygiene.md.
+    if not args.node_why:
+        missing = [f for f, v in (('--to', args.to), ('--due', args.due),
+                                  ('--done-when', args.done_when or args.done_ticket)) if not v]
+        if missing:
+            sys.exit(f"missing {', '.join(missing)}: a commitment needs a recipient, a due date "
+                     f"and what counts as delivered (or --done-ticket KEY).")
     state = load_state()
     it = create_item(
         state, text=args.text, to=args.to or '', due=args.due, project=args.project,
         source_type='manual', source_ref=args.source or '', confidence='high',
         priority=args.priority, node=node, node_why=args.node_why,
     )
+    it['done_when'] = args.done_when or (f'{args.done_ticket} reaches Done' if args.done_ticket else None)
+    it['done_ticket'] = (args.done_ticket or '').upper() or None
     save_state(state)
     print(f"added: {it['id']}  node={it.get('node')}")
+
+def cmd_set_done(args):
+    '''Add or change done_when / done_ticket / due (the weekly review re-dates here).'''
+    if not (args.done_when or args.done_ticket or args.due):
+        sys.exit('give --done-when, --done-ticket and/or --due')
+    state = load_state()
+    it = state['items'].get(args.item_id)
+    if not it:
+        sys.exit(f'item not found: {args.item_id}')
+    if args.done_ticket:
+        it['done_ticket'] = args.done_ticket.upper()
+    if args.done_when or args.done_ticket:
+        it['done_when'] = args.done_when or it.get('done_when') or f"{it['done_ticket']} reaches Done"
+    if args.due:
+        it['due'] = args.due
+    save_state(state)
+    print(f"set-done: {args.item_id} due={it.get('due')} done_when={it.get('done_when')!r} "
+          f"done_ticket={it.get('done_ticket')}")
 
 def cmd_refile(args):
     """Move a record to another node. The triage pass runs on this."""
@@ -1352,6 +1448,15 @@ def main():
                     help='work-tree node id; find one with work_tree.py find <text>')
     ap.add_argument('--node-why', default=None,
                     help='only with --node unfiled, and only for unattended runs')
+    ap.add_argument('--done-when', default=None, help='what counts as delivered; required')
+    ap.add_argument('--done-ticket', default=None,
+                    help='Jira/Linear key whose Done state IS the delivery; closes automatically')
+
+    sd = sub.add_parser('set-done', help='add or change done_when / done_ticket / due')
+    sd.add_argument('item_id')
+    sd.add_argument('--done-when', default=None)
+    sd.add_argument('--done-ticket', default=None)
+    sd.add_argument('--due', default=None)
 
     rf = sub.add_parser('refile', help='move a record to a different work-tree node')
     rf.add_argument('item_id')
@@ -1390,7 +1495,7 @@ def main():
     {'sweep': cmd_sweep, 'extract': cmd_extract, 'add': cmd_add,
      'close': cmd_close, 'drop': cmd_drop, 'reopen': cmd_reopen,
      'report': cmd_report, 'link': cmd_link, 'unlink': cmd_unlink,
-     'dedupe': cmd_dedupe, 'refile': cmd_refile,
+     'dedupe': cmd_dedupe, 'refile': cmd_refile, 'set-done': cmd_set_done,
      }.get(args.cmd or 'sweep', cmd_sweep)(args)
 
 READONLY_CMDS = {'report'}

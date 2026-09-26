@@ -14,6 +14,37 @@ Supports `work` (you@yourcompany.com) and `personal` (you@example.com) accounts.
 
 ---
 
+## Diagrams: Mermaid images only, never text-drawn (rule since 24 Sep 2026)
+
+A tree, box or flow drawn with text characters (`├──`, `└──`, `│`, `+---+`, dotted leaders like `A. Thing ...... P0`) renders in a Google Doc as a monospace block with broken line joins. the owner flagged it on the Q4 roadmap initiative tree. Every diagram that goes into a Doc is a Mermaid diagram, rendered to an inline image.
+
+- **Draw it** in Mermaid per [`diagram-gen`](../diagram-gen/SKILL.md). A hierarchy or initiative tree is `flowchart LR` with one node per leaf. Colour nodes by meaning with `classDef` (for priorities: P0 red, P1 amber, P2 grey) and add a one-line legend under the image.
+- **Validate it** with `.agent/skills/diagram-gen/render_check.py` before anyone sees it.
+- **In the markdown sent to Drive**, put `[[PLACEHOLDER_NAME]]` where the diagram goes. A raw ```` ```mermaid ```` fence would convert to a code block.
+- **After the convert**, embed the image: `python3 scripts/embed_mermaid_in_gdoc.py --id <DOC_ID> --account work --diagrams-file <placeholders.json>`, where the JSON maps each placeholder to its Mermaid source. Re-run it after every `update --convert`, because a convert wipes inline images.
+- **The repo copy** of the document keeps the ```` ```mermaid ```` fence, which the local dashboard renders.
+
+**Enforced in code.** `find_ascii_diagrams()` in `.agent/scripts/file_utils.py` runs inside `gdocs_create.py create-doc`, both `--convert` paths of the work and secondary `gdrive_manager.py`, and the source lint in `scripts/readability_gate.py` (which `publish_prd.sh` runs). It refuses box-drawing characters, ASCII art in an untyped code block, and a raw mermaid fence. Typed code blocks (`bash`, `json`, `gherkin` and similar) are left alone. Override for one call only: `GDOC_ALLOW_ASCII_DIAGRAM=1`.
+
+---
+
+## Publish pass checks R1 to R4 (rule since 25 Sep 2026)
+
+the owner's rule, after the ExampleProgram OTP PRD and BRD shipped with local links, a run-on header, and screenshot promises with no screenshot. Every Doc passes these four checks before and after publishing:
+
+| # | Rule | Fails when |
+| :--- | :--- | :--- |
+| R1 | **Links are internet links.** A reader on another machine must be able to click every link. | A link or bare path points at `C:/`, `/home/`, `file://`, a WSL path, a repo-relative `.md`, or `localhost:3737`. Link the Drive, Jira, Slack or Fathom URL instead. Ledger ids (`DEC-`, `COM-`, `WAIT-`) go in as plain text. |
+| R2 | **Tables are sized.** | A 3+ column table has even widths (the format pass did not run), a column is under 36pt, or a table is wider than the page in a paged Doc. |
+| R3 | **Promised pictures exist and render.** | A `[[PLACEHOLDER]]` resolves to neither a Mermaid diagram nor an image file. Also when a free-text `[[SCREENSHOT: ...]]` is left in, a "Representation of" caption has no picture, the Doc holds fewer images than the source promised, or an image has no content. |
+| R4 | **Header fields sit one per line.** | One line carries two or more `**Label:**` fields joined by `·`, `•` or `|`. Put each field on its own line, or use a Field/Value table. |
+
+- **Screenshots are made, not promised.** When a document calls for a screen, build a mockup: HTML in the product's visual style, captured per section with Playwright at 2x. Example: `Clients/Work/Example Program/assets/otp_address_mockups/` (`screens.html`, `capture.py`). Label each screen "Mockup for review" until Product Design supplies the final.
+- **Embed screenshots in the same run:** `bash scripts/publish_prd.sh --file <md> --id <DOC_ID> --images <map.json>`, where the JSON maps each `[[TOKEN]]` to a PNG. The script is `scripts/embed_png_in_gdoc.py`. A re-convert wipes inline images, so always publish through `publish_prd.sh` with `--images`, never convert alone.
+- **Enforced in code** by `scripts/readability_gate.py`: `--source` checks R1, R3 and R4 in the markdown, and `--doc` checks R1, R2 and R3 on the published Doc. `publish_prd.sh` runs both. Check by hand: `python3 scripts/readability_gate.py --source <md> --doc <DOC_ID> --images <map.json>`.
+
+---
+
 ## Formatting pass (automatic since 2 Sep 2026)
 
 `create-doc` runs it for you, and so does any `gdrive_manager.py` upload/update with `--convert` that produces a Doc. You only run it by hand on a doc created before this, or after a surgical edit that changed how much text sits in a table. Skip it on one call with `--no-format-pass` (gdocs-create) or `GDOC_FORMAT_PASS_DISABLE=1` (the Drive connectors).
