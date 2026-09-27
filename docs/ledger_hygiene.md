@@ -63,8 +63,10 @@ what has evidence by itself and writes one list for the owner to
 | `ASK` | One question for the owner |
 
 **5. A node is archived when its work ends.** Same day when a drop ships or an
-engagement stops. Otherwise the weekly review proposes nodes with no live record and no
-activity for 30 days. Archived nodes disappear from the Work tab (the Archived filter
+engagement stops. Otherwise, a node idle for 30 days is archived by the Saturday audit
+without asking (the owner, 26 Sep 2026: "kalo udah sebulan idle sih close aja"). Idle means
+no live record, no open todo, no ticket updated and no record activity under it for 30
+days, and the node itself is older than 30 days. Archived nodes disappear from the Work tab (the Archived filter
 still shows them), and old records keep resolving.
 
 **6. Everything is reversible.** `reopen` brings a closed or dropped record back for 14
@@ -83,10 +85,10 @@ model second, Claude last.
 | Layer | What it does | Model |
 | :--- | :--- | :--- |
 | `autoclose_check.py`, daily 13:10 WIB and before every Saturday audit | Reads each record's tickets (Work Jira, ExampleVendor Jira, Linear), decisions and MoMs that cite it, and Slack (waiting-on only). A record whose `done_ticket` is Done closes with no model. Other movement goes to one cheap call; DONE counts only when the model's quote is found verbatim in the evidence. Tickets still To Do are kept as dated `open_evidence` in `journal/state/autoclose_state.json` | none, then the cheap chain |
-| Cheap chain, `.agent/scripts/cheap_llm.py` | Gemini 3.8 Flash, then GLM 5.3 Flash, then Haiku. Any step that fails or returns no valid JSON falls through; if all fail, nothing is written. Every attempt is logged to `dashboard-data/cheap_llm_log.jsonl` | cheap only |
+| Cheap chain, `.agent/scripts/cheap_llm.py` | Default: newest Gemini Flash, then GLM 5.3 Flash, then Haiku. A machine without one of those gets the gap filled from cheap, common backends (Gemini API key, Groq, Kimi, local Ollama); pin a chain with  in models.local.json, check it with . Any step that fails or returns no valid JSON falls through; if all fail, nothing is written. Every attempt is logged to `dashboard-data/cheap_llm_log.jsonl` | cheap only |
 | Intake, both ledger CLIs | `add` requires `--done-when` (or `--done-ticket KEY`). Waiting-on also requires the link of the ask (`--source`, or `--no-link-why`). Commitments also require `--to` and `--due`. `set-done` adds these to an existing record | none |
 | Meeting action items | Enter as candidates. `extract` asks the cheap chain whether each is a real promise to a named person; only those become commitments, with a due date and a done condition. The rest stay in the MoM | cheap chain |
-| `work_tree_stale.py` | Proposes nodes with no live record, no open todo, no ticket updated and no record activity for 30 days. Only proposes; the Saturday report lists them | none |
+| `work_tree_stale.py --apply` | Archives nodes idle for 30 days (no live record, open todo, ticket update or record activity), with the reason on each. The Saturday report lists what it archived | none |
 | Saturday readers | Only what the layers above could not settle | sonnet |
 
 **Chases need evidence.** A record goes on a chase list only with dated evidence that it

@@ -4,12 +4,29 @@
 For mechanical judgement calls that run on cron and must not burn Claude quota:
 "does this evidence answer this ask", "is this MoM line a real commitment".
 
-The chain, in order (the owner, 26 Sep 2026: Gemini Flash is not always reliable, so
-every call needs a backup):
+The default chain, in order (the owner, 26 Sep 2026: Gemini Flash is not always
+reliable, so every call needs a backup):
 
-  1. Gemini 3.8 Flash (High)   agy CLI, flat-rate subscription
-  2. glm-5.3-flash             z.ai, subscription
-  3. claude haiku              the last resort, run outside the repo
+  1. newest Gemini Flash (High)   agy CLI, flat-rate subscription
+  2. glm-5.3-flash                z.ai, subscription
+  3. claude haiku                 the last resort, run outside the repo
+
+Not every machine has those three. `build_chain()` keeps the default steps a
+machine can actually run, then fills the gaps from a pool of cheap backends that
+many people already pay for (Gemini API key, Groq, Kimi, local Ollama), cheapest
+and most common first, up to three steps. A step with no credential is left out
+before any call, so a missing provider costs nothing. Haiku stays last whenever
+the claude CLI exists. To pin an exact chain, set `cheap_chain` in
+.agent/skills/agy-bridge/models.local.json (gitignored, one per install):
+
+    "cheap_chain": [{"backend": "agy", "model": "latest-flash"},
+                    {"backend": "zai", "model": "glm-5.3-flash"},
+                    {"backend": "claude", "model": "haiku"}]
+
+`latest-flash` resolves to the newest "Gemini X.Y Flash (<tier>)" in the known
+agy models; the tier is `cheap_flash_tier` in the same file, default High.
+
+    python3 .agent/scripts/cheap_llm.py --show-chain   # what this machine will run
 
 A step counts as a success only when it returns text that parses as JSON with
 the keys the caller asked for. An unknown model id, an auth blip, a timeout, or
@@ -42,11 +59,110 @@ AGY_RUN = os.path.join(REPO, ".agent", "skills", "agy-bridge", "run.py")
 AI_CALL = os.path.join(REPO, ".agent", "scripts", "ai_call.py")
 LOG = os.path.join(REPO, "dashboard-data", "cheap_llm_log.jsonl")
 
-CHAIN = [
-    {"name": "gemini-3.8-flash", "argv": ["--model", "Gemini 3.8 Flash (High)"]},
-    {"name": "glm-5.3-flash", "argv": ["--backend", "zai", "--model", "glm-5.3-flash"]},
-    {"name": "claude-haiku", "argv": None},
+DEFAULT_CHAIN = [
+    {"backend": "agy", "model": "latest-flash"},
+    {"backend": "zai", "model": "glm-5.3-flash"},
+    {"backend": "claude", "model": "haiku"},
 ]
+
+# Fills a gap left by a default step this machine cannot run. Ordered by price and
+# by how many people already hold the subscription or key. `latest-flash` on the
+# gemini backend resolves to the API id of the newest Flash, e.g. gemini-3.8-flash.
+FALLBACK_POOL = [
+    {"backend": "gemini", "model": "latest-flash"},
+    {"backend": "groq", "model": "openai/gpt-oss-120b"},
+    {"backend": "kimi", "model": "kimi-latest"},
+    {"backend": "ollama", "model": "env:OLLAMA_MODEL"},
+]
+
+MAX_STEPS = 3
+_FLASH_RE = re.compile(r"Gemini (\d+)\.(\d+) Flash \(([A-Za-z]+)\)")
+
+def _bridge():
+    """agy-bridge's run.py as a module: config, credential ladder, agy binary."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("agy_bridge_run", AGY_RUN)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+def _latest_flash(cfg, tier):
+    """(agy display name, API id) of the newest Gemini Flash at `tier`, or (None, None)."""
+    names = list(cfg.get("known_agy_models") or [])
+    best = None
+    for n in names:
+        m = _FLASH_RE.fullmatch(n.strip())
+        if m and m.group(3).lower() == tier.lower():
+            ver = (int(m.group(1)), int(m.group(2)))
+            if best is None or ver > best[0]:
+                best = (ver, n.strip())
+    if best is None:
+        return None, None
+    major, minor = best[0]
+    return best[1], f"gemini-{major}.{minor}-flash"
+
+def _step(entry, bridge, cfg, tier):
+    """One chain entry -> a runnable step, or None when this machine cannot run it."""
+    backend, model = entry.get("backend", "agy"), entry.get("model", "")
+    if backend == "claude":
+        sys.path.insert(0, os.path.dirname(AI_CALL))
+        try:
+            import ai_call
+            have = bool(ai_call.claude_bin())
+        except Exception:
+            have = False
+        return {"name": f"claude-{model}", "claude": model} if have else None
+    if backend == "agy":
+        if not (bridge.AGY_BIN and os.path.exists(bridge.AGY_BIN)):
+            return None
+        if model == "latest-flash":
+            model, _ = _latest_flash(cfg, tier)
+            if not model:
+                return None
+        return {"name": model, "argv": ["--model", model]}
+    spec = (cfg.get("backends") or {}).get(backend)
+    if not spec or spec.get("retired"):
+        return None
+    if spec.get("no_auth") or backend == "ollama":
+        if not bridge.local_router_up(spec):
+            return None
+    elif not bridge.load_token(cfg, backend):
+        return None
+    if model == "latest-flash":
+        _, model = _latest_flash(cfg, tier)
+    elif model.startswith("env:"):
+        model = os.environ.get(model[4:], "").strip()
+    if not model:
+        return None
+    return {"name": f"{backend}:{model}", "argv": ["--backend", backend, "--model", model]}
+
+def build_chain():
+    """The chain this machine can run: pinned `cheap_chain` if set, else the default
+    steps that are available, topped up from FALLBACK_POOL, Haiku kept last."""
+    try:
+        bridge = _bridge()
+        cfg = bridge.load_config()
+    except Exception as e:
+        print(f"[cheap_llm] agy-bridge config unreadable ({e}); using Claude only",
+              file=sys.stderr)
+        return [{"name": "claude-haiku", "claude": "haiku"}]
+    tier = cfg.get("cheap_flash_tier") or "High"
+    pinned = cfg.get("cheap_chain")
+    if pinned:
+        return [s for s in (_step(e, bridge, cfg, tier) for e in pinned) if s]
+    steps = [s for s in (_step(e, bridge, cfg, tier) for e in DEFAULT_CHAIN) if s]
+    last = steps.pop() if steps and "claude" in steps[-1] else None
+    seen = {s["name"] for s in steps}
+    for e in FALLBACK_POOL:
+        if len(steps) >= MAX_STEPS - (1 if last else 0):
+            break
+        s = _step(e, bridge, cfg, tier)
+        if s and s["name"] not in seen:
+            steps.append(s)
+            seen.add(s["name"])
+    if last:
+        steps.append(last)
+    return steps
 
 def _strip(text):
     text = (text or "").strip()
@@ -91,8 +207,8 @@ def _parse(text, required, lines):
     return obj
 
 def _run_step(step, prompt_path, timeout, label):
-    if step["argv"] is None:
-        cmd = [sys.executable, AI_CALL, "--model", "haiku", "--prompt-file", prompt_path,
+    if "claude" in step:
+        cmd = [sys.executable, AI_CALL, "--model", step["claude"], "--prompt-file", prompt_path,
                "--timeout", str(timeout)]
         cwd = tempfile.gettempdir()
     else:
@@ -124,7 +240,12 @@ def ask_json(prompt, required=(), lines=False, label="cheap-llm", timeout=120, c
         fh.write(prompt)
         prompt_path = fh.name
     try:
-        for step in chain or CHAIN:
+        steps = chain or build_chain()
+        if not steps:
+            _log({"ts": time.time(), "label": label, "model": None, "ok": False,
+                  "why": "no cheap backend available on this machine", "secs": 0})
+            return None, {"model": None, "tried": [], "why": "no backend available"}
+        for step in steps:
             t0 = time.time()
             text, err = _run_step(step, prompt_path, timeout, label)
             parsed = None if err else _parse(text, required, lines)
@@ -148,6 +269,10 @@ def ask_json(prompt, required=(), lines=False, label="cheap-llm", timeout=120, c
             pass
 
 if __name__ == "__main__":
+    if "--show-chain" in sys.argv:
+        for i, s in enumerate(build_chain(), 1):
+            print(f"{i}. {s['name']}")
+        sys.exit(0)
     obj, meta = ask_json('Reply with exactly this JSON and nothing else: {"ok": true}',
                          required=("ok",), label="cheap-llm-selftest")
     print(json.dumps({"answer": obj, "meta": meta}, indent=1))

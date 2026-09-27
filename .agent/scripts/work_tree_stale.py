@@ -9,9 +9,11 @@ A node is proposed when all of these hold for the node AND everything under it:
   * no record created, closed or decided under it in the last --days
   * it is not a domain or world, and not a `plan` node (planned work is not stale)
 
-It only proposes. Archiving is `work_tree.py archive-node <id> --why "..."`, and
-the weekly ledger audit puts this list in front of the owner. Built 26 Sep 2026, after
-33 nodes turned out to be finished work nobody had retired.
+the owner's rule, 26 Sep 2026: "kalo udah sebulan idle sih close aja". So with
+--apply the proposals are archived, each with the reason, and the weekly ledger
+audit runs it that way. A node younger than --days (by `created_wib`, or the
+tree's `generated_wib` for nodes from before that field existed) is never idle.
+`work_tree.py unarchive-node <id>` brings one back.
 
     work_tree_stale.py                 # markdown list
     work_tree_stale.py --json out.json
@@ -40,11 +42,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--days", type=int, default=30)
     ap.add_argument("--json")
+    ap.add_argument("--apply", action="store_true", help="archive every proposal")
     args = ap.parse_args()
     now = dt.datetime.now(dt.timezone.utc).timestamp()
     cutoff = now - args.days * DAY
 
     tree = load(os.path.join(STATE, "work_tree.json"), {"roots": []})
+    tree_born = _ts(tree.get("generated_wib"))
     nodes, kids, parent = {}, collections.defaultdict(list), {}
 
     def rec(n, p):
@@ -112,6 +116,9 @@ def main():
         newest = max((last[s] for s in sub), default=0)
         if newest >= cutoff:
             continue
+        born = _ts(n.get("created_wib")) or tree_born
+        if born and born >= cutoff:
+            continue
         idle = ("no record ever filed under it" if not newest
                 else f"last record activity {int((now - newest) / DAY)} days ago")
         proposals.append({"node": nid, "label": n.get("label"), "kind": n.get("kind"),
@@ -129,12 +136,42 @@ def main():
     if not proposals:
         print(f"No node idle for {args.days} days. Nothing to archive.")
         return 0
+    if args.apply:
+        import subprocess
+        wt = os.path.join(BASE, ".agent", "scripts", "work_tree.py")
+        done = []
+        for p in proposals:
+            # archive the node and every live node under it, so nothing below
+            # an archived parent can still take new records
+            for nid in [q for q in _subtree_ids(p["node"], kids) if not archived(q)]:
+                r = subprocess.run([sys.executable, wt, "archive-node", nid, "--why",
+                                    f"Idle {args.days}+ days ({p['why']}). Auto-archived by work_tree_stale.py."],
+                                   cwd=BASE, capture_output=True, text=True)
+                if r.returncode == 0:
+                    done.append(nid)
+        print(f"Archived {len(done)} node(s) idle for {args.days}+ days "
+              "(undo: `work_tree.py unarchive-node <id>`):\n")
+        for p in proposals:
+            print(f"- `{p['node']}` {p['label']}: {p['why']}")
+        return 0
     print(f"{len(proposals)} node(s) idle for {args.days}+ days. Archive with "
           "`work_tree.py archive-node <id> --why \"...\"` once the owner agrees:\n")
     for p in proposals:
         extra = f", plus {p['children']} child node(s)" if p["children"] else ""
         print(f"- `{p['node']}` {p['label']} ({p['kind']}{extra}): {p['why']}")
     return 0
+
+def _ts(stamp):
+    try:
+        return dt.datetime.fromisoformat(str(stamp)).timestamp() if stamp else None
+    except ValueError:
+        return None
+
+def _subtree_ids(nid, kids):
+    out = [nid]
+    for k in kids.get(nid, []):
+        out += _subtree_ids(k, kids)
+    return out
 
 def _ancestors(nid, parent):
     out, p = [], parent.get(nid)
