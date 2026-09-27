@@ -242,7 +242,8 @@ def cmd_add_node(args):
         print(f"kind '{args.kind}' not in {sorted(VALID_KINDS)}", file=sys.stderr)
         return 1
     node = {"id": args.id, "label": args.label, "kind": args.kind,
-            "status": args.status, "summary": args.summary or "", "children": []}
+            "status": args.status, "summary": args.summary or "", "children": [],
+            "created_wib": wib_now()}
     if args.parent:
         if args.parent not in idx:
             print(f"unknown parent '{args.parent}'", file=sys.stderr)
