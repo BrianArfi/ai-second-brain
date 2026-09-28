@@ -791,6 +791,21 @@ def rsvp_event(event_id=None, response='accepted', profile='default', find=None)
     print(f"Attendees now ({len(final)}): " + ", ".join(f"{e}={s}" for e, s in final.items()))
     return result
 
+def whoami(profile='default'):
+    """Print the email address this profile's token resolves to (no hardcoding)."""
+    creds = authenticate(profile)
+    if not creds:
+        print('NO_TOKEN')
+        return None
+    try:
+        service = build('calendar', 'v3', credentials=creds)
+        me = service.calendarList().get(calendarId='primary').execute().get('id', '')
+    except Exception as e:
+        print(f'Error resolving this profile\'s own address: {e}')
+        return None
+    print(me)
+    return me
+
 def main():
     parser = argparse.ArgumentParser(description='Google Calendar Manager')
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
@@ -853,6 +868,9 @@ def main():
     auth_parser.add_argument('--code', help='Authorization code, or the full localhost redirect URL')
     auth_parser.add_argument('--status', action='store_true', help='Report token health for every profile')
 
+    whoami_parser = subparsers.add_parser('whoami', help='Print the email address this profile resolves to')
+    whoami_parser.add_argument('--profile', default='default', choices=['default', 'work', 'secondary'], help='Authentication profile to use')
+
     args = parser.parse_args()
 
     if args.command == 'auth':
@@ -864,6 +882,8 @@ def main():
             sys.exit(auth_finish(args.profile, args.code))
         auth_parser.print_help()
         sys.exit(1)
+    elif args.command == 'whoami':
+        whoami(args.profile)
     elif args.command == 'list':
         # as_json: list_events emits a clean JSON array (text suppressed, status to stderr)
         list_events(args.days_back, args.days_forward, args.profile, as_json=args.json)

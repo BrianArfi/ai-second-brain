@@ -648,6 +648,40 @@ def domain_for_key(issue_key, override=None):
             f"Pass --domain to override.")
     return KEY_DOMAINS[prefix]
 
+def _domain_for_jql(jql, override=None):
+    """Site a JQL query targets: --domain wins, else read the project keys in it."""
+    if override:
+        return override
+    keys = set(re.findall(r"\b([A-Z][A-Z0-9]+)\b", jql)) & set(KEY_DOMAINS)
+    sites = {KEY_DOMAINS[k] for k in keys}
+    if len(sites) == 1:
+        return sites.pop()
+    if len(sites) > 1:
+        raise SystemExit("search: the JQL names projects on two sites "
+                         f"({', '.join(sorted(sites))}). Run one query per site.")
+    raise SystemExit("search: no known project key in the JQL; pass --domain.")
+
+def search_issues(jql, domain=None, fields=None, limit=100):
+    """Read-only JQL search. Pages through /rest/api/3/search/jql. Returns issue dicts."""
+    domain = _domain_for_jql(jql, domain)
+    fields = fields or ["summary", "status", "assignee", "updated", "resolutiondate", "issuetype"]
+    url = f"https://{domain}/rest/api/3/search/jql"
+    out, token = [], None
+    while len(out) < limit:
+        params = {"jql": jql, "fields": ",".join(fields),
+                  "maxResults": min(100, limit - len(out))}
+        if token:
+            params["nextPageToken"] = token
+        resp = requests.get(url, headers=HEADERS, auth=AUTH, params=params, timeout=30)
+        if resp.status_code != 200:
+            raise RuntimeError(f"Search failed on {domain} ({resp.status_code}): {resp.text[:400]}")
+        data = resp.json()
+        out.extend(data.get("issues", []))
+        token = data.get("nextPageToken")
+        if data.get("isLast", True) or not token:
+            break
+    return domain, out[:limit]
+
 def _adf_to_text(node):
     """Flatten an ADF document back to readable plain text."""
     if isinstance(node, str):
@@ -890,6 +924,28 @@ def main():
         parser.add_argument("--raw", action="store_true", help="print the full JSON")
         args = parser.parse_args(sys.argv[2:])
         get_issue(args.issue, args.domain, raw=args.raw)
+    elif action == "search":
+        import argparse
+        parser = argparse.ArgumentParser(prog="jira_client.py search")
+        parser.add_argument("jql")
+        parser.add_argument("--domain", default=None,
+                            help="site; default is read from the project keys in the JQL")
+        parser.add_argument("--fields", default=None, help="comma-separated field ids")
+        parser.add_argument("--limit", type=int, default=100)
+        parser.add_argument("--json", action="store_true", help="print the raw issues")
+        args = parser.parse_args(sys.argv[2:])
+        fields = args.fields.split(",") if args.fields else None
+        domain, issues = search_issues(args.jql, args.domain, fields, args.limit)
+        if args.json:
+            print(json.dumps(issues, indent=2))
+            sys.exit(0)
+        for it in issues:
+            f = it.get("fields", {})
+            who = (f.get("assignee") or {}).get("displayName") or "-"
+            when = (f.get("resolutiondate") or f.get("updated") or "")[:10]
+            status = (f.get("status") or {}).get("name", "-")
+            print(f"{it['key']} | {f.get('summary', '')[:90]} | {status} | {who} | {when}")
+        print(f"{len(issues)} issue(s) on {domain}")
     elif action == "edit-issue":
         import argparse
         parser = argparse.ArgumentParser(prog="jira_client.py edit-issue")
@@ -993,7 +1049,7 @@ def main():
         print(f"Moved: {args.issue} into {name} -> {url}")
     else:
         print(f"Unknown action: {action}")
-        print("Actions: verify-connections, daily-digest, sprint-status, "
+        print("Actions: verify-connections, daily-digest, sprint-status, search, "
               "create-issue, get-issue, edit-issue, comment, transition, sprint")
         sys.exit(1)
 

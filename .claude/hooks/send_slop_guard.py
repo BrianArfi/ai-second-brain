@@ -183,6 +183,26 @@ VOICE_STRUCTURE = [
 # the writer keep it when the sentence really is asking; a wrong one reads as unsure.
 YA_QUESTION = re.compile(r'(?i)(?<![\w\'])ya\s*\?')
 
+# The extra sentence. 31 of 150 draft corrections between 10 Aug and 27 Sep 2026 were
+# the owner cutting one added line: an offer, pressure that re-cites an old open item, or a
+# history receipt (journal/analysis/draft_feedback_baseline_2026-09-27.md, pattern 2).
+EXTRA_LINE = [
+    (re.compile(r"(?i)\b(tell me|let me know|say so)\b[^.?!\n]{0,40}\b(and|then) i('ll| will)?\b"),
+     'an offer: "tell me and I will..."'),
+    (re.compile(r"(?i)\bgive me [^.?!\n]{0,30}\band i('ll| will)\b"),
+     'an offer: "give me X and I will..."'),
+    (re.compile(r"(?i)\bi('ll| will) (file|raise|pull|build|chase|escalate|take)\b[^.?!\n]{0,60}\b(this|next) week\b"),
+     'a promise of extra scope'),
+    (re.compile(r"(?i)\b(happy to|can) (hop on|jump on|set up) a (call|quick call)\b"),
+     'a call offer'),
+    (re.compile(r"(?i)\b(still (open|unanswered)|open since|unanswered since|asked on \d{1,2} \w{3})\b"),
+     'pressure that re-cites an old open item'),
+    (re.compile(r"(?i)\bor let me close it\b|\bassign it or\b"),
+     'an ultimatum'),
+    (re.compile(r"(?i)\byou told \w+ in \w+\b|\bas (you|i) said (on|in) \d"),
+     'a history receipt'),
+]
+
 def voice_notes(text, command):
     """Ways an outbound Slack draft does not read like the owner, per the measured model."""
     if 'slack_client.py' not in command:
@@ -204,6 +224,10 @@ def voice_notes(text, command):
     if hits:
         notes.append('phrases he does not use: ' + ', '.join(h.strip().rstrip(',')
                                                              for h in hits[:5]))
+    extra = [label for rx, label in EXTRA_LINE if rx.search(text)]
+    if extra:
+        notes.append('a line the owner keeps cutting (' + '; '.join(extra[:3]) + '). '
+                     'Delete it and read the message again')
     return notes
 
 def payload_words(text):
