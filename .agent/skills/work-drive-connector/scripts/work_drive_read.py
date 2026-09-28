@@ -37,7 +37,10 @@ EXPORT = {
 def _service():
     if not os.path.exists(TOKEN_FILE):
         sys.exit(f"No Work Drive token. Run: python3 work_drive_auth.py auth-url  (then auth-save --code ...)")
-    creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+    # Refresh with the scopes the token was granted. token.json is shared with the
+    # writers and holds full `drive`; forcing drive.readonly here makes Google reject
+    # the refresh with invalid_scope.
+    creds = Credentials.from_authorized_user_file(TOKEN_FILE)
     if not creds.valid and creds.expired and creds.refresh_token:
         creds.refresh(Request())
         with open(TOKEN_FILE, 'w') as t:

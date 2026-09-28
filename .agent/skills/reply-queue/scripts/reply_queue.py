@@ -55,6 +55,10 @@ for _stream in (sys.stdout, sys.stderr):
 sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'scripts'))
 from slack_text import render as slack_render  # noqa: E402
 from brian_voice import voice_block  # noqa: E402
+# Pattern 1 of the draft-feedback baseline (27 Sep 2026): 41 of 150 corrections were a
+# draft that should not exist. Confirmations get a reaction, answered items get no draft.
+from draft_need_check import is_ack, parse_permalink, brian_replied_after  # noqa: E402
+REACT_DRAFT = 'REACT :+1:'
 STATE_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'reply_queue.json')
 LEDGER_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'slack_mention_ledger.json')
 AUTOMATION_CONFIG_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'automation_config.json')
@@ -81,6 +85,8 @@ VOICE_PROMPT_HEADER = (
     "Only draft a reply when there is something the owner can plausibly say without more "
     "context than given. If an item cannot be drafted responsibly (needs info you don't "
     "have), still include the block but set DRAFT to exactly: SKIP - needs more context.\n\n"
+    "If the message only confirms, agrees, or acknowledges something the owner asked for, "
+    "the owner does not reply in text. Set DRAFT to exactly: REACT :+1:\n\n"
     "Items:\n\n"
 )
 
@@ -118,6 +124,10 @@ def auto_reply_drafts_off():
     if not cfg.get('sources', {}).get('slack', True):
         return 'Auto reply drafts is off for Slack (toggle it in ASB Settings > Routines).'
     return None
+
+def load_slack_token():
+    from mention_ledger import load_token
+    return load_token()
 
 def text_hash(text):
     return hashlib.sha256((text or '').encode('utf-8')).hexdigest()[:16]
@@ -243,6 +253,8 @@ def render_markdown(state, ledger, fallback_ids=None, all_items=False):
             lines.append(f'  - {ctx}')
         if draft == 'SKIP - needs more context':
             lines.append('  - Draft: _skipped - needs more context, draft manually_')
+        elif draft == REACT_DRAFT:
+            lines.append('  - Draft: _no text. React 👍, the message only confirms_')
         else:
             lines.append(f'  - Draft: {draft}')
         lines.append('')
@@ -284,11 +296,31 @@ def cmd_draft(args):
     open_items = open_items_sorted(ledger)[:max(1, args.limit)]
 
     needs_draft = []
+    token = None
+    n_skipped = n_react = 0
     for iid, it in open_items:
         th = text_hash(it.get('text', ''))
         cached = state['items'].get(iid)
-        if cached is None or cached.get('text_hash') != th:
-            needs_draft.append((iid, it, th))
+        if cached is not None and cached.get('text_hash') == th:
+            continue
+        # Live re-check: the ledger sweep runs every 30 min, so an item can read open
+        # after the owner already answered it by hand.
+        parsed = parse_permalink(it.get('permalink', ''))
+        if parsed:
+            try:
+                token = token or load_slack_token()
+                if brian_replied_after(token, *parsed):
+                    state['items'].pop(iid, None)
+                    n_skipped += 1
+                    continue
+            except Exception as e:  # a failed check must never stop the queue
+                print(f'draft_need_check failed for {iid}: {e}', file=sys.stderr)
+        if is_ack(slack_render(it.get('text', ''), collapse=True)):
+            state['items'][iid] = {'drafted_at': time.time(), 'text_hash': th,
+                                   'draft_text': REACT_DRAFT}
+            n_react += 1
+            continue
+        needs_draft.append((iid, it, th))
 
     fallback_ids = []
     if needs_draft:
@@ -323,6 +355,7 @@ def cmd_draft(args):
     path = write_output(md)
     n_open_in_queue = sum(1 for iid in state['items'] if iid in ledger.get('items', {})
                           and ledger['items'][iid].get('status') == 'open')
+    print(f'pre-check: {n_skipped} already answered (no draft), {n_react} react-only')
     print(f'draft done: {len(needs_draft)} candidates, '
           f'{len(needs_draft) - len(fallback_ids)} drafted, {len(fallback_ids)} fallback, '
           f'{n_pruned} pruned -> {n_open_in_queue} in queue. Wrote {path}')

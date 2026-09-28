@@ -896,6 +896,16 @@ def _main_logic(mode, dry_run=False):
         out = _step("Unresolved Speakers", [sys.executable, speaker_script, 'pending'],
                     timeout=120)
         sections.append(f"## Unresolved Speakers\n```\n{out}\n```\n")
+
+    # ── [10.9] Stale-status guard (added 28 Sep 2026) ─────────────────
+    # Items the owner already handled in his own client (RSVPs, thread replies) must
+    # never surface as "unanswered". Cross-checks the inbound-only sweeps.
+    print("[10.9] Stale-status check (calendar RSVP)...", flush=True)
+    status_script = os.path.join(BASE_DIR, '.agent', 'scripts', 'unanswered_status_check.py')
+    if os.path.exists(status_script):
+        out = _step("Unanswered Status Check", [sys.executable, status_script,
+                    'calendar', '--days', '3'], timeout=120)
+        sections.append(f"## Stale Status Check\n```\n{out}\n```\n")
     write_output(sections, output_file)
 
     # ── Write morning plan file (Morning only) ───────────────────────

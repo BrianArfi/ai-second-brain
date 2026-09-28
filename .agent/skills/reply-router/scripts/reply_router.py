@@ -467,10 +467,17 @@ python3 .agent/skills/reply-router/scripts/reply_router.py claim --conv '{conv}'
 Your session id is in the message that opened this session. Without this the chat never leaves the owner's sidebar.
 
 ## What to do
+0. Check that this draft should exist at all, before writing a word. Run it on the latest waiting message:
+
+```bash
+python3 .agent/scripts/draft_need_check.py --permalink '<permalink>' --text '<message text>'
+```
+
+   `SKIP` (exit 10): the owner already answered by hand. Dismiss the mention (step 5) and close (step 6). No draft. `REACT` (exit 11): the message only confirms. Show the owner the original and one line, "react 👍, no text reply?", and wait for his yes. the owner dropped 41 drafts of these two kinds between 10 Aug and 27 Sep 2026.
 1. Read the thread file above first: the router appends any newer message from this same conversation there instead of opening a second session. Then read thread context via the permalink (`slack_client.py --action history` or MCP Slack read tools) and the People page in `Clients/Work/People/`.
 2. Draft ONE reply covering every waiting message, following `.agent/protocols/slack_send.md`: the owner's voice, English for Work, no-ai-slop pass, ceiling 80 words. Save it as `journal/drafts/<name>_<YYYY-MM-DD>.md`, never `.txt`. Resolve handles with `.agent/scripts/slack_mentions.py check`, then `expand --file <draft> --in-place` so every mention reads `<@<SLACK_ID>|Teammate Dev Singh>` and the owner can see who the message addresses.
 3. Present it in the 3-part reply-draft format: (1) the original message(s) quoted with sender, time and permalink, (2) the draft as it would be sent, (3) plain-language pointers on what happened and what the owner has to do. Quote the original in full. A quote that ends mid-sentence came from an old truncated ledger record, so pull the real text with `slack_client.py --action history` before you draft, and never show the owner a cut original.
-4. WAIT for the owner's explicit approval ("kirim"). Send only via `python3 .agent/skills/slack-connector/scripts/slack_client.py --action post --approved` (thread reply: `--thread-ts {thread_ts}`). NEVER send unapproved.
+4. WAIT for the owner's explicit approval ("kirim"). If more than 30 minutes passed since the draft was shown, run the step 0 check again first. Send only via `python3 .agent/skills/slack-connector/scripts/slack_client.py --action post --approved` (thread reply: `--thread-ts {thread_ts}`). NEVER send unapproved.
 5. If the owner says no reply is needed, dismiss the mention: `python3 .agent/skills/slack-tracker/scripts/mention_ledger.py dismiss` (see its --help for args).
 6. When finished, close the conversation. This writes the ASB status file for you, so do NOT hand-write it:
 
