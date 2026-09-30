@@ -484,6 +484,17 @@ REGENERATED_ON_CONFLICT = (
     'journal/master_followup_tracker.md',
 )
 
+def is_regenerated(path):
+    """True for the files above plus every `journal/state/*.index.json`.
+
+    The indexes are lean views that `state_index.py --write` rebuilds from the
+    ledgers inside `render_derived`, so upstream's copy loses nothing. Missing
+    them stranded the WSL host 37 commits behind on 30 Sep 2026: a cron sweep
+    conflicted on `commitments.index.json` alone and every sync after it failed.
+    """
+    return path in REGENERATED_ON_CONFLICT or (
+        path.startswith('journal/state/') and path.endswith('.index.json'))
+
 @contextlib.contextmanager
 def all_ledger_locks(timeout=25.0):
     """Hold every ledger lock for the duration of a git operation that rewrites
@@ -622,7 +633,7 @@ def resolve_regenerated_conflicts():
     if rc != 0:
         return False
     conflicted = [p for p in out.strip().splitlines() if p.strip()]
-    if not conflicted or any(p not in REGENERATED_ON_CONFLICT for p in conflicted):
+    if not conflicted or any(not is_regenerated(p) for p in conflicted):
         return False
     for path in conflicted:
         # `--ours` mid-rebase is the upstream side: the commits already on origin.

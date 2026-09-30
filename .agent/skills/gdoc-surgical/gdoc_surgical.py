@@ -36,6 +36,11 @@ import time
 import signal
 import argparse
 
+# Windows consoles default to cp1252 and crash on emoji in Doc text (list-tables, read).
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(SKILL_DIR, '..', '..', '..'))
 

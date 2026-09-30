@@ -2465,3 +2465,9 @@ a.ticket-chip:hover { border-color: var(--border-active); color: var(--text-acce
 /* the links themselves read as references, not as navigation away */
 a[href*="#find/"] { text-decoration-style: dotted; text-underline-offset: 2px; cursor: help; }
 a[href*="#find/"]:hover { color: var(--text-accent); }
+
+/* ✨ What's new tab (tab-whatsnew.js) */
+.whatsnew-head h2 { margin: 0 0 var(--sp-2); color: var(--text-primary); font-size: var(--fs-lg); }
+.whatsnew-head p { margin: 0 0 var(--sp-4); color: var(--text-secondary); }
+.whatsnew-intro { margin-bottom: var(--sp-4); }
+#tab-whatsnew .card { margin-bottom: var(--sp-3); }

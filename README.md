@@ -11,7 +11,7 @@ So you spend your week deciding instead of compiling.
 ![First run 15 minutes](https://img.shields.io/badge/first%20run-15%20minutes-6FB5AC?style=flat-square)
 ![Any agentic harness](https://img.shields.io/badge/core-harness%20agnostic-97A0B0?style=flat-square)
 
-[What it does](#what-it-does-every-day) · [It learns you](#it-learns-you) · [Capabilities](#capability-catalog) · [How it stays cheap](#multi-agent-setup-faster-and-cheaper) · [Your dashboard](#your-cockpit-the-visual-dashboard) · [Get started](#getting-started)
+[What it does](#what-it-does-every-day) · [It learns you](#it-learns-you) · [Capabilities](#capability-catalog) · [How it stays cheap](#multi-agent-setup-faster-and-cheaper) · [Your dashboard](#your-cockpit-the-visual-dashboard) · [Get started](#getting-started) · [What's new](CHANGELOG.md)
 
 </div>
 
@@ -326,7 +326,7 @@ python3 dashboard/server.py
 
 Then open **http://localhost:3737**. It is pure Python standard library, no build step, no pip install. Note on exposure: the server binds `0.0.0.0` (all interfaces), not localhost only, because on WSL a Windows browser reaches the dashboard through a NAT gateway rather than over loopback, so a loopback-only bind would refuse the very browser it is meant to serve. Every request is instead checked against an in-process IP allowlist before it is handled: `127.0.0.1`, `::1`, and the detected WSL gateway. `DASHBOARD_ALLOWED_IPS` can only add addresses to that list, it cannot narrow it, so if an all-interfaces bind is not acceptable on your machine or network, put the port behind a firewall rule rather than reaching for that variable. It reads your repo's files live on every request, so it is never stale by more than the last click.
 
-### Six tabs
+### Seven tabs
 
 - **⭐ Today.** The daily landing view: approvals waiting on your decision, today's meetings with prep cards, top tickets, and an SLA-breach escalation strip.
 - **📥 Inbox.** One triage queue for every inbound thread across Slack, Gmail, Google Doc comments, and Jira, with reversible triage (done, ignore, reopen) and an optional AI copilot pass that can draft a reply for your approval.
@@ -334,6 +334,7 @@ Then open **http://localhost:3737**. It is pure Python standard library, no buil
 - **🎥 Meetings.** Live recorder health, recent meetings from the Fathom registry, minutes and notes, and bot activity.
 - **⏱ Hours.** The productivity tracker, described below.
 - **⚙ System.** Harness self-observability: job routines, harness health findings, a live map of the harness, cost and savings, token usage, and the token-efficiency trend, also described below.
+- **✨ What's new.** The template's [`CHANGELOG.md`](CHANGELOG.md), rendered in the page: what is not released yet, then every release, newest first.
 
 Many list panels open a detail drawer when you click a row. Full reference, including which file feeds which panel, lives in `docs/DASHBOARD.md`.
 

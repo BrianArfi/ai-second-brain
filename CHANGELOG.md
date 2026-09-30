@@ -6,146 +6,319 @@ Entries are written in the private working repo and carried to the public templa
 (`ai-second-brain`) by the sync pipeline, which strips credentials, tokens, real client
 names, and personal data. This file is copied verbatim, so it reads the same in both.
 
-Dated headings below are the history. From v0.1.0 on, releases also carry a
-version, and the rule is in [`docs/VERSIONING.md`](docs/VERSIONING.md).
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). From
+v0.1.0 on, every release is a `## [x.y.z] - YYYY-MM-DD` section with Added, Changed
+and Fixed lists, and the version rule is in [`docs/VERSIONING.md`](docs/VERSIONING.md).
+The GitHub release body for a version is its section here. The dated headings below
+v0.1.0 are the history from before versions existed.
 
-## Unreleased
+You can also read this file inside the product: open the local dashboard and pick the
+**What's new** tab.
 
-### Standing rules ship with the template
+## [Unreleased]
 
-`CLAUDE.md.template` had not changed since July, so a fork started without the
-rules the private harness had learned since. It now carries a **Standing Rules**
-section: do the work instead of reporting on it, fix what is broken, never claim
-an action that has not happened, verify before you report, treat a question as a
-question, done means done, answer first and stop, record it where it is tracked
-in the same turn, link every file you name, read a shared document before you
-replace it, never act on a garbled instruction, and offer to save a correction as
-a rule. Each one is there because leaving it out caused a failure that repeated.
-The block sits between two markers, so the desktop app exports the same text and
-a rule learned once reaches both.
+<!-- source: private repo commits after the v0.7.0 tag (2026-09-28 14:41 WIB): 1b82be1ce, 77bff0375, b0d9966fb, 0fd4e97c7, plus this change set -->
 
-### The session model is detected on Windows
+### Added
+- **What's new tab in the dashboard.** The local dashboard renders this changelog,
+  newest release first, from `/api/changelog`. The text is escaped before it is
+  rendered, HTML comments are dropped, and links to repository files show as plain
+  text.
+- **Reply drafts show what they answer.** A new `reply_draft_guard.py` hook blocks a
+  reply draft under `journal/drafts/` that does not quote the original message, with
+  sender and time, and the thread so far. It also blocks draft text inside a code
+  fence, because a fence does not wrap.
 
-The startup routing hook printed "Session model: unknown" on every Windows
-session, so the delegation table never had a real tier to work from. Two causes,
-stacked. The transcript lookup replaced only `/` when it built the project
-directory name, while Claude Code replaces every character that is not a letter,
-a digit or `-`, so a path with a drive colon never matched. And Python's bare
-`bash` resolves to WSL's `System32\bash.exe` before PATH, so the detection script
-ran inside Linux against a Windows path. Both are fixed, with a regression test.
-
-### A leaner CLAUDE.md, and one less process per command
-
-Incident history, command lists and kill switches moved out of the always-loaded
-`CLAUDE.md` into `docs/harness_reference.md`, word for word, under five new
-anchors. Each rule stays in `CLAUDE.md` as one line plus a link. The no-op
-`drive_verify` hook, which started a Python process after every Bash call and did
-nothing, is unregistered.
-
-### Moving machines: the record travels, content does not
-
-`harness_migrate.py export` now leaves video, audio, images, archives and
-installers behind wherever they sit, and prints how much it skipped. The first
-real run found 3.5 GB of rendered video in a 3.9 GB bundle. The desktop app's own
-chat transcripts, which the bundle never carried, now travel and are restored on
-import. The migrate test runs in a sandbox instead of reading the real app data.
-
-### Tests that failed for the wrong reason
-
-Three tests failed while the code under them was right: one fed Windows paths
-unquoted, one used 1970 timestamps that a newer staleness rule reads as ancient,
-and one asserted a routine that had been deliberately removed. The last one hid
-a real bug: the reply-router settings schema still said a "Scheduled runs"
-switch gated it, which it does not. All fixed.
-
-### Seven new commands, six retired, and the list says what each group is for
-
-The command set had grown to 32 with flat descriptions, which reads as one long
-alphabetical list. Every description now leads with a group, so the picker reads
-in blocks: Daily, Weekly, Product, Artifact, Comms, Notes, Tracking, Thinking,
-Setup, Harness.
-
-Seven commands are new, wrapping skills that already shipped with nothing in
-front of them. `/user-story` turns a feature into stories and holds the line that
-every `Then` has to be objectively measurable, because "the user sees a friendly
-message" cannot be tested and will be argued about. `/ticket` drafts a tracker
-issue, resolves its work-tree node first, and waits for explicit approval before
-filing. `/rca` runs the incident protocol under one rule: no root cause, no
-"resolved". On the artifact side, `/artifact` builds a self-contained HTML
-explainer or report, `/mockup` a clickable prototype with presenter keys, `/deck`
-a keyboard-driven slide deck, and `/diagram` a Mermaid diagram validated by an
-actual render before anyone sees it. The three HTML commands end with the same
-self-containment grep, because a page that pulls in a font or an image stops
-working the moment it is sent to someone.
-
-Six commands were retired, and none of their procedures were deleted. Each moved
-to a permanent home first and every reference was repointed: the Slack send
-playbook to `.agent/protocols/slack_send.md`, the offload-mode toggle to
-`.agent/skills/agy-bridge/OFFLOAD_MODE.md`, and the morning and evening updates
-into a now self-contained `/daily-update`, which takes `morning` or `evening` to
-force a mode. `/sync-fathom` and `/no-ai-slop` were pure wrappers over SOPs that
-already lived in `.agent/`.
-
-Two wirings would have broken silently and were repointed in the same pass:
-`journal/state/routines.json` scheduled `/morning-update` and `/evening-update`
-as daily routines, and the SessionStart hook printed `/glm on` as the way to
-toggle offload mode.
+### Changed
+- **Release notes come from this file.** `sync.py` builds the GitHub release body
+  from the changelog section for the version being cut. When that section is
+  missing it uses the Unreleased section, and when that is empty too it falls back
+  to the commit titles, as before. Until now every release said "Harness sync from
+  the private repo".
+- **Versions v0.2.0 to v0.7.0 have their own sections.** They were backfilled from
+  the git tags, the public repo's diff per tag range, and the private commit log.
+  Each section names its sources in an HTML comment.
+- Release headings use the `## [x.y.z] - YYYY-MM-DD` form. `tools/pack.py` reads
+  both this form and the older `## vX.Y.Z` form.
 
 ### Fixed
+- **The meeting recorder survives a trimmed `common.py`.** The pipeline helpers moved
+  to `meeting-recorder/pipeline_common.py`, and `common.py` re-exports them, so a
+  copy of `common.py` without the helpers no longer stops the watcher.
+- The conversation claim guard no longer matches a top-level post against open
+  threads in the same channel.
 
-- **A public sync could delete the public template's own onboarding.**
-  `sync.py` copies `.claude/commands/` with an `rmtree` first, so a command
-  retired from the private repo vanishes from the public one on the next run.
-  That is right for a real restructuring and wrong for the generic starter
-  commands, which the private repo drops because it has richer replacements
-  while a fresh fork has nothing. `/setup` and `/update-harness` would both have
-  gone, and `README.md` names `/update-harness` in its own text.
-  `PRESERVE_PUBLIC_COMMANDS` now restores those ten from the public repo's git
-  HEAD after the tree copy.
+## [0.7.0] - 2026-09-28
 
+<!-- source: tag v0.7.0 (public commit 06b8af9, 2026-09-28 14:41 WIB); GitHub release v0.7.0; `git diff v0.6.0..v0.7.0` in the public repo (14 files); private commits 6b18e8a59, a9a52b950, 7c8b4ba61, 615832efd, a9b132e1d, 23a8aaa52, 895a2db9d, 670cc326e -->
+
+### Added
+- **Draft feedback tracker.** `draft_feedback.py` measures how the owner edits the
+  drafts the harness writes, and a weekly job commits the report so weekly planning
+  can read it. `draft_need_check.py` runs before a reply is drafted: it skips a
+  message the owner already answered, and suggests a reaction instead of a reply for
+  a plain acknowledgement. It is wired into the reply queue, the reply router brief
+  and the Slack send protocol.
+- **Stale-status guard.** `unanswered_status_check.py` cross-checks calendar RSVPs
+  and Slack threads, so an item the owner already handled is not reported as
+  unanswered. The daily update runs the calendar check on every run. Identity is
+  resolved at runtime (a new `gcal_manager.py whoami` action and Slack `auth.test`),
+  with environment variables to override it.
+- **Read-only JQL search** in the Jira connector, on every configured site.
+- **Record one window.** The meeting recorder can record the window you were last in,
+  or a window you pick, instead of every monitor (`list_windows`, `active_window`,
+  `WindowsCapture`). It picks the video encoder that the local ffmpeg actually has.
+
+### Changed
+- `send_slop_guard.py` warns when a draft adds lines past what the message needs.
+
+### Fixed
+- The Windows recorder GUI imported window helpers that `recorder.py` did not ship
+  in v0.3.0 to v0.6.0. They ship now.
+
+## [0.6.0] - 2026-09-27
+
+<!-- source: tag v0.6.0 (public commit 0b7e320, 2026-09-27 08:46 WIB); GitHub release v0.6.0; `git diff v0.5.0..v0.6.0` in the public repo (4 files); private commits 8919ddc99, 3b3d666c1 -->
+
+### Changed
+- **The cheap-model chain adapts to the machine.** `cheap_llm.py` builds its chain
+  from the backends the machine actually has. The default order stays Gemini Flash,
+  then GLM, then Haiku.
+- **Idle work-tree nodes archive themselves.** A node with no activity for 30 days
+  is archived by `work_tree_stale.py`. `work_tree.py add-node` records the creation
+  time, so a new empty node is never counted as idle. `docs/ledger_hygiene.md`
+  describes the rule.
+
+## [0.5.0] - 2026-09-26
+
+<!-- source: tag v0.5.0 (public commit 5519c9f, 2026-09-26 21:41 WIB); GitHub release v0.5.0; `git diff v0.4.0..v0.5.0` in the public repo (22 files); private commits a351f6f20, cb8bf600d, ab5d1714c, d0e9c6184, 87ff96f4a, 52eca0a17, 8926b854c, 9266291ef -->
+
+### Added
+- **Ledger verification by script first.** `cheap_llm.py` and the ledger CLIs check
+  a record against its evidence with a script first, a cheap model second, and
+  Claude last, so a chase is not sent for work that is already done.
+- **Ledger hygiene rules** in `docs/ledger_hygiene.md`, with `work_tree_stale.py`
+  for nodes that have gone quiet.
+- **Google Doc publish checks R1 to R4** in `readability_gate.py`: internet links
+  only, sized tables, every promised image exists, and one header field per line.
+  `publish_prd.sh` can embed screenshots.
+- **Text-drawn diagrams are refused in Google Docs.** Use a rendered Mermaid image.
+  Override once with `GDOC_ALLOW_ASCII_DIAGRAM=1`.
+- **Work hours per machine.** Each host writes its own shard under
+  `journal/state/work_hours_hosts/`, and the tracker merges them, so every machine
+  can sweep.
+
+### Fixed
+- A meeting recorder run with `--once` writes a heartbeat that stays valid until the
+  next cron tick, so a recording is not reported as "nothing is transcribing it".
+- `slack_client.py` reads `--text-file` as UTF-8, so bullets do not post as mojibake
+  on Windows.
+- `meeting-recorder/common.py` is the full module again, after a trimmed copy
+  replaced it.
+
+## [0.4.0] - 2026-09-23
+
+<!-- source: tag v0.4.0 (public commit efbf184, 2026-09-23 16:54 WIB); GitHub release v0.4.0; the CHANGELOG.md text shipped in the public repo at v0.4.0; `git diff v0.3.0..v0.4.0` (23 files); private commits 2b3f0ed2f, e2397a076, 77bafca45, ec10e49f9, a27f096f7, 01a03f4d7, 9f2325b64, 0454a1ee1, f608a55e2 -->
+
+### Added
+- **Standing rules ship with the template.** `CLAUDE.md.template` had not changed
+  since July, so a fork started without the rules the private harness had learned
+  since. It now carries a **Standing Rules** section: do the work instead of
+  reporting on it, fix what is broken, never claim an action that has not happened,
+  verify before you report, treat a question as a question, done means done, answer
+  first and stop, record it where it is tracked in the same turn, link every file you
+  name, read a shared document before you replace it, never act on a garbled
+  instruction, and offer to save a correction as a rule. Each one is there because
+  leaving it out caused a failure that repeated. The block sits between two markers,
+  so the desktop app exports the same text and a rule learned once reaches both.
+
+### Changed
+- **A leaner CLAUDE.md, and one less process per command.** Incident history,
+  command lists and kill switches moved out of the always-loaded `CLAUDE.md` into
+  `docs/harness_reference.md`, word for word, under five new anchors. Each rule stays
+  in `CLAUDE.md` as one line plus a link. The no-op `drive_verify` hook, which
+  started a Python process after every Bash call and did nothing, is unregistered.
+- **Moving machines: the record travels, content does not.**
+  `harness_migrate.py export` now leaves video, audio, images, archives and
+  installers behind wherever they sit, and prints how much it skipped. The first
+  real run found 3.5 GB of rendered video in a 3.9 GB bundle. The desktop app's own
+  chat transcripts, which the bundle never carried, now travel and are restored on
+  import. The migrate test runs in a sandbox instead of reading the real app data.
+- The agy-bridge model table brings the GLM models back and probes their ids live.
+- `/learn` says the truth about memory: it travels with git, and links in
+  `MEMORY.md` are relative.
+
+### Fixed
+- **The session model is detected on Windows.** The startup routing hook printed
+  "Session model: unknown" on every Windows session, so the delegation table never
+  had a real tier to work from. Two causes, stacked. The transcript lookup replaced
+  only `/` when it built the project directory name, while Claude Code replaces every
+  character that is not a letter, a digit or `-`, so a path with a drive colon never
+  matched. And Python's bare `bash` resolves to WSL's `System32\bash.exe` before
+  PATH, so the detection script ran inside Linux against a Windows path. Both are
+  fixed, with a regression test.
+- **Tests that failed for the wrong reason.** Three tests failed while the code under
+  them was right: one fed Windows paths unquoted, one used 1970 timestamps that a
+  newer staleness rule reads as ancient, and one asserted a routine that had been
+  deliberately removed. The last one hid a real bug: the reply-router settings
+  schema still said a "Scheduled runs" switch gated it, which it does not. All fixed.
+- The access watch credits an on-behalf-of share request to the person who needs
+  access, not to the person who asked.
+- The reply router takes back a dispatch that the app never turned into a chat.
+
+## [0.3.0] - 2026-09-21
+
+<!-- source: tag v0.3.0 (public commit a57705e, 2026-09-21 13:35 WIB); GitHub release v0.3.0; `git diff v0.2.1..v0.3.0` in the public repo (63 files); private commits d829905f0, e119801ff, aaf56f6c4, 4bed8d0f9, a23a3988a, b1045d7dc, 272b8adf1, ca4e3753c, 12f357908, bd7cb7eba, 4e7d15b2e, 0cdc580a2, 704eabfee, 94c4d1cef, cd39d98a0, 83bbaabbe, 066192502, 79b43b520 -->
+
+### Added
+- **One conversation, one session.** `conversation_claim_guard.py` refuses a send
+  into a Slack conversation that another session already owns.
+- **Evidence-gated clean-up for waiting-on records.** `answer_hunt.py` looks for an
+  answer in six sources and splits strong evidence from weak leads, and
+  `deprio_discard.py` deprioritises or discards a record only on strong evidence.
+  The lifecycle is in `docs/waiting_on_lifecycle.md`.
+- **Model drift check.** `model_drift_check.py` finds dead and outdated model ids in
+  the agy-bridge chain before a call fails on them.
+- **Local Ollama backend** for agy-bridge, through Ollama's OpenAI-compatible `/v1`,
+  with a base URL override.
+- **Calendar attachments.** `gcal_manager.py --attach` puts a Drive file on an
+  invite, and `list --json` reports attachments.
+- **Slack channel rename**, approval-gated like post and create.
+- **Automation holds are visible.** `automation_settings.py` gives every automation
+  one `held` block that says what is held, why, and when it clears.
+- **Task board builder.** `build_task_board.py` builds one Kanban board from a
+  roadmap sheet and a backlog, ready for a Linear import.
+- **Windows dictation helper.** `meeting-recorder/dictate_win.pyw` records from a
+  global hotkey and puts the transcript on the clipboard.
+
+### Changed
+- The agy-bridge chain moved off retired Gemini ids.
+- The work-hours tracker counts every session on every host, and counts automation
+  as parallel output. The dashboard's automatic sweep backfills the whole stale gap.
+
+### Fixed
+- `link_guard.py` knows every checkout root and follows writes through UNC paths,
+  and a local file link opens on Windows.
+- Reply drafts quote the whole original message and show people by name, never by a
+  bare id.
+- The ledger guard treats a checkout that is behind as "pull first", not as deleted
+  records.
+- `--convert` in the Drive connector maps pptx, docx and xlsx to their Google formats.
+- The reply-router close status file is mirrored into every checkout.
+
+## [0.2.1] - 2026-09-11
+
+<!-- source: tag v0.2.1 (public commit 080368d, 2026-09-11 16:39 WIB); GitHub release v0.2.1; `git diff v0.2.0..v0.2.1` in the public repo (6 files); private commits 342f3c735, 0a8286caa, 8e0afa61c -->
+
+### Added
+- `SKILL.md` files for the `gdoc-comment` and `gemini-image` skills.
+
+### Changed
+- The reply router runs from the desktop app scheduler instead of a crontab line
+  that was never installed. `/autodraft` documents the change.
+
+### Fixed
+- `register_prd.py` no longer corrupts the first row of every table it writes to.
+
+## [0.2.0] - 2026-09-11
+
+<!-- source: tag v0.2.0 (public commit ce7bbd7, 2026-09-11 13:26 WIB); GitHub release v0.2.0; the CHANGELOG.md text shipped in the public repo at v0.2.0; public commits 0b6a1dc, 7633f18, 38f5405, 63f880c, bee7d2c, f0441f6, 9f7bc1f, fc7ee8d; private commits 2bff0fb29, b94d0cc3c, 424d276df, d36ff5a39, 2b82b0868 -->
+
+### Added
+- **Seven new commands.** They wrap skills that already shipped with nothing in
+  front of them. `/user-story` turns a feature into stories and holds the line that
+  every `Then` has to be objectively measurable, because "the user sees a friendly
+  message" cannot be tested and will be argued about. `/ticket` drafts a tracker
+  issue, resolves its work-tree node first, and waits for explicit approval before
+  filing. `/rca` runs the incident protocol under one rule: no root cause, no
+  "resolved". On the artifact side, `/artifact` builds a self-contained HTML
+  explainer or report, `/mockup` a clickable prototype with presenter keys, `/deck`
+  a keyboard-driven slide deck, and `/diagram` a Mermaid diagram validated by an
+  actual render before anyone sees it. The three HTML commands end with the same
+  self-containment grep, because a page that pulls in a font or an image stops
+  working the moment it is sent to someone.
+- **Capability packs.** `tools/pack.py` installs skills, commands, agents and hooks
+  from one folder as one unit, and never runs code the pack supplies.
+- **The anti-AI-voice gate ships.** `.agent/skills/no-ai-slop` is now in the template,
+  so `/no-ai-slop` resolves, and [`answer_budget.md`](.agent/skills/no-ai-slop/answer_budget.md) adds the rule that runs first:
+  answer first, stop, and keep to a word ceiling per channel.
+- `public_drift_check.py` reports how far the public mirror has drifted without
+  running the sync.
+
+### Changed
+- **The command list says what each group is for.** The command set had grown to 32
+  with flat descriptions, which reads as one long alphabetical list. Every
+  description now leads with a group, so the picker reads in blocks: Daily, Weekly,
+  Product, Artifact, Comms, Notes, Tracking, Thinking, Setup, Harness.
+- **Six commands retired, none of their procedures deleted.** Each moved to a
+  permanent home first and every reference was repointed: the Slack send playbook to
+  `.agent/protocols/slack_send.md`, the offload-mode toggle to
+  `.agent/skills/agy-bridge/OFFLOAD_MODE.md`, and the morning and evening updates
+  into a now self-contained `/daily-update`, which takes `morning` or `evening` to
+  force a mode. `/sync-fathom` and `/no-ai-slop` were pure wrappers over SOPs that
+  already lived in `.agent/`. Two wirings would have broken silently and were
+  repointed in the same pass: `journal/state/routines.json` scheduled
+  `/morning-update` and `/evening-update` as daily routines, and the SessionStart
+  hook printed `/glm on` as the way to toggle offload mode.
+- `/inbox-sweep` is now `/sweep`, and `access-watch` ships, so its access pass works.
+- The end-of-turn ledger sync runs in the background (`ledger_sync.py
+  --background`), so a turn no longer ends waiting on it.
+
+### Fixed
+- **A public sync could delete the public template's own onboarding.** `sync.py`
+  copies `.claude/commands/` with an `rmtree` first, so a command retired from the
+  private repo vanishes from the public one on the next run. That is right for a real
+  restructuring and wrong for the generic starter commands, which the private repo
+  drops because it has richer replacements while a fresh fork has nothing. `/setup`
+  and `/update-harness` would both have gone, and `README.md` names `/update-harness`
+  in its own text. `PRESERVE_PUBLIC_COMMANDS` now restores those ten from the public
+  repo's git HEAD after the tree copy.
 - **A synced command could point at a skill that deliberately does not ship.**
-  Scrubbing renames client strings; it cannot remove a whole section, so the
-  public `/artifact` would have told a reader to publish through `artifact-host`,
-  which is excluded. `PUBLIC_OVERRIDES` copies a public-specific version from
-  `.agent/skills/sync-public/public_overrides/` after the tree copy. Two related
-  gaps closed the same way round: `reply-router` and `linear-connector` now ship,
-  because `/autodraft` and `/ticket` named them and they were absent, with
+  Scrubbing renames client strings; it cannot remove a whole section, so the public
+  `/artifact` would have told a reader to publish through `artifact-host`, which is
+  excluded. `PUBLIC_OVERRIDES` copies a public-specific version from
+  `.agent/skills/sync-public/public_overrides/` after the tree copy. Two related gaps
+  closed the same way round: `reply-router` and `linear-connector` now ship, because
+  `/autodraft` and `/ticket` named them and they were absent, with
   `linear-connector/teams.json` held back for its real workspace and team ids.
+- **The leak audit caught a home path with the real username in it, on a file type
+  nothing blocked.** `meeting-recorder/logs/watcher.err` synced because `*.log` was
+  a blocked pattern and `*.err` was not. The audit refused the push, which is the
+  guard working, but the file had already been written into the public tree. Log
+  directories are now blocked by directory name as well as by suffix, so the next
+  runtime file does not have to be discovered by the audit first.
+- **The Hours tab froze for three weeks and said nothing.** Four defects, one shape:
+  every failure was silent and no watch existed on the file. `dashboard/server.py`
+  spawned the background sweep behind `flock`, a Linux-only binary, and the
+  `except Exception: pass` around it turned the resulting `FileNotFoundError` on
+  macOS into a no-op, so the tab served a frozen `work_hours.json` and rendered it in
+  the same muted grey as fresh data. The same `flock` prefix broke the dashboard's
+  manual run-job buttons on macOS. `work_hours.py` counted every `sdk-cli` session as
+  cron automation, which drops every session run through the desktop app or the SDK
+  (0 sessions, leverage 1.0x); an app session is now recognised by the chat UI's own
+  line types plus more than one human-typed minute. And `gcal_manager.py list` never
+  followed `nextPageToken`, so a window wider than 250 events came back truncated at
+  the old end and the sweep cached the recent days as "no meetings". Data from 10 Aug
+  to 3 Sep 2026 was rebuilt by backfill.
+- **Guards, so the next variant of this is loud.** A calendar fetch that returns
+  nothing for a day that had events keeps the cached events and warns instead of
+  blanking them. A sweep that finds session transcripts but counts none of them as
+  interactive writes `sessions_warning` into the state and warns on stderr.
+  `work_hours.json` joined the `harness_health` staleness table at 6 hours, next to
+  the four ledgers. The refresh spawn logs both its attempts and its failures, and
+  the failure reaches the Hours tab, which now turns the "updated Xh ago" label into
+  a warning past 6 hours.
+- The sync recovers a stuck rebase instead of skipping every sync after it.
+- A send whose draft file the send gate cannot read yet is refused, instead of
+  passing unchecked.
+- The Slack tracker has a thread-participation pass, so a reply inside a thread you
+  are in is seen even when it does not mention you.
+- Slack mentions are decoded to names everywhere the harness writes text.
+- The Jira connector detects Kanban boards instead of reporting a stale sprint.
 
-- **The leak audit caught a home path with the real username in it, on a file
-  type nothing blocked.** `meeting-recorder/logs/watcher.err` synced because
-  `*.log` was a blocked pattern and `*.err` was not. The audit refused the push,
-  which is the guard working, but the file had already been written into the
-  public tree. Log directories are now blocked by directory name as well as by
-  suffix, so the next runtime file does not have to be discovered by the audit
-  first.
+## [0.1.0] - 2026-08-23
 
-### Fixed
-
-- **The Hours tab froze for three weeks and said nothing.** Four defects, one
-  shape: every failure was silent and no watch existed on the file.
-  `dashboard/server.py` spawned the background sweep behind `flock`, a
-  Linux-only binary, and the `except Exception: pass` around it turned the
-  resulting `FileNotFoundError` on macOS into a no-op, so the tab served a
-  frozen `work_hours.json` and rendered it in the same muted grey as fresh
-  data. The same `flock` prefix broke the dashboard's manual run-job buttons on
-  macOS. `work_hours.py` counted every `sdk-cli` session as cron automation,
-  which drops every session run through the desktop app or the SDK (0 sessions,
-  leverage 1.0x); an app session is now recognised by the chat UI's own line
-  types plus more than one human-typed minute. And `gcal_manager.py list` never
-  followed `nextPageToken`, so a window wider than 250 events came back
-  truncated at the old end and the sweep cached the recent days as "no
-  meetings". Data from 10 Aug to 3 Sep 2026 was rebuilt by backfill.
-- **Guards, so the next variant of this is loud.** A calendar fetch that
-  returns nothing for a day that had events keeps the cached events and warns
-  instead of blanking them. A sweep that finds session transcripts but counts
-  none of them as interactive writes `sessions_warning` into the state and
-  warns on stderr. `work_hours.json` joined the `harness_health` staleness
-  table at 6 hours, next to the four ledgers. The refresh spawn logs both its
-  attempts and its failures, and the failure reaches the Hours tab, which now
-  turns the "updated Xh ago" label into a warning past 6 hours.
-
-## v0.1.0 - 2026-08-23
+<!-- source: tag v0.1.0 (public commit c60aec7, 2026-08-22 23:29 +0300, which is 2026-08-23 WIB) -->
 
 First tagged release of the public template. It has been usable for months; what
 changed is that it is now legally usable, and that a machine checks it before it

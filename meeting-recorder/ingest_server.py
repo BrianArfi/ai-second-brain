@@ -45,7 +45,7 @@ import time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlsplit, parse_qs
 
-from common import REPO_ROOT, load_config, slugify
+from pipeline_common import REPO_ROOT, load_config, slugify
 
 MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 SESSIONS_DIR = os.path.join(MODULE_DIR, "ingest_sessions")

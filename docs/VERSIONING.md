@@ -36,3 +36,11 @@ and what to do about it.
 The desktop and mobile applications carry their own versions and their own
 release cadence. A template version says nothing about which application
 version reads it.
+
+## Release notes
+
+The GitHub release body for a version is that version's section in
+`CHANGELOG.md` (`## [x.y.z] - YYYY-MM-DD`). `sync.py` reads it when it cuts the
+release. If the section does not exist yet, it uses the Unreleased section, and
+if that is empty too, the commit titles. `sync.py --dry-run` prints the body the
+next release would get. The same file is the dashboard's What's new tab.

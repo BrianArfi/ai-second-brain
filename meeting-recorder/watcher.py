@@ -27,7 +27,7 @@ import sys
 import threading
 import time
 
-from common import REPO_ROOT, load_config, parse_json_tail, slugify
+from pipeline_common import REPO_ROOT, load_config, parse_json_tail, slugify
 from transcribe import transcribe
 
 MODULE_DIR = os.path.dirname(os.path.abspath(__file__))

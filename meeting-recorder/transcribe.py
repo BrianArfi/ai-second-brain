@@ -45,7 +45,7 @@ import time
 import urllib.error
 import urllib.request
 
-from common import (REPO_ROOT, fmt_ts, load_config, load_secret,
+from pipeline_common import (REPO_ROOT, fmt_ts, load_config, load_secret,
                     secret_search_path)
 
 LOG_PATH = os.path.join(REPO_ROOT, "dashboard-data", "meeting_recorder_log.jsonl")
