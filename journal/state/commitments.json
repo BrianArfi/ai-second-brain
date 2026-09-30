@@ -1,0 +1,39 @@
+{
+ "next_seq": 2,
+ "items": {
+  "COM-0001": {
+   "id": "COM-0001",
+   "text": "Write the refund rules one-pager for support",
+   "to": "Raka",
+   "to_slug": "raka",
+   "channel": null,
+   "channel_name": null,
+   "thread_ts": null,
+   "permalink": "",
+   "due": "2026-10-01",
+   "project": "Refunds",
+   "node": "example-initiative",
+   "node_why": null,
+   "source": {
+    "type": "manual",
+    "ref": ""
+   },
+   "status": "open",
+   "confidence": "high",
+   "first_seen": 1790773366.9458752,
+   "closed_at": null,
+   "closed_by": null,
+   "priority": false,
+   "notes": [],
+   "done_when": "one-pager shared in the support channel",
+   "done_ticket": null
+  }
+ },
+ "slack_search_watermark": 0.0,
+ "local_watermark": 0.0,
+ "processed_fathom_ids": [],
+ "processed_sources": {},
+ "pending_candidates": [],
+ "user_names": {},
+ "last_sweep": null
+}
