@@ -78,7 +78,7 @@ def _ignored():
     if not os.path.exists(IGNORE):
         return set()
     try:
-        return set(json.load(open(IGNORE)).get('ignore', []))
+        return set(json.load(open(IGNORE, encoding='utf-8')).get('ignore', []))
     except Exception:
         return set()
 
@@ -86,7 +86,7 @@ def _add_ignore(keys, reason):
     data = {'ignore': [], 'notes': {}}
     if os.path.exists(IGNORE):
         try:
-            data = json.load(open(IGNORE))
+            data = json.load(open(IGNORE, encoding='utf-8'))
         except Exception:
             pass
     data.setdefault('ignore', [])
@@ -96,7 +96,7 @@ def _add_ignore(keys, reason):
             data['ignore'].append(k)
         data['notes'][k] = reason
     tmp = IGNORE + '.tmp'
-    with open(tmp, 'w') as f:
+    with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=1)
     os.replace(tmp, IGNORE)
 
@@ -251,7 +251,7 @@ def slack_requests():
     """Open mention-ledger items that are somebody asking the owner for access."""
     if not os.path.exists(LEDGER):
         return []
-    state = json.load(open(LEDGER))
+    state = json.load(open(LEDGER, encoding='utf-8'))
     names = state.get('user_names', {})
     out = []
     for iid, it in state.get('items', {}).items():
@@ -284,7 +284,7 @@ def cmd_report(args):
         snap = {'generated_at': time.time(), 'slack': slack, 'drive': drive}
         path = args.out if os.path.isabs(args.out) else os.path.join(BASE_DIR, args.out)
         tmp = path + '.tmp'
-        with open(tmp, 'w') as f:
+        with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(snap, f, indent=1)
         os.replace(tmp, path)                 # cron writes this, briefings read it
         print(f'wrote {path}: {len(drive)} drive + {len(slack)} slack pending')

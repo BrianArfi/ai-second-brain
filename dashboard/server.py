@@ -1586,8 +1586,27 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._handle_get_briefing()
         elif self.path == '/api/progress':
             self._handle_get_progress()
+        elif self.path == '/api/changelog':
+            self._handle_get_changelog()
         else:
             super().do_GET()
+
+    def _handle_get_changelog(self):
+        """GET /api/changelog: CHANGELOG.md split into sections for the
+        What's new tab. Parsing and cleaning live in dashboard/changelog.py
+        (HTML comments dropped, repo-file links flattened); the browser escapes
+        every section before rendering it."""
+        try:
+            dash_dir = str(Path(__file__).resolve().parent)
+            if dash_dir not in sys.path:
+                sys.path.insert(0, dash_dir)
+            import changelog as changelog_mod
+            data = changelog_mod.load(BASE_DIR / 'CHANGELOG.md')
+            self._send_json(200, json.dumps(data))
+        except Exception as e:
+            self._send_json(500, json.dumps({
+                'error': 'Failed to read CHANGELOG.md', 'details': str(e)
+            }))
 
     _wh_spawned_at = 0.0
 

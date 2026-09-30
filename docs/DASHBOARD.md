@@ -57,7 +57,7 @@ gets richer on its own.
 
 ## The tabs
 
-There are six tabs. Each owns its own frontend module under `dashboard/public/` except
+There are seven tabs. Each owns its own frontend module under `dashboard/public/` except
 Today, which lives in `app.js` alongside the shared router and utilities.
 
 - **⭐ Today** (`app.js`): the daily landing view. Approvals waiting on you (command-queue
@@ -81,6 +81,11 @@ Today, which lives in `app.js` alongside the shared router and utilities.
   surface first, each expands to a job-log drill with a Run-now / Ack action), harness
   health findings, a live map of the harness, activity, cost and savings, Claude token
   usage, and the token-efficiency trend.
+- **✨ What's new** (`tab-whatsnew.js`): the repository's `CHANGELOG.md`, served by
+  `/api/changelog` and parsed by `dashboard/changelog.py`. The Unreleased section and
+  the newest release open by default, older ones are collapsed. HTML comments are
+  dropped, links to repository files show as plain text, and every section is
+  HTML-escaped before it is rendered. Test: `python3 dashboard/test_changelog.py`.
 
 Many list panels open a detail drawer when you click a row.
 

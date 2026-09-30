@@ -30,7 +30,7 @@ import urllib.request
 
 MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, MODULE_DIR)
-from common import REPO_ROOT, fmt_ts, load_config, parse_json_tail, slugify  # noqa: E402
+from pipeline_common import REPO_ROOT, fmt_ts, load_config, parse_json_tail, slugify  # noqa: E402
 import watcher as W  # noqa: E402  (register/draft/heartbeat reuse)
 
 API_BASE = os.environ.get("VEXA_API_BASE", "http://localhost:8056")

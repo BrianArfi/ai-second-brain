@@ -70,12 +70,12 @@ function canRender(container) {
   return !(a && container && container.contains(a) && a.matches('input, textarea, select'));
 }
 
-/* ── Router: #today (default) | #inbox | #work[/filter] | #meetings | #system
+/* ── Router: #today (default) | #inbox | #work[/filter] | #meetings | #system | #whatsnew
    Plus #find/<ID>, which is NOT a tab: it is the permalink to one ledger
    record, owned by quickfind.js, which opens it in the Drawer over whatever
    tab is already showing. Routing it as a tab would throw the owner back to Today
    every time he clicked a WAIT- link from another tab. ── */
-const TAB_NAMES = ['today', 'inbox', 'work', 'meetings', 'hours', 'system'];
+const TAB_NAMES = ['today', 'inbox', 'work', 'meetings', 'hours', 'system', 'whatsnew'];
 
 function parseHash() {
   const h = (location.hash || '#today').replace(/^#/, '');

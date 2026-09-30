@@ -83,6 +83,11 @@ def candidates(convs, channel, thread_ts):
             msgs = conv.get("messages") or []
             if not any(len(m) > 1 and m[1] == thread_ts for m in msgs):
                 continue
+        elif key.startswith(channel + ":t"):
+            # A top-level post cannot land inside a thread. Matching it against
+            # every open thread in the channel blocked a new announcement on
+            # 28 Sep 2026 because an unrelated six-day-old thread was claimed.
+            continue
         elif conv.get("status") not in OPEN_STATUSES:
             # No thread-ts to disambiguate: only a live conversation is evidence.
             continue

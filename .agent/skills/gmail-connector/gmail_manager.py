@@ -18,6 +18,11 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
+# Windows consoles default to cp1252; subjects and bodies carry non-ascii.
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 # Global timeout: 180 seconds
 def timeout_handler(signum, frame):
     print("[ERROR] Gmail Manager timed out after 180 seconds", file=sys.stderr)

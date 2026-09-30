@@ -53,7 +53,7 @@ for _stream in (sys.stdout, sys.stderr):
 # message that names nobody, which is what the owner was reading on 25 Aug 2026. Shared with the rest
 # of the harness, and behaviourally identical to the Rust half in the ASB app's slackpush.rs.
 sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'scripts'))
-from slack_text import render as slack_render  # noqa: E402
+from slack_text import render as slack_render, user_names  # noqa: E402
 from brian_voice import voice_block  # noqa: E402
 # Pattern 1 of the draft-feedback baseline (27 Sep 2026): 41 of 150 corrections were a
 # draft that should not exist. Confirmations get a reaction, answered items get no draft.
@@ -147,14 +147,55 @@ def context_str(it):
         parts.append(f'(re: {ctx1})')
     return ' '.join(parts)
 
-def item_prompt_block(iid, it):
+THREAD_MAX = 8   # earlier messages kept per thread; the parent is always one of them
+
+def fetch_thread(token, it):
+    """The thread messages that came BEFORE this one, oldest first, whole text.
+
+    the owner asked on 29 Sep 2026 for the original message and the thread history on
+    every reply draft: a draft that shows only the last line makes him guess what
+    is being answered. The parent is always kept; after it, the latest THREAD_MAX-1."""
+    thread_ts = str(it.get('thread_ts') or '')
+    ts = str(it.get('ts') or '')
+    if not thread_ts or thread_ts in ('None', ts):
+        return []
+    import mention_ledger as ml
+    resp = ml.slack('conversations.replies', token,
+                    {'channel': it.get('channel'), 'ts': thread_ts, 'limit': 200})
+    if not resp.get('ok'):
+        return []
+    earlier = [[m.get('user') or m.get('bot_id') or '?', m.get('text', ''), m.get('ts', '')]
+               for m in resp.get('messages', [])
+               if m.get('ts') and float(m['ts']) < float(ts)
+               and m.get('subtype') not in ('channel_join', 'group_join')]
+    if len(earlier) > THREAD_MAX:
+        earlier = earlier[:1] + earlier[-(THREAD_MAX - 1):]
+    return earlier
+
+def _who(uid):
+    return user_names().get(uid) or uid
+
+def _when(ts):
+    try:
+        return datetime.fromtimestamp(float(ts), WIB).strftime('%d %b %H:%M WIB')
+    except (TypeError, ValueError):
+        return ''
+
+def _quote(text, indent):
+    body = slack_render(text or '', collapse=False).strip() or '(no text)'
+    return '\n'.join(f'{indent}> {ln.rstrip()}  ' if ln.strip() else f'{indent}>' for ln in body.split('\n'))
+
+def item_prompt_block(iid, it, thread=None):
     chan = it.get('channel_name', '?')
     # Decoded for the MODEL too, not only for the owner. A drafter handed `<@<SLACK_ID>>` cannot tell
     # who is being asked for what, and writes a reply that answers nobody in particular.
-    text = slack_render(it.get('text', ''), collapse=True)[:400]
+    text = slack_render(it.get('text', ''), collapse=True)
     ctx = context_str(it)
     priority = ' [PRIORITY]' if it.get('priority') else ''
-    lines = [f'item_id: {iid}{priority}', f'channel: {chan}', f'message: {text}']
+    lines = [f'item_id: {iid}{priority}', f'channel: {chan}']
+    for uid, txt, _ in thread or []:
+        lines.append(f'earlier in thread, {_who(uid)}: {slack_render(txt, collapse=True)}')
+    lines.append(f'message: {text}')
     if ctx:
         lines.append(f'context: {ctx}')
     return '\n'.join(lines)
@@ -244,13 +285,27 @@ def render_markdown(state, ledger, fallback_ids=None, all_items=False):
         chan = it.get('channel_name', '?')
         link = it.get('permalink') or ''
         link_md = f' [thread]({link})' if link else ''
-        orig = slack_render(it.get('text', ''), collapse=True)[:160]
         ctx = context_str(it)
         draft = entry.get('draft_text', '')
+        thread = entry.get('thread') or []
         lines.append(f'- {flag}**{chan}**{link_md} `{iid}`')
-        lines.append(f'  - Original: {orig}')
-        if ctx:
+        lines.append(f'  - **From** {_who(it.get("author", "?"))}, {_when(it.get("ts"))}')
+        if thread:
+            # One block per message: the name line sits OUTSIDE the quote and a blank line
+            # separates messages. Name and text inside one quote run together into a single
+            # paragraph, which the owner found unreadable (29 Sep 2026).
+            lines.append(f'  - **Thread so far** ({len(thread)} earlier, oldest first):')
+            lines.append('')
+            for uid, txt, ts in thread:
+                lines.append(f'    **{_who(uid)}** · {_when(ts)}')
+                lines.append('')
+                lines.append(_quote(txt, '    '))
+                lines.append('')
+        elif ctx:
             lines.append(f'  - {ctx}')
+        lines.append('  - **Original message:**')
+        lines.append(_quote(it.get('text', ''), '    '))
+        lines.append('')
         if draft == 'SKIP - needs more context':
             lines.append('  - Draft: _skipped - needs more context, draft manually_')
         elif draft == REACT_DRAFT:
@@ -267,7 +322,7 @@ def render_markdown(state, ledger, fallback_ids=None, all_items=False):
         lines.append('')
         for iid in fallback_ids:
             it = ledger_items.get(iid, {})
-            orig = re.sub(r'\s+', ' ', it.get('text', ''))[:160]
+            orig = re.sub(r'\s+', ' ', it.get('text', ''))
             chan = it.get('channel_name', '?')
             lines.append(f'- `{iid}` **{chan}**: {orig}')
         lines.append('')
@@ -322,10 +377,19 @@ def cmd_draft(args):
             continue
         needs_draft.append((iid, it, th))
 
+    threads = {}
+    for iid, it, _ in needs_draft:
+        try:
+            token = token or load_slack_token()
+            threads[iid] = fetch_thread(token, it)
+            time.sleep(API_PAUSE)
+        except Exception as e:  # a missing history must never stop the queue
+            print(f'thread fetch failed for {iid}: {e}', file=sys.stderr)
+
     fallback_ids = []
     if needs_draft:
         prompt = VOICE_PROMPT_HEADER + '\n\n'.join(
-            item_prompt_block(iid, it) for iid, it, _ in needs_draft)
+            item_prompt_block(iid, it, threads.get(iid)) for iid, it, _ in needs_draft)
         rc, stdout = run_agy_bridge(prompt)
         if rc == 3:
             fallback_ids = [iid for iid, _, _ in needs_draft]
@@ -345,7 +409,20 @@ def cmd_draft(args):
                     continue
                 state['items'][iid] = {
                     'drafted_at': now, 'text_hash': th, 'draft_text': draft,
+                    'thread': threads.get(iid) or [],
                 }
+
+    # Backfill: drafts made before 29 Sep 2026 carry no thread history.
+    for iid, entry in state['items'].items():
+        it = ledger.get('items', {}).get(iid)
+        if 'thread' in entry or not it or it.get('status') != 'open':
+            continue
+        try:
+            token = token or load_slack_token()
+            entry['thread'] = fetch_thread(token, it)
+            time.sleep(API_PAUSE)
+        except Exception as e:
+            print(f'thread backfill failed for {iid}: {e}', file=sys.stderr)
 
     n_pruned = prune(state, ledger)
     state['last_run'] = time.time()

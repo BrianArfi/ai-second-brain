@@ -588,8 +588,9 @@ def markdown_to_adf(md):
         content = [{"type": "paragraph", "content": [{"type": "text", "text": " "}]}]
     return {"type": "doc", "version": 1, "content": content}
 
-def create_issue(project_key, summary, issue_type="Story", priority="High", description_text="", assignee_account_id=None, domain="examplevendor.atlassian.net", parent=None, labels=None, components=None, epic_link_field="customfield_10014"):
+def create_issue(project_key, summary, issue_type="Story", priority="High", description_text="", assignee_account_id=None, domain=None, parent=None, labels=None, components=None, epic_link_field="customfield_10014"):
     """Create a Jira issue. Returns (key, url) on success or raises on error."""
+    domain = domain or domain_for_key(project_key)
     url = f"https://{domain}/rest/api/3/issue"
     auth = HTTPBasicAuth(EMAIL, TOKEN)
 
@@ -893,7 +894,10 @@ def main():
         parser.add_argument("--description-file", default=None,
                             help="markdown file; avoids shell escaping on long tickets")
         parser.add_argument("--assignee", default=None)
-        parser.add_argument("--domain", default="examplevendor.atlassian.net")
+        parser.add_argument("--domain", default=None,
+                            help="site; default is derived from the project key "
+                                 "(KEY_DOMAINS). The old hardcoded examplevendor default "
+                                 "sent MP/MPS creates to the wrong site (29 Sep 2026).")
         parser.add_argument("--parent", default=None, help="epic or parent issue key")
         parser.add_argument("--label", action="append", default=[])
         parser.add_argument("--component", action="append", default=[])
