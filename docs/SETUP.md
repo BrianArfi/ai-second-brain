@@ -245,14 +245,14 @@ What each one drives:
 
 | Variable | Used by | What happens if wrong |
 | :--- | :--- | :--- |
-| `WORK_DOMAIN` | `gdocs-create`, `drive_permissions.py` | New docs get domain-shared to the wrong workspace |
+| `WORK_DOMAIN` | every Drive and Docs writer (through `apply_visibility` in `.agent/scripts/file_utils.py`), `drive_permissions.py` | New docs get domain-shared to the wrong workspace |
 | `OWNER_WORK_EMAIL` | `gmail-connector` auth flow | The auth prompt suggests the wrong account |
 | `OWNER_NAME_TOKENS` | `commitment-ledger` | Action items assigned to YOU are never picked up |
 | `OWNER_SLACK_ID` | `commitment-ledger`, Slack sweeps | Mentions of you are missed |
 
-**Doc permissions gotcha:** `gdocs-create` publishes new docs as "anyone with the
-link can comment" by default. After creating anything non-public, restrict it to
-your own domain:
+**Doc sharing:** every writer shares a new or updated work doc with your `WORK_DOMAIN`
+as commenters, and removes any "anyone with the link" access it finds. Pass
+`--visibility public` (or `--share`) only when you mean to publish. To audit an older doc:
 
 ```bash
 python3 .agent/scripts/drive_permissions.py restrict <DOC_ID> --domain $WORK_DOMAIN --apply

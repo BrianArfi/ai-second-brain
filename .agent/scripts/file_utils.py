@@ -78,7 +78,21 @@ def require_send_approval(action_label, approved):
     )
     sys.exit(1)
 
-WORK_DOMAIN = 'yourcompany.com'
+def _work_domain(default='yourcompany.com'):
+    """The Workspace domain that 'domain' visibility grants to.
+
+    Read from WORK_DOMAIN (process environment, then the workspace .env via
+    harness_secrets) so a fork shares to its own domain without editing code.
+    Falls back to the built-in default when neither is set.
+    """
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from harness_secrets import load_secret
+        return load_secret('WORK_DOMAIN', default) or default
+    except Exception:
+        return os.environ.get('WORK_DOMAIN', '').strip() or default
+
+WORK_DOMAIN = _work_domain()
 VISIBILITY_CHOICES = ('domain', 'public', 'private')
 
 def apply_visibility(service, file_id, visibility='domain', domain=WORK_DOMAIN):

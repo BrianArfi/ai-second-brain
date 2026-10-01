@@ -4,6 +4,154 @@ This document covers the system's internals: how the layers fit together, what e
 
 ---
 
+## What it is: three layers
+
+Most AI tools are a blank chat box. This repo gives that box a **job description**, **standard operating procedures**, and **hands that reach your real tools**.
+
+```
+   YOU SAY:  "draft the PRD for the new checkout flow"
+                              |
+   +----------------------------------------------------------+
+   |  CLAUDE.md       THE BRAIN     who you are, your rules,   |
+   |                                your languages, your memory|
+   +----------------------------------------------------------+
+   |  .claude/        THE REFLEXES  saved commands, subagents, |
+   |                                guardrail hooks            |
+   +----------------------------------------------------------+
+   |  .agent/skills/  THE HANDS     Drive, Docs, Slack,        |
+   |                                Calendar, meetings, Jira   |
+   +----------------------------------------------------------+
+                              |
+   YOU GET:  a real Google Doc, in your format, ready to share
+```
+
+1. **`CLAUDE.md` is the brain.** It states who you are, which projects you run, which language each document should be in, and the rules it must follow. It grows as you teach it. The more specific it is, the more autonomously the AI can act.
+2. **`.claude/` is the reflexes.** Commands are saved workflows: draft a PRD, write meeting notes, produce a weekly report. Subagents split big jobs across cheaper helpers. Hooks enforce your rules automatically, for example asking before anything is sent to Slack.
+3. **`.agent/skills/` are the hands.** Each one is a small script that reads or writes a real service: create a Google Doc from markdown, post a Slack message as you, pull a meeting transcript, fetch a sprint board, update a tracking sheet.
+
+**Runs on your machine, across machines.** The repo detects whether it is on macOS, WSL, or Windows at the start of each session and adapts how it runs your tools. Your credentials and notes stay local. Nothing is uploaded to a third party beyond the API calls the AI makes on your behalf.
+
+**Guardrails that hold.** Slack sends refuse to run without an `--approved` flag, and a hook asks you before a Slack send goes through. Jira writes need the same flag. For email and WhatsApp, the guard is the rule in `CLAUDE.md`: show the draft, then wait for your yes. The WhatsApp bridge can also hold every send until you approve it outside the chat. Documents written to Drive stay inside your company domain once you set `WORK_DOMAIN` (see [`SETUP.md`](SETUP.md)), unless you publish them deliberately.
+
+---
+
+## Capability catalog
+
+The repo ships 33 commands and about 65 skills. A representative slice of what you can ask, in plain language:
+
+| Area | What you can ask it to do |
+| :--- | :--- |
+| **Communication** | Sweep Slack across many channels and draft a reply in your voice; send email as you; draft and send WhatsApp messages; reply inside a Google Doc comment thread. Slack sends need your approval flag; email and WhatsApp drafts are shown to you first. |
+| **Documents** | Turn markdown into a real, formatted Google Doc; make surgical in-place edits (add links, insert table rows, embed diagrams) without clobbering your hand edits; export a branded PDF; draft and quality-gate a PRD; build an HTML explainer, prototype or deck. |
+| **Meetings** | Record and transcribe a meeting locally on your own machine; turn any transcript into clean minutes with decisions and action items filed to your tracker; prepare a one-page brief before a meeting. |
+| **Reporting and ops** | A morning briefing and evening recap; a weekly report that weighs what mattered; a PRD pipeline; ledgers for commitments, decisions and waiting-on items; a live visual dashboard of every project. |
+| **Data** | Query Jira sprints and flag anyone overloaded; pull funnels and retention from Mixpanel; run SQL against Metabase; sweep your calendar into a clean view. |
+| **Design and media** | Generate and edit images from a prompt; build diagrams from a description; assemble slide decks. |
+| **Learning** | Remember a correction permanently via `/learn`; keep your dashboard, to-do list, and trackers in sync automatically. |
+| **Under the hood** | Fan a big job out to parallel workers; route bulk work to cheaper models with a guaranteed fallback; run a quality-gate reviewer before anything reaches you. |
+
+---
+
+## Multi-agent setup: faster and cheaper
+
+Here is the part that makes it economical to run every day.
+
+A big job such as a weekly report, a deep-research brief, or a large PRD is rarely one kind of work. It is mostly **bulk reading**, a little **focused analysis**, and a bit of **careful synthesis**. Run all of it on one expensive model and you overpay for the reading. Run all of it on one cheap model and the thinking falls apart.
+
+So this repo splits the job. One strategist directs; a fleet of cheap, fast workers does the reading in parallel; only the distilled facts come back for synthesis.
+
+```
+                    +------------------------------------+
+   "write this      |      MAIN SESSION: Opus 5          |  plans + synthesizes
+    week's   ------>|      the strategist                |  (smart, pricey)
+    report"         +-----------------+------------------+
+                                      | spawns a fleet, all at once
+          +----------+---------------+---------------+----------+
+          v          v               v               v          v
+      +-------+  +-------+       +-------+       +-------+  +-------+
+      |harvest|  |harvest|       |harvest|  ...  |harvest|  |review |   Haiku 4.5
+      | mtg 1 |  | mtg 2 |       | mtg 3 |       | Slack |  | pass  |   (cheap, fast)
+      +---+---+  +---+---+       +---+---+       +---+---+  +---+---+
+          |   each reads ~12K of raw source, returns ~1.5K of facts   |
+          +----------+---------------+---------------+----------+
+                                     v
+                    +------------------------------------+
+                    |  Opus reads 15K of clean facts     |
+                    |  -> writes the finished report     |
+                    +------------------------------------+
+```
+
+Two things save money and time at once. The **bulk reading**, usually the largest share of tokens, runs on a model that costs a fifth as much. And the **parallel workers** finish in the time a single agent would spend reading one file. The flagship spends its pricey tokens only where judgment is actually required.
+
+A third saving comes from **prompt caching**: the large, stable parts of a prompt such as your `CLAUDE.md` or a long document are cached and reread at about a tenth of the normal input price across a session.
+
+Two subagents ship as working examples: a **harvester** that reads many sources and returns structured facts without trying to write the final document, and a **reviewer** that checks a draft against your rules before it reaches you.
+
+### Which model for which job
+
+Use the cheapest model that can do the subtask well. Match the tier to the work, not the other way around.
+
+| Tier | Model | Model ID | Context | Price /1M (in / out) | Use it for |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Bulk** | Claude Haiku 4.5 | `claude-haiku-4-5` | 200K | $1 / $5 | Mechanical work with no judgment: bulk reading, formatting, extraction, classification. The default for harvester and reviewer subagents. |
+| **Scoped** | Claude Sonnet 5 | `claude-sonnet-5` | 1M | $3 / $15 | Scoped research, code exploration, in-scope synthesis. The best balance of speed and intelligence for focused subtasks. |
+| **Flagship** | Claude Opus 5 | `claude-opus-5` | 1M | $5 / $25 | The main session for synthesis-heavy work: planning, weighing tradeoffs, writing the final deliverable. |
+| **Frontier** | Claude Fable 5 | `claude-fable-5` | 1M | $10 / $50 | The most demanding long-horizon, autonomous work, where one run may plan, build, and verify across many steps. When correctness matters more than cost. |
+
+A practical default: run the main session on **Opus 5**, delegate bulk work to **Haiku 4.5** subagents, and reach for **Sonnet 5** when a subtask needs real research rather than mechanical effort. Move the main session up to **Fable 5** for the hardest end-to-end jobs.
+
+> Model IDs are exact strings. Use them as written, with no date suffix. Prices are list API prices and may change; check the provider's pricing page for current figures.
+
+### What it saves on a real job: the weekly report
+
+The weekly report is the clearest case, because it is mostly bulk reading wrapped around a little synthesis, exactly the shape the diagram above is built for. Take a representative week:
+
+- **8 meeting transcripts** at ~12K tokens each, plus written notes, dashboard sections, the to-do list, and Slack history: about **150K tokens of raw source**.
+- Of that, only about **15K tokens of distilled facts** actually matter for writing the report.
+
+| | **A. One flagship agent does it all** | **B. This repo: Haiku harvests, Opus synthesizes** |
+| :--- | :--- | :--- |
+| Who reads the 150K of sources | Opus, in one growing context | 9 Haiku workers, in parallel |
+| What the flagship then carries | all **150K** of raw transcript, re-read every turn | only the **15K** of facts |
+| Reading cost (150K input) | 150K x $5/1M = **$0.75** | 150K x $1/1M = **$0.15** |
+| Synthesis (~10 drafting turns) | 150K x 10 = 1.5M token-reads | 15K x 10 = 150K token-reads |
+| Wall-clock to read sources | 8 transcripts, one after another | 8 transcripts at once (~1/8 the time) |
+
+Two levers pull at the same time:
+
+1. **Tier swap.** Every token of bulk reading moves from Opus to Haiku, a flat, exact **5x cheaper** (input $5 to $1, output $25 to $5). Same work, on the model the work actually needs.
+2. **Context compression.** In version A the 150K of raw transcript sits in the flagship's window and is re-processed on *every* drafting turn. In version B the flagship only ever holds 15K of facts, so the drafting phase re-reads **10x less**. Usually the bigger saving, and it makes the report *better*, because the model reasons over clean facts instead of hunting through raw transcripts.
+
+```
+   COST OF ONE WEEKLY REPORT   (illustrative, from list prices)
+
+   One flagship agent does everything
+   ####################  ~$2.00
+
+   This repo: Haiku harvests, Opus synthesizes
+   ####  under $0.50            <- ~4-5x cheaper, and finishes faster
+```
+
+> These figures are an **illustrative model from list prices, not a published benchmark.** Your exact numbers depend on how many meetings you had, transcript length, and caching. The two levers and their direction hold regardless: bulk work on a 5x-cheaper tier, and a flagship context that never bloats with raw source. The same pattern applies to deep-research briefs, large PRDs, and any gather-then-synthesize job.
+
+### Optional: offload bulk work to non-Claude models
+
+The repo ships an optional **model bridge** (`.agent/skills/agy-bridge/`) that can route harvest, critique, and research subtasks to cheaper non-Claude backends (GLM, Kimi, Gemini via CLI) when you happen to have those subscriptions.
+
+**You do not need any of them.** With no bridge backends configured, every caller detects it instantly and falls back to the Claude tiers above; the whole harness runs Claude-only at full capability. The bridge is a cost saver for people who already pay for a second model, never a requirement. Run `python3 .agent/skills/agy-bridge/run.py --doctor` to see your mode.
+
+### It keeps getting cheaper: the token-efficiency loop
+
+Cost discipline is not a one-time setup, so the harness audits itself:
+
+- A weekly cron runs `.agent/scripts/token_efficiency.py report`: tokens, cost, and offload share per task type, week over week, from real usage logs.
+- Every change made to save tokens is recorded with `token_efficiency.py log-change`, so the next report shows each optimization next to its **observed** effect, not its promised one.
+- The dashboard renders the trend, the current top-3 token hotspots, and the what-changed log; weekly planning picks at most one hotspot to optimize next.
+
+The protocol lives in [`.agent/protocols/token_efficiency.md`](../.agent/protocols/token_efficiency.md).
+
+---
+
 ## System Layers
 
 ```
@@ -205,6 +353,24 @@ End of Week
   └── weekly-report-generator
         ├── Reads all week's calendar + transcripts + Drive
         └── Produces report → Google Doc
+```
+
+---
+
+## Repository layout
+
+```
+.agent/skills/      Connectors and skills (Drive, Docs, Slack, Calendar, meetings, Jira, and more)
+.agent/scripts/     Shared helpers, including the machine detection used at session start
+.agent/workflows/   Reusable multi-step workflow definitions
+.claude/commands/   Saved workflows you can invoke by name or in plain language
+.claude/agents/     Subagent definitions (harvester, reviewer)
+.claude/hooks/      Automatic guardrails (send confirmation, formatting checks)
+meeting-recorder/   Record + transcribe meetings locally (macOS, Windows, Linux)
+meetbot/            Rust bot that auto-joins Meet/Teams calls and transcribes them
+dashboard/          Local visual dashboard web app (http://localhost:3737)
+docs/               Setup, customizing, and architecture guides
+CLAUDE.md.template  Rename to CLAUDE.md and make it yours
 ```
 
 ---
