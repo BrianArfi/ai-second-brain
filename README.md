@@ -8,9 +8,7 @@ For PMs, consultants and team leads whose week runs on meetings, Slack and Googl
 [![Version 0.8.1](https://img.shields.io/badge/version-0.8.1-green.svg)](CHANGELOG.md)
 [![Made for Claude Code](https://img.shields.io/badge/made%20for-Claude%20Code-orange.svg)](#requirements)
 
-![You type "Write up this morning's meeting." It reads the newest transcript in inbox/, files the minutes in notes/meetings/, and shows a summary, one decision and two action items: one with an owner and a due date, one flagged because the owner is unclear. It ends: Draft ready. Nothing was sent. Approve it, or tell me what to change.](docs/images/meeting-minutes.png)
-
-*Illustration with sample data.*
+![Your morning, already sorted. On the left, the prompt "Write up this morning's meeting." and the line "Nothing is sent until you approve it." On the right, the local dashboard's Today view with sample data: 2 overdue, 2 due today, 4 commitments due, and a morning briefing of the three things that matter today. In front of it, the meeting note it filed: one decision and three action items, one flagged "Owner unclear".](docs/hero.png)
 
 ## Why
 
@@ -25,6 +23,10 @@ For PMs, consultants and team leads whose week runs on meetings, Slack and Googl
 - **Writes the weekly report** into the same Google Doc every week, leading with what shipped, not with whatever happened on Friday.
 - **Drafts every reply you owe.** Nothing is sent until you approve it.
 - **Remembers corrections.** Correct it once, run `/learn`, and the next session already knows.
+
+![The local dashboard in use, with sample data. The Today tab shows the morning briefing: the three things that matter today, the meetings, what can wait, and an escalation row with a drafted chase for a late reply. Then the Work tab shows the tracker: open tickets by priority and project, with what is overdue and due today.](docs/demo.gif)
+
+*Recorded on a fresh clone with sample data. Nothing here is connected to a real account.*
 
 ## Quick start
 
@@ -42,12 +44,9 @@ You type, in plain words:
 
 > Write up this morning's meeting.
 
-It picks the newest transcript or notes in `inbox/`, files the minutes as `notes/meetings/YYYY-MM-DD-<short-name>.md`, and shows you a summary, the decisions, the action items and the open questions. A sample action item list:
+It picks the newest transcript or notes in `inbox/`, files the minutes as `notes/meetings/YYYY-MM-DD-<short-name>.md`, and shows you a summary, the decisions, the action items and the open questions. A sample run:
 
-```
-- Send the revised quote to the client. Owner: Dita. Due: Friday.
-- Confirm the launch date with legal. Owner unclear (flagged).
-```
+![You type "Write up this morning's meeting." It reads the newest transcript in inbox/, files the minutes in notes/meetings/, and shows a summary, one decision and two action items: one with an owner and a due date, one flagged because the owner is unclear. It ends: Draft ready. Nothing was sent. Approve it, or tell me what to change.](docs/images/meeting-minutes.png)
 
 ---
 

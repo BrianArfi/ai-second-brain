@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AI Second Brain hero</title>
+<!-- Shared visual system: paper #F1F3EE, field #0D453E, ink #072B27, signal #C8F751. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800;900&family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #F1F3EE; --field: #0D453E; --ink: #072B27; --signal: #C8F751;
+    --head: "Archivo", "Helvetica Neue", Arial, system-ui, sans-serif;
+    --body: "Inter", "Segoe UI", system-ui, sans-serif;
+    --mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1600px; height: 800px; overflow: hidden; }
+  body {
+    background: var(--paper); color: var(--ink); font-family: var(--body);
+    position: relative;
+  }
+  /* left column */
+  .copy { position: absolute; left: 72px; top: 150px; width: 620px; }
+  .kicker { font-family: var(--mono); font-size: 22px; font-weight: 700; color: var(--field); display: flex; align-items: center; gap: 12px; }
+  .kicker .dot { width: 14px; height: 14px; border-radius: 3px; background: var(--signal); border: 3px solid var(--ink); }
+  h1 { font-family: var(--head); font-weight: 900; font-size: 78px; line-height: 1.02;
+       letter-spacing: -.035em; margin-top: 26px; color: var(--ink); }
+  h1 .hl { background: linear-gradient(transparent 58%, var(--signal) 58%, var(--signal) 92%, transparent 92%);
+           padding: 0 4px; margin: 0 -4px; }
+  .sub { font-size: 25px; line-height: 1.4; margin-top: 30px; color: var(--field); font-weight: 500; max-width: 560px; }
+  .prompt { margin-top: 40px; display: inline-flex; align-items: center; gap: 14px;
+            background: var(--ink); color: #E8F0EC; font-family: var(--mono); font-size: 19px;
+            padding: 16px 22px; border-radius: 14px; box-shadow: 0 10px 0 -4px rgba(7,43,39,.18); }
+  .prompt .caret { color: var(--signal); font-weight: 700; }
+  .prompt .cursor { width: 10px; height: 22px; background: var(--signal); display: inline-block; }
+  .approve { margin-top: 18px; display: flex; align-items: center; gap: 10px; font-size: 19px;
+             font-weight: 600; color: var(--ink); }
+  .approve .tick { width: 26px; height: 26px; border-radius: 50%; background: var(--signal);
+                   border: 2px solid var(--ink); display: grid; place-items: center; font-size: 15px; font-weight: 800; }
+
+  /* dashboard window: real screenshot of the local dashboard with demo data */
+  .win { position: absolute; left: 712px; top: 34px; width: 840px; border-radius: 18px; overflow: hidden;
+         background: #0b0d12; border: 3px solid var(--ink);
+         box-shadow: 0 30px 60px -20px rgba(7,43,39,.45), 14px 14px 0 0 var(--field); }
+  .win .bar { height: 38px; background: var(--ink); display: flex; align-items: center; padding: 0 16px; gap: 8px; }
+  .win .bar i { width: 12px; height: 12px; border-radius: 50%; background: #2c5a52; display: block; }
+  .win .bar i:first-child { background: var(--signal); }
+  .win .bar span { margin-left: 14px; font-family: var(--mono); font-size: 14px; color: #9fbdb5; }
+  .win img { display: block; width: 100%; }
+  .label { position: absolute; font-family: var(--mono); font-size: 15px; font-weight: 700; letter-spacing: .06em;
+           text-transform: uppercase; background: var(--signal); color: var(--ink); padding: 7px 12px;
+           border: 2px solid var(--ink); border-radius: 8px; }
+
+  /* meeting note card: the minutes /mom writes, drawn from the sample note */
+  .doc { position: absolute; left: 1000px; top: 486px; width: 540px; background: #fff; border-radius: 16px;
+         border: 3px solid var(--ink); box-shadow: 0 30px 50px -18px rgba(7,43,39,.5), 10px 10px 0 0 var(--ink);
+         overflow: hidden; transform: rotate(-1.4deg); }
+  .doc .path { font-family: var(--mono); font-size: 13.5px; color: #5b6f6a; background: #F6F7F3;
+               padding: 10px 20px; border-bottom: 1px solid #e2e6df; }
+  .doc .in { padding: 12px 22px 12px; }
+  .doc h3 { font-family: var(--head); font-size: 25px; font-weight: 800; letter-spacing: -.01em; }
+  .doc h4 { font-family: var(--head); font-size: 14px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+            color: var(--field); margin: 10px 0 4px; }
+  .doc p { font-size: 16px; line-height: 1.45; color: #23302d; }
+  .doc table { width: 100%; border-collapse: collapse; font-size: 15.5px; }
+  .doc td { padding: 6px 0; border-bottom: 1px solid #ebeee8; vertical-align: top; }
+  .doc td.o { width: 140px; font-weight: 600; text-align: right; white-space: nowrap; }
+  .doc .flag { background: var(--signal); padding: 2px 8px; border-radius: 6px; border: 1.5px solid var(--ink); font-size: 13.5px; }
+</style>
+</head>
+<body>
+  <div class="copy">
+    <div class="kicker"><span class="dot"></span>ai-second-brain</div>
+    <h1>Your morning,<br><span class="hl">already</span> sorted.</h1>
+    <p class="sub">Your plan, your meeting notes and the replies you owe, drafted before you sit down.</p>
+    <div class="prompt"><span class="caret">&gt;</span>Write up this morning's meeting.<span class="cursor"></span></div>
+    <div class="approve"><span class="tick">&#10003;</span>Nothing is sent until you approve it.</div>
+  </div>
+
+  <div class="win">
+    <div class="bar"><i></i><i></i><i></i><span>localhost:3737 &middot; Today</span></div>
+    <img src="assets/dashboard-today-live.png" alt="">
+  </div>
+
+  <div class="doc">
+    <div class="path">notes/meetings/2026-10-01-refund-flow-review.md</div>
+    <div class="in">
+      <h3>Refund flow review</h3>
+      <h4>Decision</h4>
+      <p>Refunds up to $150 go out automatically.</p>
+      <h4>Action items</h4>
+      <table>
+        <tr><td>Write the refund rules one-pager</td><td class="o">You &middot; Thu</td></tr>
+        <tr><td>List the 10 most common refund reasons</td><td class="o">Raka &middot; Sat</td></tr>
+        <tr><td>Confirm the fallback with the bank</td><td class="o"><span class="flag">Owner unclear</span></td></tr>
+      </table>
+    </div>
+  </div>
+</body>
+</html>

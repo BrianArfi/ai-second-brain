@@ -293,7 +293,7 @@ function briefingCard() {
   const body = `<div class="md">${U.mdToHtml(b.latest.markdown || '')}</div>` +
     (otherBtn ? `<p class="row-note">${otherBtn}</p>` : '');
   return Comp.card({
-    key: 'briefing', icon: '🗞️', title: 'Briefing (Pagi/Malam)',
+    key: 'briefing', icon: '🗞️', title: 'Briefing (morning/evening)',
     count, body, open: defaultOpen,
   });
 }
@@ -362,7 +362,7 @@ function escalationStrip(ov) {
       draftEscalationButton(it) + escalationActionButtons(it),
   }));
   return `<div class="escalation-strip" id="today-escalations">
-    <div class="escalation-title">⏳ Escalations — chase these</div>
+    <div class="escalation-title">⏳ Escalations: chase these</div>
     <div class="rows">${rows.join('')}</div>
   </div>`;
 }
