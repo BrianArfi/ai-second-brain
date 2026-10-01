@@ -14,6 +14,7 @@
 **Name**: [Your name / what the AI should call you]
 **Role**: [e.g., Product Manager, Consultant, Operations Lead]
 **Based in**: [City, Country — affects timezone references]
+**Timezone**: [IANA zone name, e.g. Europe/London or Asia/Jakarta. `/daily-update` reads it to choose morning or evening mode]
 **Languages**: [e.g., English for work docs, Indonesian for personal content]
 
 Brief context:

@@ -61,8 +61,13 @@ DISCHARGES = [
      "slack_client.py", re.compile(r"slack\.com/archives/")),
     ("Google Doc created", re.compile(r"gdocs_create\.py"),
      "gdocs_create.py", re.compile(r"docs\.google\.com|drive\.google\.com")),
-    ("Google Doc updated", re.compile(r"gdocs_writer\.py|gdoc_surgical\.py"),
-     None, re.compile(r"docs\.google\.com|drive\.google\.com")),
+    # gdoc_surgical.py counts only for a subcommand that writes, and only when it
+    # actually ran. Reading its source (`sed -n ... gdoc_surgical.py`) or running
+    # `read`/`list-tables` filed two phantom "Doc updated" blocks on 30 Sep 2026.
+    ("Google Doc updated",
+     re.compile(r"gdocs_writer\.py|gdoc_surgical\.py\s+"
+                r"(replace|linkify|append|insert-table|insert-row|set-cell|delete-row)\b"),
+     ("gdocs_writer.py", "gdoc_surgical.py"), re.compile(r"docs\.google\.com|drive\.google\.com")),
     # Both of these have a dry/no-op mode, so the command pattern has to require
     # the flag that actually writes. Without it, `--help`, a dry run, or a grep
     # that merely names the script filed a phantom discharge and blocked the

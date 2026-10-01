@@ -17,6 +17,19 @@ You can also read this file inside the product: open the local dashboard and pic
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-01
+
+### Changed
+- **The README tells you what the template does for you first.** It opens with the shift, the gap and the fix, a diagram of the daily loop and a table of what is inside, then the quick start. The deeper reference moved to `docs/ARCHITECTURE.md`, `docs/DASHBOARD.md` and `docs/SETUP.md`, so nothing was dropped.
+- **`/daily-update` reads your timezone from `CLAUDE.md`.** It no longer assumes WIB.
+- **Domain sharing reads `WORK_DOMAIN` from your environment or `.env`**, so a fork shares Google files to its own domain without editing code.
+
+### Fixed
+- **Runtime files that a demo session committed by mistake are removed:** `.agent/harness.json`, a ledger session file, a dashboard cache and a sample commitment.
+- **The ledger watcher counts a Google Doc update only when `gdoc_surgical.py` runs a command that writes.** Reading its source or running `read` no longer blocks the end of a turn.
+
+## [0.8.0] - 2026-09-30
+
 <!-- source: private repo commits after the v0.7.0 tag (2026-09-28 14:41 WIB): 1b82be1ce, 77bff0375, b0d9966fb, 0fd4e97c7, plus this change set -->
 
 ### Added

@@ -1,30 +1,35 @@
 ---
-description: Daily - Daily update - auto-detects WIB time; morning prep before 17:00 WIB (or if no morning ran yet), evening recap after
+description: Daily - Daily update - reads the owner's timezone from CLAUDE.md; morning prep before 17:00 local time (or if no morning ran yet), evening recap after
 argument-hint: "[optional focus, or 'morning'/'evening' to force a mode]"
 ---
 
-Determine current WIB time first. **Do NOT run `TZ=Asia/Jakarta date` in Git Bash on Windows.** Git Bash ships no tzdata, so `TZ=Asia/Jakarta` is silently ignored and the command returns **UTC**, which reads as 7 hours earlier than the owner's actual local time. On 14 Sep 2026 that returned 05:43 when the real time was 12:43 WIB, and the run entered morning mode after a morning update had already gone out.
+Determine the owner's current local time first. **The timezone comes from the `Timezone` line in `CLAUDE.md`.** Map it to an IANA zone name and call it `<TZ>` below: WIB is `Asia/Jakarta`, GST is `Asia/Dubai`, and a line that already names an IANA zone is used as written. If `CLAUDE.md` has no timezone, ask once, then continue.
+
+**Do NOT run `TZ=<TZ> date` in Git Bash on Windows.** Git Bash ships no tzdata, so the `TZ` value is silently ignored and the command returns **UTC**. On 14 Sep 2026 that returned 05:43 when the real time was 12:43 local (UTC+7), and the run entered morning mode after a morning update had already gone out.
 
 Get the time from a host that has tzdata:
 
 ```bash
 # WSL or macOS (native):
-TZ=Asia/Jakarta date '+%H:%M %A %Y-%m-%d'
+TZ=<TZ> date '+%H:%M %Z %A %Y-%m-%d'
 
 # Windows native (proxy to WSL):
-wsl.exe bash -c "TZ=Asia/Jakarta date '+%H:%M %A %Y-%m-%d'"
+wsl.exe bash -c "TZ=<TZ> date '+%H:%M %Z %A %Y-%m-%d'"
+
+# Any host with Python 3.9 or later:
+python3 -c "from datetime import datetime; from zoneinfo import ZoneInfo; print(datetime.now(ZoneInfo('<TZ>')).strftime('%H:%M %Z %A %Y-%m-%d'))"
 ```
 
-Sanity check before trusting it: UTC plus 7 must equal the WIB figure. If a machine reports the same clock for both `date -u` and the WIB command, that machine has no tzdata and its answer is UTC. Use the other host.
+Sanity check before trusting it: `date -u` plus the zone's UTC offset must equal the local figure. If a machine reports the same clock for both `date -u` and the `TZ=<TZ>` command, and the zone is not UTC, that machine has no tzdata and its answer is UTC. Use another host.
 
 **Then check whether a morning update already ran today**, because that decides the mode as much as the clock does: grep `Dashboard.md` for a `(Pagi)` section carrying today's date, and look for `_temp/daily_plan_<today>.md`. If either exists, morning has run and the mode is evening regardless of the hour.
 
-If $ARGUMENTS forces a mode ("morning" or "evening"), obey it. Otherwise (the owner's rule: morning until 17:00 WIB, since his work window starts ~12:30):
+If $ARGUMENTS forces a mode ("morning" or "evening"), obey it. Otherwise (the owner's rule: morning until 17:00 local time, since his work window starts ~12:30; change the hour here if your day runs differently):
 
-- Before 17:00 WIB AND no morning update has run yet today -> **morning mode**
-- 17:00 WIB or later, or morning already ran today -> **evening mode**
+- Before 17:00 local time AND no morning update has run yet today -> **morning mode**
+- 17:00 local time or later, or morning already ran today -> **evening mode**
 
-State which mode you chose and why (current WIB time) before starting.
+State which mode you chose and why (current local time and zone) before starting.
 
 Then Read the authoritative SOP for that mode and follow it exactly:
 

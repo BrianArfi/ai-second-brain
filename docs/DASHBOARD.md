@@ -12,6 +12,8 @@ step), so it runs anywhere you have `python3`.
 - [What you see, and what fills in over time](#what-you-see-and-what-fills-in-over-time)
 - [The tabs](#the-tabs)
 - [The Hours tab: work-hours productivity tracker](#the-hours-tab-work-hours-productivity-tracker)
+- [Cost, savings and token efficiency](#cost-savings-and-token-efficiency)
+- [It runs on rails: the cron layer](#it-runs-on-rails-the-cron-layer)
 - [Where each panel gets its data](#where-each-panel-gets-its-data)
 - [Keeping it running](#keeping-it-running)
 - [Security](#security)
@@ -93,7 +95,7 @@ Many list panels open a detail drawer when you click a row.
 
 ## The Hours tab: work-hours productivity tracker
 
-The most distinctive panel in the dashboard. It reconstructs the owner's working day from
+The most distinctive panel in the dashboard. It reconstructs your working day from
 digital traces rather than a manually filled timesheet, and shows both what is measured
 and what is estimated, side by side, rather than blending them into one number.
 
@@ -112,8 +114,8 @@ Built by `.agent/skills/work-hours/scripts/work_hours.py`, state in
   the honest answer to "how much did I get done in the time I had."
 - **Productivity / output multiplier**: (meetings at 1x, plus AI-stream hours at the
   AI-speed factor) divided by actual hours. This one is an estimate, not a measurement.
-- **Streams breakdown**: a per-day timeline of overlapping streams by lane (Meetings,
-  Work PM, You, Other AI), stacked so overlaps are visible, with a table twin for
+- **Streams breakdown**: a per-day timeline of overlapping streams by lane (meetings,
+  client work, other AI work), stacked so overlaps are visible, with a table twin for
   accessibility.
 - **Weekly trend**: the same actual / effective / leverage / productivity figures
   aggregated by week, so a single noisy day does not distort the read.
@@ -126,14 +128,59 @@ quote:**
   with no conversion factor applied.
 - Assumed: the productivity / output multiplier, because it applies an AI-speed factor to
   convert AI-stream hours into an estimated manual-solo-equivalent. The default factor is
-  **2.5**, research-calibrated (see `.agent/skills/work-hours/research_ai_speed_factor.md`)
-  but still an estimate. The dashboard UI labels every figure that uses it "assumed," and
-  it is overridable via `--ai-speed N` or the `WORK_HOURS_AI_SPEED` env var.
+  **2.5**. It is an estimate, and the dashboard labels every figure that uses it "assumed".
+  The sources behind the number, and why none of them measures it directly, are in
+  [`research_ai_speed_factor.md`](../.agent/skills/work-hours/research_ai_speed_factor.md).
+  Override it with `--ai-speed N` or the `WORK_HOURS_AI_SPEED` env var.
 - The workday boundary is **04:00 WIB**, not midnight, so work that runs past midnight
   counts to the day it started rather than splitting across two days.
-- Overlapping meetings are merged into a single stream before counting. the owner is one
+- Overlapping meetings are merged into a single stream before counting. You are one
   person: a double-booked slot, or one recording that spans two calendar events, is never
   counted twice.
+
+---
+
+## Cost, savings and token efficiency
+
+The System tab keeps the economics visible, not just the activity:
+
+- **Cost & Savings** shows what actually ran through the optional model bridge (see
+  [Multi-agent setup](ARCHITECTURE.md#multi-agent-setup-faster-and-cheaper)) against what
+  it would have cost on Claude alone. It is always visible, not tucked behind a click.
+- **Token usage** shows Claude token consumption from real usage logs.
+- **Token efficiency** renders the weekly trend, the current top-3 token hotspots, and the
+  what-changed log from
+  [the token-efficiency loop](ARCHITECTURE.md#it-keeps-getting-cheaper-the-token-efficiency-loop),
+  so a cost-saving change shows its **observed** effect, not its promised one.
+
+---
+
+## It runs on rails: the cron layer
+
+Most panels are fed by automation, not by you remembering to run a script. The Hours tab
+is the exception: it is rebuilt on each page load from transcripts, meeting records and git
+commits, not written by a cron job. The other tabs are kept fresh by this repo's own
+crontab entries, which number in the low tens. If you point this repo's cron setup at a
+crontab you already use for other projects, only the entries this repo installs belong to
+it, including:
+
+- Ledgers that sweep commitments, waiting-on items, and Slack mentions.
+- An inbox sweep that refreshes the Inbox tab.
+- A command-queue dispatcher that runs headless AI tasks and leaves drafts for your approval.
+- Pre-meeting card generation.
+- Token usage and token-efficiency tracking.
+- Harness health checks.
+- Portfolio sync.
+- The meeting recorder's bot watcher.
+- A dashboard keepalive.
+
+The jobs run throttled. They start at fixed offsets, so they do not all land on the same
+minute, and they run at low CPU and IO priority, so a burst of background work cannot
+starve the editor and the sessions you are using.
+
+Each registered job reports a heartbeat. A silent overnight failure shows up as a failing
+row on the System tab instead of going unnoticed. See `.agent/skills/harness-health/` for
+the health-check layer itself.
 
 ---
 
@@ -171,9 +218,14 @@ on macOS, Linux, and WSL.
 
 ## Security
 
-- **It binds to localhost.** Do not expose port 3737 to your network. There is no
-  authentication: anyone who can reach the port can read your data and use the action
-  buttons.
+- **It binds to all interfaces (`0.0.0.0`), and filters by IP.** On WSL a Windows browser
+  reaches the dashboard through a NAT gateway, not over loopback, so a loopback-only bind
+  would refuse the browser it is meant to serve. Instead, every request is checked against
+  an in-process allowlist before it is handled: `127.0.0.1`, `::1`, and the detected WSL
+  gateway. `DASHBOARD_ALLOWED_IPS` can only add addresses to that list. It cannot narrow it.
+  If an all-interfaces bind is not acceptable on your machine or network, put port 3737
+  behind a firewall rule. There is no authentication beyond the allowlist: anyone who can
+  reach the port from an allowed address can read your data and use the action buttons.
 - **It can run local commands on your behalf.** The action endpoints edit your local
   tracker files, and the optional AI-task and run-job buttons execute local scripts and can
   invoke the headless `claude` CLI. Those are conveniences for a single-user, on-your-own-machine
