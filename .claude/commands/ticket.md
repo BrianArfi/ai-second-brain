@@ -35,6 +35,7 @@ than an unfiled one, because it reads as tracked and never surfaces again.
 - **Description**: the problem, the expected behaviour, and the source. Link the PRD, the MOM, the Slack permalink, the decision id. A ticket with no source becomes an argument in three weeks.
 - **Acceptance criteria in Gherkin**, every `Then` measurable. Copy them from the PRD if one exists rather than rewriting from memory.
 - **Long descriptions go in a file**, never inline: `--description-file /tmp/spec.md` converts markdown to ADF properly.
+- **Naming a specific service or repo?** Check it against `Clients/Work/work_github_estate_index.md` (CLAUDE.md "Technical ground truth") first -- "Example Program" and "Marketplace" are not repo names, and GitHub's mirror of Bitbucket can be 5 minutes stale.
 
 ## 4. Show the owner, then file
 

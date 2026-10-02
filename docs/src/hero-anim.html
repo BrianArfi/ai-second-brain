@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AI Second Brain animated hero</title>
+<!-- Animated version of hero.html, rendered to docs/hero.gif by docs/src/render_gifs.py.
+     Shared visual system: paper #F1F3EE, field #0D453E, ink #072B27, signal #C8F751.
+     Runs once in 9 s: headline, the prompt types, the dashboard and the filed note land,
+     the action items and the "Owner unclear" flag appear, then the approval line. Fades back to paper. -->
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800;900&family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #F1F3EE; --field: #0D453E; --ink: #072B27; --signal: #C8F751;
+    --head: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --body: "Inter", "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1600px; height: 800px; overflow: hidden; }
+  body { background: var(--paper); color: var(--ink); font-family: var(--body); position: relative; }
+  .a { animation-duration: .6s; animation-timing-function: cubic-bezier(.2,.8,.2,1);
+       animation-fill-mode: both; animation-iteration-count: 1; }
+  @keyframes rise { from { opacity: 0; transform: translateY(26px); } to { opacity: 1; transform: none; } }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes slideL { from { opacity: 0; transform: translateX(120px); } to { opacity: 1; transform: none; } }
+  @keyframes drop { from { opacity: 0; transform: translateY(-70px) rotate(4deg); } to { opacity: 1; transform: rotate(-1.4deg); } }
+  @keyframes grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+  @keyframes pop { 0% { opacity: 0; transform: scale(.4); } 70% { opacity: 1; transform: scale(1.15); } 100% { opacity: 1; transform: scale(1); } }
+  @keyframes type { from { width: 0; } to { width: 32ch; } }
+  @keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+  @keyframes out { from { opacity: 0; } to { opacity: 1; } }
+
+  .copy { position: absolute; left: 72px; top: 150px; width: 660px; }
+  .kicker { font-family: var(--mono); font-size: 24px; font-weight: 700; color: var(--field);
+            display: flex; align-items: center; gap: 12px; animation-name: fade; animation-delay: .1s; }
+  .kicker .dot { width: 16px; height: 16px; border-radius: 3px; background: var(--signal); border: 3px solid var(--ink); }
+  h1 { font-family: var(--head); font-weight: 900; font-size: 80px; line-height: 1.02;
+       letter-spacing: -.035em; margin-top: 24px; }
+  h1 .l1 { display: block; animation-name: rise; animation-delay: .3s; }
+  h1 .l2 { display: block; animation-name: rise; animation-delay: .6s; }
+  .hl { position: relative; display: inline-block; z-index: 0; }
+  .hl::before { content: ""; position: absolute; left: -6px; right: -6px; top: 56%; height: 36%;
+                background: var(--signal); z-index: -1; transform-origin: left center;
+                animation: grow .5s cubic-bezier(.2,.8,.2,1) 1.3s both; }
+  .sub { font-size: 27px; line-height: 1.4; margin-top: 28px; color: var(--field); font-weight: 500;
+         max-width: 640px; animation-name: rise; animation-delay: 1.5s; }
+  .prompt { margin-top: 38px; display: inline-flex; align-items: center; gap: 14px;
+            background: var(--ink); color: #E8F0EC; font-family: var(--mono); font-size: 23px;
+            padding: 18px 24px; border-radius: 14px; box-shadow: 6px 6px 0 var(--field); width: 560px;
+            animation-name: rise; animation-delay: 1.9s; }
+  .prompt .caret { color: var(--signal); font-weight: 700; }
+  .prompt .typed { display: inline-block; overflow: hidden; white-space: nowrap; width: 32ch;
+                   animation: type 1.6s steps(32, end) 2.3s both; }
+  .prompt .cursor { width: 11px; height: 26px; background: var(--signal); display: inline-block;
+                    animation: blink .8s steps(1) 0s 11 both; }
+  .approve { margin-top: 22px; display: flex; align-items: center; gap: 12px; font-size: 24px;
+             font-weight: 700; color: var(--ink); animation-name: rise; animation-delay: 6.3s; }
+  .approve .tick { width: 32px; height: 32px; border-radius: 50%; background: var(--signal);
+                   border: 3px solid var(--ink); display: grid; place-items: center; font-size: 17px; font-weight: 900;
+                   animation: pop .5s ease-out 6.5s both; }
+
+  .win { position: absolute; left: 732px; top: 34px; width: 820px; border-radius: 18px; overflow: hidden;
+         background: #0b0d12; border: 3px solid var(--ink); box-shadow: 14px 14px 0 0 var(--field);
+         animation-name: slideL; animation-delay: 3.2s; animation-duration: .8s; }
+  .win .bar { height: 40px; background: var(--ink); display: flex; align-items: center; padding: 0 16px; gap: 8px; }
+  .win .bar i { width: 13px; height: 13px; border-radius: 50%; background: #2c5a52; display: block; }
+  .win .bar i:first-child { background: var(--signal); }
+  .win .bar span { margin-left: 14px; font-family: var(--mono); font-size: 16px; color: #9fbdb5; }
+  .win .bar b { margin-left: auto; font: 800 14px var(--head); color: var(--ink); background: var(--signal);
+                padding: 4px 10px; border-radius: 6px; }
+  .win img { display: block; width: 100%; }
+
+  .doc { position: absolute; left: 968px; top: 470px; width: 590px; background: #fff; border-radius: 16px;
+         border: 3px solid var(--ink); box-shadow: 10px 10px 0 0 var(--ink); overflow: hidden;
+         animation-name: drop; animation-delay: 4.2s; animation-duration: .7s; }
+  .doc .path { font-family: var(--mono); font-size: 16px; color: #5b6f6a; background: #F6F7F3;
+               padding: 10px 22px; border-bottom: 1px solid #e2e6df; }
+  .doc .in { padding: 10px 24px 10px; }
+  .doc h3 { font-family: var(--head); font-size: 28px; font-weight: 800; letter-spacing: -.01em; }
+  .doc h4 { font-family: var(--head); font-size: 15px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+            color: var(--field); margin: 6px 0 2px; }
+  .doc p { font-size: 19px; line-height: 1.4; color: #23302d; }
+  .doc table { width: 100%; border-collapse: collapse; font-size: 19px; }
+  .doc td { padding: 5px 0; border-bottom: 1px solid #ebeee8; vertical-align: top; }
+  .doc td.o { width: 160px; font-weight: 700; text-align: right; white-space: nowrap; }
+  .doc tr { animation-name: rise; }
+  .doc tr:nth-child(1) { animation-delay: 4.9s; }
+  .doc tr:nth-child(2) { animation-delay: 5.2s; }
+  .doc tr:nth-child(3) { animation-delay: 5.5s; }
+  .doc .flag { display: inline-block; background: var(--signal); padding: 2px 9px; border-radius: 6px;
+               border: 2px solid var(--ink); font-size: 16px; animation: pop .5s ease-out 5.9s both; }
+
+  .cover { position: absolute; inset: 0; background: var(--paper); z-index: 9;
+           animation: out .5s linear 8.5s both; }
+</style>
+</head>
+<body>
+  <div class="copy">
+    <div class="kicker a"><span class="dot"></span>ai-second-brain</div>
+    <h1><span class="l1 a">Your morning,</span><span class="l2 a"><span class="hl">already</span> sorted.</span></h1>
+    <p class="sub a">Your plan, your meeting notes and the replies you owe, drafted before you sit down.</p>
+    <div class="prompt a"><span class="caret">&gt;</span><span class="typed">Write up this morning's meeting.</span><span class="cursor"></span></div>
+    <div class="approve a"><span class="tick">&#10003;</span>Nothing is sent until you approve it.</div>
+  </div>
+
+  <div class="win a">
+    <div class="bar"><i></i><i></i><i></i><span>localhost:3737 &middot; Today</span><b>sample data</b></div>
+    <img src="assets/dashboard-today-live.png" alt="">
+  </div>
+
+  <div class="doc a">
+    <div class="path">notes/meetings/2026-10-01-refund-flow-review.md</div>
+    <div class="in">
+      <h3>Refund flow review</h3>
+      <h4>Decision</h4>
+      <p>Refunds up to $150 go out automatically.</p>
+      <h4>Action items</h4>
+      <table>
+        <tr class="a"><td>Write the refund rules one-pager</td><td class="o">You &middot; Thu</td></tr>
+        <tr class="a"><td>List the 10 most common refund reasons</td><td class="o">Raka &middot; Sat</td></tr>
+        <tr class="a"><td>Confirm the fallback with the bank</td><td class="o"><span class="flag">Owner unclear</span></td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="cover"></div>
+</body>
+</html>
