@@ -54,10 +54,11 @@ for _stream in (sys.stdout, sys.stderr):
 # of the harness, and behaviourally identical to the Rust half in the ASB app's slackpush.rs.
 sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'scripts'))
 from slack_text import render as slack_render, user_names  # noqa: E402
-from brian_voice import voice_block  # noqa: E402
+from brian_voice import voice_block, clean_draft  # noqa: E402
 # Pattern 1 of the draft-feedback baseline (27 Sep 2026): 41 of 150 corrections were a
 # draft that should not exist. Confirmations get a reaction, answered items get no draft.
 from draft_need_check import is_ack, parse_permalink, brian_replied_after  # noqa: E402
+from draft_context import router_owner  # noqa: E402
 REACT_DRAFT = 'REACT :+1:'
 STATE_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'reply_queue.json')
 LEDGER_PATH = os.path.join(BASE_DIR, 'journal', 'state', 'slack_mention_ledger.json')
@@ -87,6 +88,10 @@ VOICE_PROMPT_HEADER = (
     "have), still include the block but set DRAFT to exactly: SKIP - needs more context.\n\n"
     "If the message only confirms, agrees, or acknowledges something the owner asked for, "
     "the owner does not reply in text. Set DRAFT to exactly: REACT :+1:\n\n"
+    "Read every 'earlier in thread' line before drafting: the reply answers the whole "
+    "thread, including a request someone made higher up, not only the last message. "
+    "'owner said recently in this channel' lines are his own words: the draft must never "
+    "contradict them, and must not repeat what he already said.\n\n"
     "Items:\n\n"
 )
 
@@ -172,6 +177,20 @@ def fetch_thread(token, it):
         earlier = earlier[:1] + earlier[-(THREAD_MAX - 1):]
     return earlier
 
+BRIAN_RECENT = 3   # his own last messages in the channel, so a draft cannot contradict them
+
+def fetch_brian_recent(token, channel):
+    """the owner's last BRIAN_RECENT top-level messages in this channel, newest first.
+
+    W39: "salah dong, ini goes against apa yang udah gw kirim kemarin". The drafter saw
+    the thread and not what the owner himself had said in the channel the day before."""
+    import mention_ledger as ml
+    resp = ml.slack('conversations.history', token, {'channel': channel, 'limit': 100})
+    if not resp.get('ok'):
+        return []
+    return [m.get('text', '') for m in resp.get('messages', [])
+            if m.get('user') == ml.BRIAN_ID_DEFAULT][:BRIAN_RECENT]
+
 def _who(uid):
     return user_names().get(uid) or uid
 
@@ -185,7 +204,7 @@ def _quote(text, indent):
     body = slack_render(text or '', collapse=False).strip() or '(no text)'
     return '\n'.join(f'{indent}> {ln.rstrip()}  ' if ln.strip() else f'{indent}>' for ln in body.split('\n'))
 
-def item_prompt_block(iid, it, thread=None):
+def item_prompt_block(iid, it, thread=None, recent=None):
     chan = it.get('channel_name', '?')
     # Decoded for the MODEL too, not only for the owner. A drafter handed `<@<SLACK_ID>>` cannot tell
     # who is being asked for what, and writes a reply that answers nobody in particular.
@@ -195,6 +214,8 @@ def item_prompt_block(iid, it, thread=None):
     lines = [f'item_id: {iid}{priority}', f'channel: {chan}']
     for uid, txt, _ in thread or []:
         lines.append(f'earlier in thread, {_who(uid)}: {slack_render(txt, collapse=True)}')
+    for txt in recent or []:
+        lines.append(f'owner said recently in this channel: {slack_render(txt, collapse=True)[:300]}')
     lines.append(f'message: {text}')
     if ctx:
         lines.append(f'context: {ctx}')
@@ -370,6 +391,12 @@ def cmd_draft(args):
                     continue
             except Exception as e:  # a failed check must never stop the queue
                 print(f'draft_need_check failed for {iid}: {e}', file=sys.stderr)
+            # Another Claude session already owns this conversation (W39: "ini udah
+            # dijawab di sesi sebelah bukan?"). Its draft is the one the owner reviews.
+            if router_owner(parsed[0], parsed[2] or parsed[1], ''):
+                state['items'].pop(iid, None)
+                n_skipped += 1
+                continue
         if is_ack(slack_render(it.get('text', ''), collapse=True)):
             state['items'][iid] = {'drafted_at': time.time(), 'text_hash': th,
                                    'draft_text': REACT_DRAFT}
@@ -377,19 +404,24 @@ def cmd_draft(args):
             continue
         needs_draft.append((iid, it, th))
 
-    threads = {}
+    threads, recent = {}, {}
     for iid, it, _ in needs_draft:
         try:
             token = token or load_slack_token()
             threads[iid] = fetch_thread(token, it)
             time.sleep(API_PAUSE)
+            chan = it.get('channel')
+            if chan and chan not in recent:
+                recent[chan] = fetch_brian_recent(token, chan)
+                time.sleep(API_PAUSE)
         except Exception as e:  # a missing history must never stop the queue
             print(f'thread fetch failed for {iid}: {e}', file=sys.stderr)
 
     fallback_ids = []
     if needs_draft:
         prompt = VOICE_PROMPT_HEADER + '\n\n'.join(
-            item_prompt_block(iid, it, threads.get(iid)) for iid, it, _ in needs_draft)
+            item_prompt_block(iid, it, threads.get(iid), recent.get(it.get('channel')))
+            for iid, it, _ in needs_draft)
         rc, stdout = run_agy_bridge(prompt)
         if rc == 3:
             fallback_ids = [iid for iid, _, _ in needs_draft]
@@ -407,6 +439,9 @@ def cmd_draft(args):
                 if not draft:
                     fallback_ids.append(iid)
                     continue
+                draft, lint_notes = clean_draft(draft)
+                if lint_notes:
+                    print(f'{iid} draft checks: ' + '; '.join(lint_notes)[:200], file=sys.stderr)
                 state['items'][iid] = {
                     'drafted_at': now, 'text_hash': th, 'draft_text': draft,
                     'thread': threads.get(iid) or [],

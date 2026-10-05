@@ -121,8 +121,11 @@ def git_raw(args, timeout=LS.GIT_LOCAL_TIMEOUT):
     letter of the filename.
     """
     try:
+        # utf-8, not the locale: on Windows text=True decodes as cp1252, so a
+        # macOS screenshot name with U+202F came back as mojibake, `git add` failed
+        # on it, and every Windows auto-commit since mid-Sep 2026 aborted (5 Oct).
         p = subprocess.run(['git', *args], cwd=BASE_DIR, capture_output=True,
-                           text=True, timeout=timeout)
+                           encoding='utf-8', errors='surrogateescape', timeout=timeout)
         return p.returncode, p.stdout, p.stderr.strip()
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
         return None, '', str(exc)

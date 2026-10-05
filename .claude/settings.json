@@ -231,6 +231,16 @@
         "hooks": [
           {
             "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/draft_lint_stop.py\"",
+            "timeout": 20,
+            "statusMessage": "Checking drafts..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
             "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/ledger_guard.py\"",
             "timeout": 120,
             "statusMessage": "Syncing ledgers..."

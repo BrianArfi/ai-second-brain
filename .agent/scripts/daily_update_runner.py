@@ -906,6 +906,16 @@ def _main_logic(mode, dry_run=False):
         out = _step("Unanswered Status Check", [sys.executable, status_script,
                     'calendar', '--days', '3'], timeout=120)
         sections.append(f"## Stale Status Check\n```\n{out}\n```\n")
+
+    # ── [10.10] Carry-over check (added 5 Oct 2026) ──────────────────
+    # Due today/tomorrow records (breached or not), tomorrow's meetings, and the
+    # previous briefing's dated lines. The 5 Oct morning missed Palak's mapping
+    # for Julie's review because none of the other reports show any of these.
+    carry_script = os.path.join(BASE_DIR, '.agent', 'scripts', 'carryover_check.py')
+    if os.path.exists(carry_script):
+        print("[10.10] Carry-over check (due today/tomorrow, tomorrow's meetings)...", flush=True)
+        out = _step("Carry-over Check", [sys.executable, carry_script], timeout=150)
+        sections.insert(0, f"## ⏭️ Carry-over: due today or tomorrow (READ FIRST)\n```\n{out}\n```\n")
     write_output(sections, output_file)
 
     # ── Write morning plan file (Morning only) ───────────────────────

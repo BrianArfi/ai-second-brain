@@ -45,7 +45,7 @@ AGY_BRIDGE = os.path.join(BASE_DIR, '.agent', 'skills', 'agy-bridge', 'run.py')
 INBOX_CLI = os.path.join(BASE_DIR, '.agent', 'skills', 'inbox-hub', 'scripts', 'inbox_sweep.py')
 
 sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'scripts'))
-from brian_voice import voice_block  # noqa: E402
+from brian_voice import voice_block, clean_draft  # noqa: E402
 
 # generic words that make a term useless for grepping repo context
 _STOP = {'the', 'and', 'for', 'with', 'please', 'this', 'that', 'from', 'your',
@@ -298,6 +298,9 @@ def main():
                 print('  ! two failures and no success, treating GLM as unavailable; stopping early')
                 break
             continue
+        body, lint_notes = clean_draft(body)
+        if lint_notes:
+            print(f"  ~ {it['id']} draft checks: {'; '.join(lint_notes)[:200]}")
         if args.dry_run:
             counts['ok'] += 1
             print(f"\n{'='*70}\n{it['id']}  [{note}]\n  {title}\n{'-'*70}\n{body}\n")

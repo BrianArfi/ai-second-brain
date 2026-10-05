@@ -129,7 +129,8 @@ def git(args, timeout=GIT_LOCAL_TIMEOUT):
     """
     try:
         p = subprocess.run(['git', *args], cwd=BASE_DIR, capture_output=True,
-                           text=True, timeout=timeout, env=GIT_ENV)
+                           encoding='utf-8', errors='surrogateescape',
+                           timeout=timeout, env=GIT_ENV)
         return p.returncode, p.stdout.strip(), p.stderr.strip()
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
         return None, '', str(exc)

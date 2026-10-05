@@ -41,5 +41,19 @@ def voice_block():
             _cache = FALLBACK
     return _cache
 
+def clean_draft(text):
+    """(text, notes): a model draft after the deterministic fixes in `draft_lint.autofix`.
+
+    Cuts the added line the owner always cuts (an offer, a walkthrough, a history receipt) and
+    capitalises known names. Fails open: a broken lint returns the draft untouched.
+    """
+    if not text or text.startswith(('SKIP', 'REACT')):
+        return text, []
+    try:
+        from draft_lint import autofix
+        return autofix(text)
+    except Exception:
+        return text, []
+
 if __name__ == '__main__':
     print(voice_block())

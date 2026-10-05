@@ -17,6 +17,78 @@ You can also read this file inside the product: open the local dashboard and pic
 
 ## [Unreleased]
 
+### Added
+- **`/session` refers one Claude session from another.** Name a session by
+  id prefix, `last`, or any keyword it contained, and the current session
+  loads what that one was asked, which files it wrote, the links and ledger
+  ids it produced, and where it ended. No argument lists recent sessions;
+  `/session here` prints this session's reference to paste elsewhere; several
+  references and a trailing task work in one message. Backed by
+  `.agent/scripts/session_ref.py` (stdlib, reads local transcripts).
+- **Weekly planning and follow-ups read email through the Gmail connector.**
+  The Gmail card depends on a Google preview program and fails until the
+  project is enrolled, so these commands now name the connector directly.
+- **`oauth_client_resync.py` recovers every Google connector on one OAuth
+  client after its secret is reset.** `apply` copies a new client secret into
+  each token and test-refreshes it. If the reset also revoked the grants,
+  `reauth-url` and `reauth-save` re-consent all of them with one sign-in.
+- **`CLAUDE.md` now states the changelog rule as a hard rule.** A skill,
+  command, agent, or hook whose behavior changes is not done until this
+  file has a new `Unreleased` bullet, written in the same turn as the code
+  -- not deferred to release day. The `sync.py` pipeline to the public
+  `ai-second-brain` repo already existed; this just makes feeding it
+  non-optional.
+- **Drafts shown in chat are checked before you answer them.** A new Stop
+  hook, `draft_lint_stop.py`, reads the draft in the reply and blocks once
+  when it finds a correction you keep making: an added offer or walkthrough
+  line, a name in lowercase, or a message full of system terms. The
+  corrected draft is what you see next. Off switch: `DRAFT_LINT_DISABLE=1`.
+- **`draft_lint.py`, one set of draft checks for every drafter.** The same
+  checks run in the chat hook, on draft files, on sends, and inside the
+  automated drafters. `draft_lint.py replay` measures the catch rate
+  against your past corrections.
+- **`draft_context.py` gives a reply draft its context in one call.** For a
+  Slack permalink it says whether you already replied or reacted, whether
+  another session drafted or sent into that thread, and prints the whole
+  thread plus your last three messages in the channel. The chat hook asks
+  for it before a reply draft is shown.
+
+### Changed
+- **Automated drafters cut the line you always cut.** Reply queue, chase
+  queue and inbox drafts now drop offer, walkthrough and history sentences
+  and capitalise names before you see them.
+- **The reply queue reads more before it drafts.** It skips a thread that
+  another session owns, and gives the model your last three messages in
+  the channel so a draft cannot contradict what you said.
+- **The shared voice prompt lists your five most frequent corrections**, so
+  every drafter that loads it avoids them.
+- **The send guard and the draft-file guard use the shared checks.** The
+  send guard also warns on a lowercase name or a very technical message.
+- **The weekly draft-feedback report catches up after a missed Saturday.**
+  It runs hourly from Saturday to Monday and does the work once per week,
+  reports the week that ended, and counts how often the new checks fired.
+- **The draft-feedback classifier keeps working when the cheap models are
+  out of quota.** It falls back to Haiku through the Claude CLI, uses short
+  ids the model cannot garble, and a stricter prompt so document comments
+  and plain approvals are not counted as corrections. A week with replies
+  still unclassified is flagged in the report and retried.
+- **Reply sessions and the Slack send protocol start with `draft_context.py`**
+  instead of `draft_need_check.py`, so every reply draft begins with the
+  whole thread and your recent messages in that channel.
+
+### Fixed
+- **A sweep sees a reply posted outside the thread.** When someone answers
+  your post with a new message in the channel or DM and does not tag you,
+  the Slack thread reader now finds it. It reads each channel after your
+  last top-level post: everything after it in a DM, the next 24 hours in a
+  channel.
+- **An item the label pass skipped stays in "Needs you".** It used to drop
+  out of the report as soon as any other item had a label. It is now listed
+  after the labelled items, with a warning to label it and run `label` again.
+- **The label prompt asks for every item to be labelled**, and treats a
+  helper's "done" on something you asked for someone else as needing your
+  reply, because the person who first asked still has to hear it.
+
 ## [0.8.1] - 2026-10-01
 
 ### Changed

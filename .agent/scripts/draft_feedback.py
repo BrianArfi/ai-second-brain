@@ -33,6 +33,7 @@ DATA_DIR = os.path.join(BASE_DIR, 'journal', 'draft_feedback')
 TURNS = os.path.join(DATA_DIR, 'turns.jsonl')
 LABELS = os.path.join(DATA_DIR, 'labels.jsonl')
 REPORT = os.path.join(BASE_DIR, 'journal', 'analysis', 'draft_feedback_weekly.md')
+LINT_LOG = os.path.join(DATA_DIR, 'lint_events.jsonl')
 AGY_BRIDGE = os.path.join(BASE_DIR, '.agent', 'skills', 'agy-bridge', 'run.py')
 
 # Transcript stores for this repo, per machine. Missing ones are skipped. The WSL cron
@@ -150,17 +151,48 @@ def cmd_collect(_=None):
 
 def _prompt(batch):
     cats = '\n'.join(f'{k}: {v}' for k, v in PATTERNS.items())
+    # Numeric ids: a model echoes "7" faithfully, but cut the long session:timestamp
+    # keys at the first colon-T (W40), so those labels never matched.
     items = '\n\n'.join(
-        f"ID: {r['key']}\nDRAFT SHOWN (tail): {r['draft_turn'][-900:]}\nBRIAN REPLIED: {r['owner'][:600]}"
-        for r in batch)
+        f"ID: {i}\nDRAFT SHOWN (tail): {r['draft_turn'][-900:]}\nBRIAN REPLIED: {r['owner'][:600]}"
+        for i, r in enumerate(batch, 1))
     return (
         'An AI assistant showed the owner a draft of an outbound message (Slack, WhatsApp, email, '
         'comment). For each item, decide whether OWNER REPLIED is a correction of that draft. '
         'New unrelated tasks, questions about other topics, and feedback on documents or code '
         'are NONE. "drop this", "replied manually", "handled already" are NOT_NEEDED.\n\n'
+        'Most replies are NOT corrections. Answer NONE unless the owner changes, rejects, or drops '
+        'the outbound MESSAGE text itself. These are always NONE: comments left on a document, '
+        'PRD, MoM, mockup, slide or file ("I left 4 comments on ...md"); UI or design feedback '
+        '("kotak kuning ini nutupin"); instructions about the harness, app or code; approval '
+        'with an unrelated extra task ("ok send, and also create a ticket"); the owner answering a '
+        'question the assistant asked; the owner typing his own new message; a plain approval '
+        '("send", "ok send it"). One line per ID, one pattern per ID. A sentence he wants '
+        'added because the draft left out a fact he gives is MISSED_CONTEXT only if the fact '
+        'was available in the thread; otherwise NONE.\n\n'
         f'Patterns (pick exactly one, or NONE):\n{cats}\n\n'
         'Output one line per item and nothing else:\nID<TAB>PATTERN<TAB>the owner\'s key words, max 120 chars\n\n'
         f'{items}\n')
+
+def _claude_haiku(prompt_file):
+    """Run the classify prompt on Haiku through the Claude CLI, or None if there is none."""
+    import shutil
+    exe = shutil.which('claude')
+    if not exe:
+        return None
+    with open(prompt_file, encoding='utf-8') as f:
+        prompt = f.read()
+    try:
+        return subprocess.run([exe, '-p', '--model', 'haiku'], input=prompt, capture_output=True,
+                              text=True, encoding='utf-8', timeout=600)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+def unlabelled(week):
+    """Corrections in `week` that no classifier has labelled yet."""
+    labelled = {r['key'] for r in _read_jsonl(LABELS)}
+    return sum(1 for r in _read_jsonl(TURNS)
+               if r['ts'] and _week(r['ts']) == week and not r['approval'] and r['key'] not in labelled)
 
 def cmd_classify(_=None):
     labelled = {r['key'] for r in _read_jsonl(LABELS)}
@@ -173,18 +205,26 @@ def cmd_classify(_=None):
             f.write(_prompt(batch))
         res = subprocess.run([sys.executable, AGY_BRIDGE, '--task', 'harvest', '--prompt-file', tmp,
                               '--timeout', '300'], capture_output=True, text=True, encoding='utf-8')
-        if res.returncode != 0:
-            print(f'classify: agy-bridge rc={res.returncode}, {len(todo) - i} left unlabelled', file=sys.stderr)
+        by = 'agy'
+        if res.returncode == 3:
+            # The bridge's fallback_to_claude sentinel (W40: agy quota exhausted for four
+            # days). Honour it with Haiku when the Claude CLI is on this machine.
+            res, by = _claude_haiku(tmp), 'haiku'
+        if res is None or res.returncode != 0:
+            print(f'classify: no classifier available (agy-bridge and Claude CLI), '
+                  f'{len(todo) - i} left unlabelled', file=sys.stderr)
             break
         os.remove(tmp)
-        keys = {r['key'] for r in batch}
+        keys = {str(n): r['key'] for n, r in enumerate(batch, 1)}
+        done = set()
         for line in res.stdout.splitlines():
             parts = line.strip().split('\t')
-            if len(parts) >= 2 and parts[0] in keys:
+            if len(parts) >= 2 and parts[0].strip() in keys and parts[0].strip() not in done:
+                done.add(parts[0].strip())
                 pat = parts[1].strip().upper()
                 pat = pat if pat in PATTERNS else 'NONE'
-                out.append({'key': parts[0], 'pattern': pat,
-                            'quote': parts[2][:200] if len(parts) > 2 else '', 'by': 'agy'})
+                out.append({'key': keys[parts[0].strip()], 'pattern': pat,
+                            'quote': parts[2][:200] if len(parts) > 2 else '', 'by': by})
     _append_jsonl(LABELS, out)
     print(f'classify: {len(todo)} to label, {len(out)} labelled')
 
@@ -192,7 +232,33 @@ def _week(ts):
     y, w, _ = datetime.date.fromisoformat(ts[:10]).isocalendar()
     return f'{y}-W{w:02d}'
 
-def cmd_report(_=None):
+def report_week(today=None):
+    """The week the report is for: the ISO week holding the most recent Saturday.
+
+    On Saturday that is the current week; on Sunday or Monday (the catch-up runs) it is
+    still the week that just ended, not the one or two days of the new week."""
+    today = today or datetime.date.today()
+    sat = today - datetime.timedelta(days=(today.weekday() - 5) % 7)
+    y, w, _ = sat.isocalendar()
+    return f'{y}-W{w:02d}'
+
+def _reported_week():
+    try:
+        with open(REPORT, encoding='utf-8') as f:
+            m = re.search(r'## Patterns in (\d{4}-W\d{2})', f.read())
+        return m.group(1) if m else None
+    except OSError:
+        return None
+
+def lint_counts(week):
+    """How often the draft checks fired that week (draft_lint_stop.py log)."""
+    c = collections.Counter()
+    for r in _read_jsonl(LINT_LOG):
+        if r.get('ts') and _week(r['ts']) == week and r.get('severity') == 'block':
+            c[r.get('pattern')] += 1
+    return c
+
+def cmd_report(_=None, week=None):
     turns = _read_jsonl(TURNS)
     labels = {r['key']: r for r in _read_jsonl(LABELS)}
     shown = collections.Counter(_week(r['ts']) for r in turns if r['ts'])
@@ -205,7 +271,8 @@ def cmd_report(_=None):
             fixes[wk][lab['pattern']] += 1
             q = lab.get('quote') or r['owner'][:120]
             quotes[(wk, lab['pattern'])].append(' '.join(q.split()).replace('"', "'"))
-    weeks = sorted(shown)[-8:]
+    target = week or report_week()
+    weeks = sorted(w for w in shown if w <= target)[-8:]
     lines = ['# Draft Feedback, Weekly', '',
              f'Generated {datetime.datetime.now().strftime("%Y-%m-%d %H:%M")} by `.agent/scripts/draft_feedback.py report`. '
              'Baseline and pattern definitions: '
@@ -215,6 +282,10 @@ def cmd_report(_=None):
         n = sum(fixes[wk].values())
         lines.append(f'| {wk} | {shown[wk]} | {n} | {100 * n / max(shown[wk], 1):.0f}% |')
     last = weeks[-1] if weeks else None
+    pending = unlabelled(last) if last else 0
+    if pending:
+        lines += ['', f'**{pending} replies in {last} are not classified yet** (no classifier was '
+                  'available), so its rate is incomplete. The hourly catch-up retries until they are.']
     lines += ['', f'## Patterns in {last}', '', '| Pattern | This week | Previous 4 weeks |', '| :--- | ---: | ---: |']
     prev = collections.Counter()
     for wk in weeks[-5:-1]:
@@ -233,6 +304,11 @@ def cmd_report(_=None):
                 lines.append(f'  - "{q}"')
     else:
         lines.append('Nothing repeated three or more times this week.')
+    fired = lint_counts(last) if last else {}
+    lines += ['', '## Machine checks fired', '',
+              'Times `draft_lint_stop.py` blocked a draft in chat before the owner saw it '
+              '(checks shipped 5 Oct 2026, W41):', '']
+    lines.append(', '.join(f'{p} {n}' for p, n in sorted(fired.items())) if fired else 'None logged this week.')
     os.makedirs(os.path.dirname(REPORT), exist_ok=True)
     with open(REPORT, 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines) + '\n')
@@ -271,24 +347,39 @@ def main():
     ap = argparse.ArgumentParser(description='Weekly draft-feedback tracking')
     sub = ap.add_subparsers(dest='cmd', required=True)
     for name in ('collect', 'classify', 'report', 'weekly'):
-        sub.add_parser(name)
+        p = sub.add_parser(name)
+        if name in ('report', 'weekly'):
+            p.add_argument('--week', help='ISO week to report, e.g. 2026-W40 (default: '
+                           'the week holding the most recent Saturday)')
+        if name == 'weekly':
+            p.add_argument('--if-due', action='store_true',
+                           help='exit quietly when the report already covers that week')
     sp = sub.add_parser('seed-baseline')
     sp.add_argument('dir')
     a = ap.parse_args()
     if a.cmd == 'seed-baseline':
         return cmd_seed(a)
+    week = getattr(a, 'week', None)
+    if a.cmd == 'weekly' and a.if_due:
+        # Cron never replays a missed slot, and the WSL host is often off at 14:30 on a
+        # Saturday (W40 was lost that way: host up at 16:00 on 3 Oct). So the job runs
+        # every hour Saturday to Monday and does the work once per report week.
+        due = week or report_week()
+        if _reported_week() == due and not unlabelled(due):
+            return
+        print(f'{datetime.datetime.now():%Y-%m-%d %H:%M} weekly: {due} is due')
     if a.cmd in ('collect', 'weekly'):
         cmd_collect()
     if a.cmd in ('classify', 'weekly'):
         cmd_classify()
     if a.cmd in ('report', 'weekly'):
-        cmd_report()
+        cmd_report(week=week)
     if a.cmd == 'weekly':
         commit_outputs()
 
 def commit_outputs():
     """Cron path: commit and push only this script's outputs, never the whole tree."""
-    paths = [os.path.relpath(p, BASE_DIR) for p in (TURNS, LABELS, REPORT)]
+    paths = [os.path.relpath(p, BASE_DIR) for p in (TURNS, LABELS, REPORT, LINT_LOG) if os.path.exists(p)]
     def git(*args):
         return subprocess.run(['git', '-C', BASE_DIR, *args], capture_output=True, text=True)
     git('add', *paths)
