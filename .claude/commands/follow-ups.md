@@ -16,7 +16,7 @@ without the user explicitly approving each one.
    also check for:
    - Slack threads or DMs where the last message was to the user and it's
      been a while
-   - emails awaiting a reply
+   - emails awaiting a reply (read with `python3 .agent/skills/gmail-connector/gmail_manager.py list`, not the Gmail card)
    - Jira tickets assigned to or mentioning the user with no recent activity
 
    If none of those are connected, work from `notes/`/`inbox/` alone and

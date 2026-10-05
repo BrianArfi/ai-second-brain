@@ -58,6 +58,20 @@ def message_fences(text):
         inside = not inside
     return n
 
+def lint_findings(text):
+    """Draft checks for the corrections the owner keeps giving (`draft_lint.py`): an added
+    line he cuts, a lowercase name, a message that reads like system internals. Only
+    block-severity findings, so a judgment call never stops the file."""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                        '..', '..', '.agent', 'scripts'))
+        import draft_lint
+        return ['a fix for %s (%s)' % (f['pattern'], f['msg'])
+                for s in draft_lint.draft_segments(text) for f in draft_lint.lint(s)
+                if f['severity'] == 'block'][:6]
+    except Exception:
+        return []
+
 def check(path, text):
     """Return a list of what is missing, empty when the draft is fine."""
     name = os.path.basename(path).lower()
@@ -68,6 +82,7 @@ def check(path, text):
         missing.append(f'the message text as > blockquotes: {fences} code fence(s) hold draft text, '
                        'and a fence does not wrap, so the owner has to scroll sideways. Put each '
                        'message in > lines; keep ``` only for tagged code (```bash, ```json)')
+    missing += lint_findings(text)
     if 'reply' not in name and not is_thread:
         return missing
     if '<!-- no-original:' in text:

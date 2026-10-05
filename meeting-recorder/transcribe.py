@@ -426,7 +426,9 @@ def run_cpu(audio, cfg, lang, provider=None):
     # Loud on purpose. CPU transcription is roughly real time, so an hour of
     # meeting is about an hour of laptop, and the user deserves to know that
     # before it happens rather than wonder why the fan is on.
-    print(f"[transcribe] ⚠ CPU fallback: no GPU and no API provider available.\n"
+    # Plain ASCII: the Windows console is cp1252 and a non-ASCII glyph here
+    # raises UnicodeEncodeError before the transcription even starts (4 Oct).
+    print(f"[transcribe] WARNING CPU fallback: no GPU and no API provider available.\n"
           f"[transcribe]   Model '{model}' on CPU takes roughly as long as the audio "
           f"itself (~{fmt_ts(dur)}).\n"
           f"[transcribe]   A free Gemini or Groq API key makes this near-instant: "

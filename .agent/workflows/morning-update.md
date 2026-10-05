@@ -16,6 +16,16 @@ Execute the daily runner in morning mode for a fast, priority-focused sweep.
 python .agent/scripts/daily_update_runner.py --mode morning
 ```
 
+## Carry-over First (mandatory, added 5 Oct 2026)
+
+The runner puts a `⏭️ Carry-over` section at the top of [daily_update_morning.md](../../daily_update_morning.md) ([carryover_check.py](../scripts/carryover_check.py), also runnable by hand). Read it before anything else. Every item in it is a Top-5 candidate:
+
+- **Records due today or tomorrow, breached or not.** The waiting-watchdog report only lists breached records, so a record due today that blocks tomorrow's meeting never appears there.
+- **Tomorrow's meetings.** Prep for a meeting tomorrow starts today. The calendar pull below only reaches midday tomorrow.
+- **Lines in the previous briefing that name today or tomorrow.** A deadline written in last week's briefing is still a deadline today.
+
+On 5 Oct 2026 the morning update missed Palak's marketplace mapping (`WAIT-0930`), due that day for Julie's review the next day, through all three gaps at once. the owner had to ask why it was forgotten.
+
 ## Calendar-Driven Meeting Prep (mandatory)
 
 The day is built around meetings, so the calendar is a first-class source, not an afterthought.
@@ -66,7 +76,7 @@ Each ledger below is the **SOURCE OF TRUTH** for its domain — embed its `repor
      - **Figma** → the Work-account Figma URL (per [[feedback_figma_work_account]]); resolve via the master-links index, don't guess.
      - **Driving Slack thread / ping** → the **permalink** (per [[feedback_slack_sending_playbook]]).
      - **Jira** → the issue link. Never reference "the BRD"/"the PRD"/"the ticket"/"the Figma" without the link attached — that is the exact gap the owner flagged (card looked thin because the doc wasn't clickable).
-   - Actively hunt the relevant docs (grep the repo, `master_links.md`, fathom_registry, the ticket's own links) rather than only linking what the mechanical card happened to surface. A thorough card front-loads every doc the owner would otherwise have to go dig for.
+   - Actively hunt the relevant docs (grep the repo, [master_links.md](../../Clients/Work/master_links.md), fathom_registry, the ticket's own links) rather than only linking what the mechanical card happened to surface. A thorough card front-loads every doc the owner would otherwise have to go dig for.
 2. **Commitments (the owner owes others)**: `python3 .agent/skills/commitment-ledger/scripts/commitment_ledger.py report`. **Do not embed the report.** Since 26 Sep 2026 the briefing carries one health line (open, overdue, against the targets in [`docs/ledger_hygiene.md`](../../docs/ledger_hygiene.md)) plus only what the owner must act on today: commitments due today or tomorrow, and overdue ones marked 🔥. Link [`journal/master_followup_tracker.md`](../../journal/master_followup_tracker.md) for the rest. A 300-line overdue list every morning is how the ledgers stopped being read. If the last `sweep` printed `FALLBACK_TO_CLAUDE` or `pending_candidates` remain in `journal/state/commitments.json`, Claude extracts those candidates itself (read each candidate's text, decide if it is a real commitment, identify recipient + due) and registers the results via `commitment_ledger.py add ...`; do not leave candidates to rot.
 3. **Waiting-on watchdog (others owe the owner)**: `python3 .agent/skills/waiting-watchdog/scripts/waiting_watchdog.py sweep --check-slack` (the Slack-thread close check is SOP-only, never cron'd), then `... report`. **Do not embed the report.** One health line (open, breached), then **today's chase list: at most 5 breached records**, records under a live-priority node first, then the oldest. **A record qualifies only with dated evidence that it is still open**: its `open_evidence` in `journal/state/autoclose_state.json` (for example "ABC-123 is TODO, updated 2026-08-23"), or a Slack or MoM line you read this morning. A silent thread is not evidence; asks that finish as an action (access, tickets, docs) leave no reply. No evidence either way means one line to the owner asking, not a chase (26 Sep 2026: a draft chased Teammate for four things already done). Group by person: one draft message per person, in the owner's voice, covering that person's records on the list. the owner approves the batch with one word; after each send, `waiting_watchdog.py touch <id>` for every record it covered. Every other breached record waits for the Saturday review in `journal/ledger_audit/<date>.md`, not for today's Top-5. On the first morning after a Saturday review, put one line in the briefing: how many records the review left for the owner, linked.
 4. **Decision log**: `python3 .agent/skills/decision-log/scripts/decision_log.py report` → embed verbatim (overdue-open decisions on top). Surface any decision whose deadline is today/past as a today-action.

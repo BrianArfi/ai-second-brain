@@ -202,6 +202,14 @@ EXTRA_LINE = [
     (re.compile(r"(?i)\byou told \w+ in \w+\b|\bas (you|i) said (on|in) \d"),
      'a history receipt'),
 ]
+# The maintained list lives in `.agent/scripts/draft_lint.py`, shared with the chat-draft
+# Stop hook and the automated drafters. The copy above is the fallback for a partial checkout.
+try:
+    sys.path.insert(0, os.path.join(REPO_ROOT, '.agent', 'scripts'))
+    import draft_lint as _draft_lint
+    EXTRA_LINE = _draft_lint.EXTRA_LINE
+except Exception:
+    _draft_lint = None
 
 def voice_notes(text, command):
     """Ways an outbound Slack draft does not read like the owner, per the measured model."""
@@ -228,6 +236,15 @@ def voice_notes(text, command):
     if extra:
         notes.append('a line the owner keeps cutting (' + '; '.join(extra[:3]) + '). '
                      'Delete it and read the message again')
+    if _draft_lint is not None:
+        try:
+            lower = _draft_lint.name_case(text)
+            if lower:
+                notes.append('names in lowercase (' + ', '.join(
+                    '%s -> %s' % p for p in lower[:4]) + '). He capitalises names')
+            notes += [n for _, n in _draft_lint.ai_voice(text)][:1]
+        except Exception:
+            pass
     return notes
 
 def payload_words(text):

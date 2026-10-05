@@ -37,6 +37,7 @@ import mimetypes
 import os
 import re
 import secrets
+import socket
 import shutil
 import subprocess
 import sys
@@ -569,7 +570,18 @@ def main():
 
     threading.Thread(target=sweeper, args=(cfg,), daemon=True).start()
 
-    server = ThreadingHTTPServer((args.bind, args.port), IngestHandler)
+    # One server at a time: socketserver's allow_reuse_address maps to
+    # SO_REUSEADDR on Windows, which lets five copies share the port and the
+    # upload land on an arbitrary one (seen 4 Oct 2026). Exclusive bind makes
+    # the duplicate exit instead of silently racing the live one.
+    class ExclusiveBindServer(ThreadingHTTPServer):
+        allow_reuse_address = False
+        def server_bind(self):
+            if os.name == "nt":
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            super().server_bind()
+
+    server = ExclusiveBindServer((args.bind, args.port), IngestHandler)
     server.daemon_threads = True
     print(f"\n  [ingest] listening on http://{args.bind}:{args.port}")
     print(f"  Recordings:  {rec_dir}")

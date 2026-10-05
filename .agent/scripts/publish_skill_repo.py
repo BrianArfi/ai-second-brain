@@ -75,7 +75,7 @@ def load_audit():
     spec.loader.exec_module(mod)
     return mod.audit
 
-IDENTITY_LABELS = {"bare 'owner'", "'owner arfi' (work identity)"}
+IDENTITY_LABELS = {"bare 'owner'", "'owner arfi' (work identity)", "'you'", "'you' (work identity)"}
 
 def bundled_notice(dst, finding):
     """True for the copyright holder's name in a bundled package's LICENSE or NOTICE.
