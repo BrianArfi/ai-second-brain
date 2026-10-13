@@ -174,10 +174,37 @@ def parse_permalink(permalink):
     ts = f'{raw_ts[:10]}.{raw_ts[10:]}'
     return cid, ts, thread_ts
 
+def owner_slack_ids(owner_hint):
+    """Slack U-ids for the owner name(s) on a record, from the person index.
+
+    `owner_hint` may name several people ("YourManager Teammate Labna"). Returns an
+    empty set when nobody resolves."""
+    state_dir = os.path.dirname(STATE_PATH)
+    users = {}
+    try:
+        with open(os.path.join(state_dir, 'slack_user_names.json'), encoding='utf-8') as fh:
+            users = {uid: {'name': n} for uid, n in json.load(fh).items()}
+    except (OSError, ValueError, AttributeError):
+        pass
+    try:
+        with open(os.path.join(state_dir, 'slack_person_index.json'), encoding='utf-8') as fh:
+            users.update(json.load(fh).get('users', {}))
+    except (OSError, ValueError, AttributeError):
+        pass
+    wanted = [n.strip().lower() for n in re.split(r',| and |/|\+', owner_hint or '') if n.strip()]
+    ids = set()
+    for uid, u in users.items():
+        names = {str(u.get(k) or '').strip().lower() for k in ('name', 'display_name', 'handle')}
+        names.discard('')
+        if any(w in names for w in wanted):
+            ids.add(uid)
+    return ids
+
 def owner_replied_since(token, source, owner_hint, since_ts):
-    """conversations.replies on the source thread: any message after since_ts from
-    someone other than the owner (best-effort owner match; conservative - any non-the owner
-    reply in-thread after `since` counts, since we don't reliably know owner's U-id)."""
+    """conversations.replies on the source thread: a message after since_ts from the
+    record's owner. When the owner resolves to Slack ids, only their replies count
+    (12 Oct 2026: Wshah's reply closed a record owned by Teammate). When nobody
+    resolves, any non-the owner reply counts, as before."""
     parsed = parse_permalink(source.get('permalink', ''))
     if not parsed:
         return False, None
@@ -189,11 +216,14 @@ def owner_replied_since(token, source, owner_hint, since_ts):
         return False, None
     msgs = resp.get('messages', [])
     brian_id = os.environ.get('OWNER_SLACK_ID', '<SLACK_ID>')
+    owner_ids = owner_slack_ids(owner_hint)
     for m in msgs:
         mts = float(m.get('ts', 0))
         if mts <= float(since_ts):
             continue
         if m.get('user') == brian_id:
+            continue
+        if owner_ids and m.get('user') not in owner_ids:
             continue
         return True, mts
     return False, None

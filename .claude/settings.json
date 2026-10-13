@@ -1,5 +1,8 @@
 {
   "model": "opus",
+  "env": {
+    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"
+  },
   "alwaysThinkingEnabled": true,
   "permissions": {
     "allow": [
@@ -164,6 +167,16 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/launchd_guard.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/agent_spend_guard.py\"",
             "timeout": 10
           }
         ]

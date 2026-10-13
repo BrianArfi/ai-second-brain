@@ -35,6 +35,13 @@ task_type strings token-tracker/agy-bridge/ai_runs actually use (see
 `token_usage.py`'s classification, or grep a recent week in
 `token_efficiency.json`).
 
+## Per-session and subagent-model view
+`token_efficiency.py` buckets spend by task type. For "which session, and was it
+subagents on Opus", run `.agent/scripts/token_usage_report.py` (cron Monday 12:55
+WIB, output `journal/reports/token_usage/<date>.md`; baseline
+[`2026-10-13-baseline.md`](../../journal/reports/token_usage/2026-10-13-baseline.md): 87% of subagent spend on Opus). The 13 Oct 2026 target
+is for that share to fall toward planning and design agents only.
+
 ## Hotspots feed weekly-planning
 `/weekly-planning`'s review phase reads `journal/state/token_efficiency.json`
 `hotspots` (top 3 token sinks with a one-line why) and picks **at most one**

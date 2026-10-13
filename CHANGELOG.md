@@ -18,6 +18,67 @@ You can also read this file inside the product: open the local dashboard and pic
 ## [Unreleased]
 
 ### Added
+- **Linear admin access can be cut back in one command.** `linear_client.py restrict-admins --keep a@x.com,b@x.com`
+  shows who keeps admin and who drops to member, and changes nothing until `--approved`.
+  `linear_client.py members` lists every active user with their role.
+- **Calendar events can repeat.** `gcal_manager.py create --recurrence 'FREQ=MONTHLY;BYMONTHDAY=5'`
+  makes one recurring event, for checks like a monthly earnings review.
+- **A weekly report shows which sessions spent the most, and on which model.** `token_usage_report.py`
+  ranks sessions by price-weighted tokens, splits parent and subagent spend, and shows the share of
+  subagent spend on Opus. It runs every Monday at 12:55 WIB.
+- **Subagents with no model run on Sonnet, and costly spawns get a warning.** `.claude/settings.json`
+  sets `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`, so a spawned agent no longer inherits an Opus session.
+  The new `agent_spend_guard.py` hook warns, and never blocks, when Opus is named for QA or lookup
+  work, a session passes 15 agents, or an agent spawns another agent. It is safe to also register
+  globally: two copies of the hook on one spawn log and warn once.
+
+### Fixed
+- **The waiting-on sweep closes a record only when its owner replies.** Before, any reply in the
+  thread from someone other than the owner closed it, so one person's answer could close another
+  person's open ask. When the owner's Slack id is unknown, the old behaviour stays.
+- **The calendar sweep shows the right "Today" before 07:00 WIB.** `gcal_manager.py sweep`
+  took the date in UTC, so an early morning update listed yesterday's meetings. It now uses
+  the host's local timezone.
+- **`link_sync.py` no longer crashes on a Windows console.** Its tick-mark output raised a
+  `UnicodeEncodeError` under cp1252, so the run looked failed. Output is now UTF-8.
+
+### Added
+- **Migration backlog rows show where the work really is.** `afm_linked_sync.py`
+  reads the delivery tickets each backlog row cites (MSP, STOR, MBA, MP, MPS),
+  writes them as clickable links with their live status, and fills the PRD
+  column. It proposes a row status change only from the row's own delivery
+  ticket, never from a legacy or dependency ticket. A second mode rewrites each
+  tracking ticket's description from its sheet row: what, context, engineering
+  questions and answers, blockers, related tickets, PRD and backlog link.
+  Both modes are dry runs until `--approved`.
+- **Backlog rows without a ticket get one, with a one-pager inside it.**
+  `afm_create_tickets.py` turns a one-pager per backlog row (story, why, scope,
+  acceptance criteria, dependencies, open questions, what is missing before
+  estimation) into an AFM Jira ticket: epics first, stories under them, every
+  description linking its PRD section and the sheet row. A dry run writes one
+  review file to read before anything is created.
+- **Long Jira batches survive slow responses, and a ticket rewrite never loses
+  text.** The AFM Jira helper retries reads and updates after a timeout (never
+  creates, which may have landed). Rewriting a ticket description keeps the
+  text it replaces under a "Previous description" heading.
+- **Reply drafts get a review page with pinned comments.** `draft_review.py publish`
+  turns a draft file (the original thread plus the draft) into an unlisted page on
+  the artifact host with shared comments on, so the owner marks the exact line to
+  change instead of retyping it in chat. Revisions republish to the same URL,
+  `comments` reads the pins back, and pages expire from the site after 30 days.
+  Sending still needs approval in chat.
+
+### Fixed
+- **Mixpanel raw export reaches the EU data host.** The connector called
+  `data.eu.mixpanel.com`, which does not resolve, so every `export` failed with
+  a DNS error. It now calls `data-eu.mixpanel.com`.
+- **The public sync blocks timestamped token backups.** A file named
+  `token*.json.bak-<date>` slipped past both `token*.json` and `*.bak`. The leak
+  audit stopped the push, so nothing leaked, and the blocklist now covers the name.
+
+## [0.9.0] - 2026-10-05
+
+### Added
 - **`/session` refers one Claude session from another.** Name a session by
   id prefix, `last`, or any keyword it contained, and the current session
   loads what that one was asked, which files it wrote, the links and ledger

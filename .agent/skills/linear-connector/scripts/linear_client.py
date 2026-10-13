@@ -550,6 +550,64 @@ def comment(key, body, approved=False):
         raise RuntimeError("Linear reported commentCreate success=false")
     return res["comment"]
 
+# ---------------------------------------------------------------- members and roles
+
+def list_members():
+    """Every active user with their role. Owners cannot be demoted by the API."""
+    users = paginate("""
+        query($after: String) {
+          users(first: %d, after: $after) {
+            nodes { id name email admin owner guest active }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+    """ % PAGE_SIZE, {}, ["users"])
+    out = []
+    for u in users:
+        if not u.get("active"):
+            continue
+        role = "owner" if u.get("owner") else "admin" if u.get("admin") else \
+               "guest" if u.get("guest") else "member"
+        out.append({"id": u["id"], "name": u["name"], "email": u["email"], "role": role})
+    return sorted(out, key=lambda u: (u["role"], (u["email"] or "").lower()))
+
+def restrict_admins(keep, approved=False):
+    """Demote every admin whose email is not in `keep` to member.
+
+    Without --approved this is a dry run: it prints the plan and changes
+    nothing. Owners are listed but never touched, because Linear refuses to
+    demote an owner through the API and the owner is usually the billing seat.
+    """
+    keep = {e.strip().lower() for e in keep if e.strip()}
+    members = list_members()
+    missing = sorted(keep - {(m["email"] or "").lower() for m in members})
+    plan = {"keep_admin": [], "promote": [], "demote": [], "owners_untouched": [],
+            "keep_not_found": missing, "applied": False}
+    for m in members:
+        email = (m["email"] or "").lower()
+        if m["role"] == "owner":
+            plan["owners_untouched"].append(m["email"])
+        elif email in keep:
+            plan["keep_admin" if m["role"] == "admin" else "promote"].append(m["email"])
+        elif m["role"] == "admin":
+            plan["demote"].append(m["email"])
+    if not approved:
+        return plan
+    require_send_approval("change Linear workspace roles", approved)
+    by_email = {(m["email"] or "").lower(): m["id"] for m in members}
+    for email in plan["promote"]:
+        res = gql("mutation($id: String!) { userPromoteAdmin(id: $id) { success } }",
+                  {"id": by_email[email.lower()]})
+        if not res["userPromoteAdmin"].get("success"):
+            raise RuntimeError(f"userPromoteAdmin failed for {email}")
+    for email in plan["demote"]:
+        res = gql("mutation($id: String!) { userDemoteAdmin(id: $id) { success } }",
+                  {"id": by_email[email.lower()]})
+        if not res["userDemoteAdmin"].get("success"):
+            raise RuntimeError(f"userDemoteAdmin failed for {email}")
+    plan["applied"] = True
+    return plan
+
 # ---------------------------------------------------------------- CLI
 
 def _timeout_handler(signum, frame):
@@ -629,6 +687,22 @@ def main():
 
     elif action == "daily-digest":
         print(daily_digest())
+
+    elif action == "members":
+        dump(list_members())
+
+    elif action == "restrict-admins":
+        args = parse(
+            (["--keep"], {"required": True,
+                          "help": "comma-separated emails that stay (or become) admin"}),
+            (["--approved"], {"action": "store_true",
+                              "help": "apply; without it this is a dry run"}),
+        )
+        plan = restrict_admins(args.keep.split(","), args.approved)
+        dump(plan)
+        if plan["keep_not_found"]:
+            print(f"[WARN] Not in the workspace: {plan['keep_not_found']}. Invite them first.",
+                  file=sys.stderr)
 
     elif action == "create-issue":
         args = parse(

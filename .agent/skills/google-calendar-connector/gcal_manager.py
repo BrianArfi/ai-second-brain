@@ -386,7 +386,8 @@ def sweep_events(profile='default', output='text'):
     service = build('calendar', 'v3', credentials=creds)
 
     # Calculate ranges: last 7 days + next 7 days
-    now = datetime.datetime.now(datetime.timezone.utc)
+    # Host-local, tz-aware: a UTC 'now' put a pre-07:00 WIB run on yesterday.
+    now = datetime.datetime.now().astimezone()
     today = now.strftime('%Y-%m-%d')
     
     # Get start of this week (Monday) and last week
@@ -601,7 +602,7 @@ def build_attachments(spec):
         attachments.append(item)
     return attachments
 
-def create_event(summary, start_time, end_time, description=None, profile='default', attendees=None, add_meet=True, tz='Asia/Jakarta', attach=None):
+def create_event(summary, start_time, end_time, description=None, profile='default', attendees=None, add_meet=True, tz='Asia/Jakarta', attach=None, recurrence=None):
     """Create a new calendar event. By default attaches a Google Meet link."""
     creds = authenticate(profile)
     if not creds:
@@ -635,6 +636,10 @@ def create_event(summary, start_time, end_time, description=None, profile='defau
 
     if attach:
         event['attachments'] = build_attachments(attach)
+
+    if recurrence:
+        rule = recurrence if recurrence.startswith('RRULE:') else f'RRULE:{recurrence}'
+        event['recurrence'] = [rule]
 
     try:
         event_result = service.events().insert(
@@ -836,6 +841,7 @@ def main():
     create_parser.add_argument('--desc', help='Description')
     create_parser.add_argument('--no-meet', action='store_true', help='Do NOT attach a Google Meet link (default: attach)')
     create_parser.add_argument('--attach', help="Drive files to attach, separated by ';': '<url or file id>|<title>'. The title is what the chip shows, so pass it.")
+    create_parser.add_argument('--recurrence', help="RFC 5545 rule, e.g. 'FREQ=MONTHLY;BYMONTHDAY=5' (RRULE: prefix optional)")
     create_parser.add_argument('--profile', default='default', choices=['default', 'work', 'secondary'], help='Authentication profile to use')
 
     # Update command
@@ -892,7 +898,7 @@ def main():
     elif args.command == 'mcp':
         run_mcp_server(args.profile)
     elif args.command == 'create':
-        create_event(args.summary, args.start, args.end, args.desc, args.profile, args.attendees, add_meet=not args.no_meet, tz=args.tz, attach=args.attach)
+        create_event(args.summary, args.start, args.end, args.desc, args.profile, args.attendees, add_meet=not args.no_meet, tz=args.tz, attach=args.attach, recurrence=args.recurrence)
     elif args.command == 'update':
         update_event(args.event_id, args.profile, args.summary, args.start,
                      args.end, args.desc, args.attendees, notify=not args.no_notify,

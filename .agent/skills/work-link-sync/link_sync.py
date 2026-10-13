@@ -19,6 +19,10 @@ What it does:
 
 import argparse
 import sys
+
+# The tick marks in the output crash a Windows cp1252 console after the writes land.
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 import os
 import signal
 
