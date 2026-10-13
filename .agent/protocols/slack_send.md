@@ -34,6 +34,14 @@ Slack message workflow (approval-gated):
 
    A first message that answers nobody has no original, so it shows parts 2 and 3 only.
 
+   **Publish the draft file as a review page and put the link above the chat copy.** the owner pins comments on the exact line he wants changed, which beats retyping it in chat (asked for 6 Oct 2026):
+
+   ```bash
+   python3 .agent/skills/artifact-host/scripts/draft_review.py publish journal/drafts/<name>_<YYYY-MM-DD>.md
+   ```
+
+   the owner approved this flow once, so the publish needs no separate ask. Before revising, or when he says he commented, read the pins with `draft_review.py comments <draft.md>`, revise the file, and publish again: the URL stays the same. The page never replaces the chat copy, and approval still happens in chat.
+
    the owner reviews replies away from the terminal with no thread open in front of him. A reply on its own gives him nothing to judge it against, so he has to go and find the original first, which is the work the draft was supposed to save. Rule: harness memory `feedback-reply-drafts-show-original-and-pointers`.
 
    **Never quote a truncated original.** The mention ledger holds the message text, and a cut copy reads as complete, so the reply answers half the ask and nothing on the page shows it. If the quote ends mid-sentence, pull the real text before drafting:

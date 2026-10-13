@@ -98,7 +98,7 @@ def make_export_request(config, params=None):
     Raw data export from data.mixpanel.com/api/2.0/export
     Returns newline-delimited JSON.
     """
-    base_url = "https://data.eu.mixpanel.com/api/2.0/export"
+    base_url = "https://data-eu.mixpanel.com/api/2.0/export"
     all_params = {}
     if config.get('MIXPANEL_PROJECT_ID'):
         all_params['project_id'] = config['MIXPANEL_PROJECT_ID']

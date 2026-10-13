@@ -57,6 +57,11 @@ python3 $L create-issue --team ENG --title "..." --description "..." --approved
 python3 $L update-issue ENG-123 --state "In Progress" --approved
 python3 $L comment ENG-123 --body-file draft.md --approved
 
+# roles -- restrict-admins is a dry run until --approved; owners are never touched
+python3 $L members
+python3 $L restrict-admins --keep you@yourcompany.com,teammate@yourcompany.com
+python3 $L restrict-admins --keep ... --approved   # needs an API key from an admin account
+
 # work-tree feed
 python3 .agent/skills/linear-connector/scripts/dump_all_issues.py \
     --out _temp/linear_all_issues.json
