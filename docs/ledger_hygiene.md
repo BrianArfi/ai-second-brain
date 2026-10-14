@@ -45,6 +45,15 @@ A meeting action item that fails this test stays in the MoM. It is not a record.
 **2. Every record leaves within 30 days.** It closes with evidence, or it gets chased, or
 it gets dropped with a reason. Nothing sits.
 
+**2a. Priority decays with silence** (13 Oct 2026). A record's priority is calculated,
+never stored: `.agent/scripts/priority_decay.py`. It drops one level after 14 days with no
+signal and a second after 30, when it also joins the Saturday review. A signal is a reply
+in its Slack thread, a meeting note or decision citing it, a ticket update, a chase, or
+`priority_decay.py signal <ID> --why "..."`. Briefings and the tracker are not signals.
+Due within 7 days or YourManager/Julie: no decay. Under a live node (open P0/P1 todo line, or
+node status `critical`): one level at most, never the review list.
+`priority_decay.py set-base <ID> P1` raises the starting level; `report --list P1` lists a level.
+
 **3. At most 5 chases a day.** The morning update picks them: live-priority work first,
 then the oldest. One message per person. the owner approves the batch with one word. The
 rest waits for the weekly review, so a breached record is never silently forgotten and

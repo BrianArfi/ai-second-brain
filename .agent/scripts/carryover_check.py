@@ -47,15 +47,26 @@ def date_patterns(day):
             rf"\b{ID_DAY[day.weekday()]}\s+{d}\b"]
     return re.compile('|'.join(pats), re.I)
 
+def _levels():
+    """id -> 'P2' style tag from priority_decay.py, or {} if it cannot run."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import priority_decay
+        return {rid: a['level'] for rid, a in priority_decay.annotate().items()}
+    except Exception as e:
+        print(f"  (priority levels unavailable: {e})")
+        return {}
+
 def ledger_block(today, tomorrow):
     print("## 1. Due today or tomorrow (breached or not)")
     n = 0
+    lv = _levels()
     for c in _items('journal/state/commitments.json'):
         if c.get('status') != 'open' or not c.get('due'):
             continue
         if c['due'] in (str(today), str(tomorrow)):
             tag = 'TODAY' if c['due'] == str(today) else 'tomorrow'
-            print(f"- [{tag}] {c['id']} (the owner owes {c.get('to') or '?'}): {(c.get('text') or '')[:140]}  [node:{c.get('node')}]")
+            print(f"- [{tag}] {c['id']} {lv.get(c['id'], '')} (the owner owes {c.get('to') or '?'}): {(c.get('text') or '')[:140]}  [node:{c.get('node')}]")
             n += 1
     end_tomorrow = datetime.combine(tomorrow, datetime.max.time(), WIB).timestamp()
     start_today = datetime.combine(today, datetime.min.time(), WIB).timestamp()
@@ -66,7 +77,7 @@ def ledger_block(today, tomorrow):
         if start_today <= due <= end_tomorrow:
             dd = datetime.fromtimestamp(due, WIB)
             tag = 'TODAY' if dd.date() == today else 'tomorrow'
-            print(f"- [{tag} {dd:%H:%M} WIB] {w['id']} (waiting on {w.get('owner')}): {(w.get('what') or '')[:140]}  [node:{w.get('node')}]")
+            print(f"- [{tag} {dd:%H:%M} WIB] {w['id']} {lv.get(w['id'], '')} (waiting on {w.get('owner')}): {(w.get('what') or '')[:140]}  [node:{w.get('node')}]")
             n += 1
     if not n:
         print("- nothing")
