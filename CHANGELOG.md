@@ -18,6 +18,8 @@ You can also read this file inside the product: open the local dashboard and pic
 ## [Unreleased]
 
 ### Added
+- **Waiting-on records tell you when they move.** The waiting watchdog checks every hour whether the person you are waiting on replied in the thread, and runs "done-checks" for asks that finish as an action instead of a reply (first one: a GitHub repository now exists). When a record you watch moves, by any path, one Slack DM from the bot lists it with the link, so you can continue straight away. New records are watched by default; older ones only after `watch <id> --on`. The morning update opens with "Moved since yesterday" from the new `moved` command.
+- **The daily update can keep a read-only Sheet copy of a git ledger.** A team that records decisions and blockers as files in a git repository can let people without git still read them. When the workspace has a ledger mirror script, `/daily-update` runs it once a day in Step 4: it pulls the ledger repository, rewrites a Google Sheet that nobody edits, and does nothing on a second run the same day. Creating the Sheet the first time still needs an explicit go.
 - **Haiku agents stay under 100,000 tokens of context.** Claude Haiku 5.5 charges five times more per token once one request's prompt passes 100,000 tokens, cache reads included, and every turn re-reads the whole history. Splitting 400k of work into five fresh agents of 100k or less costs about a tenth of one long run. New `chunk_work.py` splits a work list into chunks of about 85k tokens and keeps findings in a state file, so each fresh `harvester` reads one chunk plus the earlier findings and stops. `harvester` gets `maxTurns: 20` as a backstop, and `CLAUDE.md` Subagents has the rule.
 - **Ledger records lose priority when nobody raises them.** `priority_decay.py` calculates
   each open commitment, waiting-on and decision's priority on every read: one level down
@@ -43,6 +45,7 @@ You can also read this file inside the product: open the local dashboard and pic
   globally: two copies of the hook on one spawn log and warn once.
 
 ### Fixed
+- **The public sync survives a sync from another machine.** When the public repo already had a newer sync commit, the push was rejected as non-fast-forward and the release never ran. The sync now moves onto the remote commit and keeps the freshly built tree, so nothing published there is lost.
 - **The waiting-on sweep closes a record only when its owner replies.** Before, any reply in the
   thread from someone other than the owner closed it, so one person's answer could close another
   person's open ask. When the owner's Slack id is unknown, the old behaviour stays.
