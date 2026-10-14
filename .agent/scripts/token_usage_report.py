@@ -6,7 +6,7 @@ files plus their subagent sidecars), counts each assistant message once (by
 message id, so streamed duplicates are not double-counted), and ranks
 sessions over a window.
 
-Built 13 Oct 2026 after one quiz QA session spent 377M tokens on 81
+Built 13 Oct 2026 after one TLN quiz QA session spent 377M tokens on 81
 nested Opus subagents. Pairs with the global hook
 ~/.claude/hooks/agent_spend_guard.py and CLAUDE_CODE_SUBAGENT_MODEL=sonnet.
 The question it answers each week: did subagent spend move off Opus?

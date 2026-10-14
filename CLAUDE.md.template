@@ -141,6 +141,12 @@ Spawn subagents to isolate context, parallelize independent work, or offload bul
 
 Pick the cheapest row that fully covers the task; mechanical -> delegate, judgment -> keep in main loop.
 
+**Haiku 100k rule.** Claude Haiku 5.5 (what the `haiku` alias resolves to on the Anthropic API) costs 5x more per token on any single request whose prompt is over 100,000 tokens (cache reads and writes count). Keep every Haiku agent under that line:
+- Give a Haiku agent one chunk, at most 85k tokens of source (about 10 transcripts), never an open-ended list.
+- For more than one chunk, run `python3 .agent/scripts/chunk_work.py init` and spawn one fresh Haiku agent per chunk. The agent reads its chunk and the earlier findings with `next`, writes findings with `done`, and stops.
+- The parent reads the findings from the state file, never from the agent's chat reply, and synthesizes after the last chunk.
+- Pin the alias to the intended model with `ANTHROPIC_DEFAULT_HAIKU_MODEL`; on Bedrock, Vertex and Foundry `haiku` is still 4.5 (flat price, no threshold).
+
 **Delegation goes both ways.** The Agent tool takes an explicit `model` (`haiku` | `sonnet` | `opus` | `fable`), so a spawned agent's tier is independent of what the main loop is running. Match the model to the WORK, not to the session:
 
 - **Delegate DOWN (bulk / mechanical).** Whatever the main loop is on, push harvest, lookup, routine drafts, and conversion to `haiku`/`sonnet`. This is the default and applies just as hard on a flagship session: a flagship main loop is for holding the deliverable together, not for reading 12 transcripts.

@@ -18,6 +18,16 @@ You can also read this file inside the product: open the local dashboard and pic
 ## [Unreleased]
 
 ### Added
+- **Haiku agents stay under 100,000 tokens of context.** Claude Haiku 5.5 charges five times more per token once one request's prompt passes 100,000 tokens, cache reads included, and every turn re-reads the whole history. Splitting 400k of work into five fresh agents of 100k or less costs about a tenth of one long run. New `chunk_work.py` splits a work list into chunks of about 85k tokens and keeps findings in a state file, so each fresh `harvester` reads one chunk plus the earlier findings and stops. `harvester` gets `maxTurns: 20` as a backstop, and `CLAUDE.md` Subagents has the rule.
+- **Ledger records lose priority when nobody raises them.** `priority_decay.py` calculates
+  each open commitment, waiting-on and decision's priority on every read: one level down
+  after 14 days with no signal, another after 30, and at 30 days it goes on the Saturday
+  review list. A signal is a reply in the record's Slack thread, a meeting note or decision
+  citing it, a ticket update, a chase, or `priority_decay.py signal <ID> --why "..."`. Your
+  own briefings do not count, so listing a record does not keep it alive. Records due within
+  7 days, or owed to or by the two named VIPs, never decay; records under a live work-tree
+  node drop one level at most. The tracker opens with a Relevance section, the morning
+  carry-over shows each record's level, and the chase list picks by level.
 - **Linear admin access can be cut back in one command.** `linear_client.py restrict-admins --keep a@x.com,b@x.com`
   shows who keeps admin and who drops to member, and changes nothing until `--approved`.
   `linear_client.py members` lists every active user with their role.

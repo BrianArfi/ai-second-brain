@@ -56,6 +56,8 @@ SCRIPTS = {
     'commitments': ['python3', os.path.join(BASE_DIR, '.agent/skills/commitment-ledger/scripts/commitment_ledger.py'), 'report'],
     'waiting_on': ['python3', os.path.join(BASE_DIR, '.agent/skills/waiting-watchdog/scripts/waiting_watchdog.py'), 'report'],
     'decisions': ['python3', os.path.join(BASE_DIR, '.agent/skills/decision-log/scripts/decision_log.py'), 'report'],
+    # Calculated priority per record (decays with silence), at the top so relevance is read first.
+    'relevance': ['python3', os.path.join(BASE_DIR, '.agent/scripts/priority_decay.py'), 'report', '--markdown'],
 }
 
 def atomic_write(path, text):
@@ -116,7 +118,7 @@ def render():
     now = datetime.now(WIB).strftime('%Y-%m-%d %H:%M WIB')
     sections = {}
     errors = []
-    for key in ('commitments', 'waiting_on', 'decisions'):
+    for key in ('relevance', 'commitments', 'waiting_on', 'decisions'):
         out, err = run_report(key)
         if err:
             errors.append(err)
@@ -139,6 +141,10 @@ def render():
         f'`bash .agent/scripts/ensure_dashboard.sh`',
         '',
         f'**Last generated**: {now}',
+        '',
+        '---',
+        '',
+        sections['relevance'],
         '',
         '---',
         '',
