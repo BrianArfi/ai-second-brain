@@ -243,10 +243,32 @@ To wire it to your calendar and MOM template, see the paths in `meeting-recorder
 
 ## Recording from the phone
 
-For a meeting in a room, away from the laptop. The phone runs a small web app that
-records and streams the audio to whichever machine answers; from there the pipeline
-above is unchanged, because the phone lands exactly the two files `recorder.py`
-would have written.
+For a meeting in a room, away from the laptop. From the ingest server onward the
+pipeline above is unchanged, because the phone lands exactly the two files
+`recorder.py` would have written.
+
+### Default: the AI Second Brain phone app (no Tailscale)
+
+Record from the **Meetings** tab of the phone app. The audio goes over the same
+sealed link the app already uses to reach the desktop: the LAN when phone and
+computer share a network, the cloud relay when they do not (cellular, other wifi).
+The desktop app hands each chunk to `ingest_server.py` on loopback
+(`src-tauri/src/remote/recorder.rs`) and starts the ingest server if it is down.
+
+```
+phone app  --chunks over LAN or relay-->  desktop app  --127.0.0.1-->  ingest_server.py  -->  watcher.py --file
+```
+
+Setup is pairing the phone with the desktop once (QR in the desktop's phone
+settings). No Tailscale, no second token, no port opened on the LAN. A recording
+made with no connection stays on the phone and uploads, resuming where it stopped,
+once the desktop is reachable again. The desktop must be on and running the app for
+the upload to land.
+
+### Fallback: the browser web app (needs Tailscale)
+
+Only for a phone without the app. The phone runs a small web app that records and
+streams the audio to whichever machine answers.
 
 ```
 phone (browser)  --15s chunks-->  ingest_server.py  -->  <recordings_dir>/x.m4a + x.json
@@ -254,7 +276,7 @@ phone (browser)  --15s chunks-->  ingest_server.py  -->  <recordings_dir>/x.m4a 
                                                             +--> watcher.py --file  (fired directly)
 ```
 
-### Why it is a web app and why Tailscale is required
+#### Why the web app needs Tailscale
 
 A browser refuses the microphone to any page that is not a **secure context**, so
 `http://192.168.1.x:8787` cannot record and a self-signed certificate does not help.

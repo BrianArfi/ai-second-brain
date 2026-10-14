@@ -14,10 +14,19 @@ are waiting on the owner for), this is the mirror: things the owner is waiting o
 - `add` a waiting-on item with an owner, what's expected, and an SLA in hours.
 - `sweep` (cron, hourly, **pure local, zero-network**): compares `since` age against
   `sla_hours`. Anything over SLA and still open secondarys to `status=breached`.
-- `sweep --check-slack` (**SOP-only, not cron'd** — Claude runs this during morning/evening
+- `sweep --check-slack` (hourly on the cron host from 14 Oct 2026, and in the morning
   update): for items with a Slack source permalink, reads `conversations.replies` on the
-  source thread and auto-closes (`status=answered`) if anyone other than the owner replied
-  after `since`.
+  source thread and auto-closes (`status=answered`) when the owner replied after `since`.
+- `sweep --check-probes`: for items with a `done_probe` (a done-check that is not a reply),
+  runs it and auto-closes on success. Today: `github-repo:<org>/<name>` exists, through `gh`.
+  Ticket keys are not probes; `done_ticket` is checked by `autoclose_check.py`.
+- `notify [--dry-run]`: ONE Slack DM from the bot to the owner listing every record with
+  `notify=true` that was answered since its last notify, by any path (reply, probe,
+  autoclose, manual close). Work Slack only. New records have `notify=true`
+  (`add --no-notify` to opt out); older records stay quiet unless `watch <id> --on`.
+- `moved [--hours 24]`: every record answered in the window, for the morning update's
+  "Moved since yesterday" block. Read-only.
+- `watch <id> --on|--off`, `set-probe <id> <probe>`: change the notify flag or the probe.
 - `report [--all]`: briefing-ready markdown. Breached items first (🚨 ESCALATE lines),
   then open items with an SLA countdown. `--all` also includes answered/dropped.
 - `close <id> [--note "..."]` / `drop <id> [--note "..."]`: manual close (owner delivered /
@@ -41,8 +50,12 @@ python3 .agent/skills/waiting-watchdog/scripts/waiting_watchdog.py add \
 # hourly cron sweep (local only, no network)
 python3 .agent/skills/waiting-watchdog/scripts/waiting_watchdog.py sweep
 
-# SOP-run sweep that also checks Slack threads for owner replies
-python3 .agent/skills/waiting-watchdog/scripts/waiting_watchdog.py sweep --check-slack
+# hourly cron: SLA ages, Slack replies, probes, then one DM to the owner if anything moved
+python3 .agent/skills/waiting-watchdog/scripts/waiting_watchdog.py sweep --check-slack --check-probes
+python3 .agent/skills/waiting-watchdog/scripts/waiting_watchdog.py notify
+
+# what moved in the last day (morning update)
+python3 .agent/skills/waiting-watchdog/scripts/waiting_watchdog.py moved --hours 24
 
 # briefing report (embed verbatim in morning/evening updates)
 python3 .agent/skills/waiting-watchdog/scripts/waiting_watchdog.py report
@@ -80,9 +93,10 @@ python3 .agent/skills/waiting-watchdog/scripts/waiting_watchdog.py touch WAIT-00
 - Retention: `answered`/`dropped` items are pruned 14 days after `closed_at`.
 - Cron design (not installed by this skill — install is an integration-stage step):
   `7 * * * * flock -n /tmp/waiting_watchdog.lock python3 <abs>/waiting_watchdog.py sweep >> .agent/skills/waiting-watchdog/waiting_watchdog_cron.log 2>&1`.
-  Hourly, local-only sweep has zero Slack rate-limit impact. `--check-slack` is
-  intentionally **excluded from cron** — it's SOP-run only (morning/evening update),
-  per the plan's "LLM/network out of mechanical cron" rule.
+  Since 14 Oct 2026 the hourly line is `sweep --check-slack --check-probes && notify`
+  (the owner: progress on a wait should reach him within the hour, not at the next update).
+  About 115 `conversations.replies` calls an hour, inside Slack's tier-3 limit; a
+  `ratelimited` answer waits `retry_after` and retries. No model call in the cron.
 - `--check-slack` reuses the `SLACK_USER_TOKEN` from `.agent/skills/slack-connector/token.env`
   (same auth as the mention ledger). It parses the source `permalink` to get channel + thread
   ts, then treats any non-the owner message in that thread posted after `since` as a reply —

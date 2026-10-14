@@ -43,6 +43,7 @@ In both modes also follow [`.agent/protocols/phased_update_protocol.md`](../../.
 - Execute as 4 gated steps (Harvest -> Summarize -> Prioritize -> Execute). NEVER jump from Step 1 to Step 4.
 - Step 1 runs `python3 .agent/scripts/daily_update_runner.py --mode <morning|evening>` from the repo root.
 - No em-dashes in any output.
+- **Refresh the ledger Sheet once a day, when this workspace has `.agent/scripts/team_os_sheet_sync.py`** (standing approval from the owner, 14 Oct 2026, for this refresh only): in Step 4, run `python3 .agent/scripts/team_os_sheet_sync.py --approved`. It mirrors the team-os git ledger into the read-only Work Sheet, and a second run on the same day is a no-op. Report the Sheet link it prints, or the error. Creating the Sheet (`--create`) is not covered by this approval.
 
 ## Morning mode only
 

@@ -5,14 +5,24 @@ waiting_watchdog.py - SLA watchdog for things the owner is waiting on from other
 Design (per plan bangun-aja-semuanya-barengan-wiggly-noodle.md, Component 3):
   sweep (cron, hourly, pure local, zero-network): age-vs-SLA check only.
     since + sla_hours elapsed and status still open -> status=breached, breached_at set.
-  sweep --check-slack (SOP-only, Claude-driven, NOT cron'd): for items with a Slack
-    source, checks conversations.replies in the source thread for an owner reply
-    posted after `since` -> status=answered.
+  sweep --check-slack: for items with a Slack source, checks conversations.replies
+    in the source thread for an owner reply posted after `since` -> status=answered.
+    Hourly on the cron host since 14 Oct 2026 (was SOP-only before).
+  sweep --check-probes: for items with a `done_probe`, checks the probe
+    (today: `github-repo:<org>/<name>` exists, through `gh`) -> status=answered.
+  notify: one Slack DM from the bot to the owner listing every record with
+    notify=true that moved (answered by any path, including autoclose_check and
+    a manual close) since the last notify. Work Slack only, never Telegram.
+  moved [--hours N]: what closed or was answered in the last N hours, for the
+    morning update's "Moved since yesterday" block.
 
 Subcommands:
   add     --owner --what --sla-hours [--escalate-to] [--escalation-path] [--source]
-          [--since] [--initiative <portfolio initiative id>]
-  sweep   [--check-slack]
+          [--since] [--initiative <portfolio initiative id>] [--done-probe P] [--no-notify]
+  sweep   [--check-slack] [--check-probes]
+  notify  [--dry-run]
+  moved   [--hours 24]
+  watch   <id> --on|--off   (notify flag)
   report  [--all]
   link    <id> --initiative <portfolio initiative id> | --none
   close   <id>
@@ -297,6 +307,11 @@ def cmd_add(args):
         'notes': '' if not args.no_link_why else f' | no link: {args.no_link_why}',
         'done_when': args.done_when or (f'{args.done_ticket} reaches Done' if args.done_ticket else None),
         'done_ticket': (args.done_ticket or '').upper() or None,
+        'done_probe': args.done_probe or None,
+        # New records ping the owner when they move. Records older than the notify
+        # feature (14 Oct 2026) stay quiet unless `watch <id> --on`.
+        'notify': not args.no_notify,
+        'notified_at': None,
     }
     save_state(state)
     print(f'added: {item_id} - waiting on {args.owner} for "{args.what}" (SLA {args.sla_hours}h)')
@@ -330,6 +345,7 @@ def cmd_sweep(args):
     token = None
     if args.check_slack:
         token = load_token()
+    n_probed = 0
 
     for it in state['items'].values():
         if it['status'] not in ('open', 'breached'):
@@ -339,6 +355,14 @@ def cmd_sweep(args):
             replied, _ = owner_replied_since(token, it['source'], it['owner'], it['since'])
             if replied:
                 it.update(status='answered', closed_at=time.time(), notes='auto: owner replied in thread')
+                it['needs_escalation'] = False
+                n_answered += 1
+                continue
+        if getattr(args, 'check_probes', False) and it.get('done_probe'):
+            ok, evidence = run_probe(it['done_probe'])
+            n_probed += 1
+            if ok:
+                it.update(status='answered', closed_at=time.time(), close_note=f'auto: {evidence}')
                 it['needs_escalation'] = False
                 n_answered += 1
                 continue
@@ -356,7 +380,7 @@ def cmd_sweep(args):
     breached_now = sum(1 for i in open_items if i['status'] == 'breached')
     escalations = [i for i in open_items if i.get('needs_escalation')]
     summary = (f'sweep done in {time.time()-t0:.0f}s: +{n_breached} newly breached, '
-               f'{n_answered} auto-answered, {n_pruned} pruned -> {len(open_items)} open '
+               f'{n_answered} auto-answered ({n_probed} probes), {n_pruned} pruned -> {len(open_items)} open '
                f'({breached_now} breached, {len(escalations)} need escalation)')
     print(summary)
     for it in sorted(escalations, key=lambda x: -age_hours(x['since'])):
@@ -367,6 +391,122 @@ def cmd_sweep(args):
     if os.path.exists(HEARTBEAT):
         os.system(f'{sys.executable} {HEARTBEAT} --job waiting-watchdog --status ok '
                   f'--summary "{summary[:200]}" >/dev/null 2>&1')
+
+# ------------------------------------------------------------------ probes --
+
+def run_probe(probe):
+    """A done-check that is not a reply: (True, evidence) when the thing exists.
+
+    github-repo:<org>/<name>   the repository exists (gh api, the cron host's login)
+    Ticket keys are not probes: `done_ticket` is checked by autoclose_check.py."""
+    kind, _, target = (probe or '').partition(':')
+    if kind == 'github-repo' and re.fullmatch(r'[\w.-]+/[\w.-]+', target):
+        import subprocess
+        try:
+            r = subprocess.run(['gh', 'api', f'repos/{target}', '--jq', '.html_url'],
+                               capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return False, f'probe error: {e}'
+        if r.returncode == 0 and r.stdout.strip():
+            return True, f'repo exists: {r.stdout.strip()}'
+        return False, 'repo not found yet'
+    return False, f'unknown probe: {probe}'
+
+# ------------------------------------------------------------------ notify --
+
+def load_bot_token():
+    tok = os.environ.get('SLACK_BOT_TOKEN')
+    if not tok and os.path.exists(TOKEN_ENV):
+        for line in open(TOKEN_ENV):
+            line = line.strip()
+            if line.startswith('SLACK_BOT_TOKEN='):
+                tok = line.split('=', 1)[1].strip().strip('"').strip("'")
+    return tok
+
+def moved_items(state, since_ts, only_notify=False):
+    out = []
+    for it in state['items'].values():
+        if it['status'] not in ('answered',):
+            continue
+        closed = it.get('closed_at') or 0
+        if closed <= since_ts:
+            continue
+        if only_notify and (not it.get('notify') or it.get('notified_at')):
+            continue
+        out.append(it)
+    return sorted(out, key=lambda x: x.get('closed_at') or 0)
+
+def moved_line(it):
+    how = it.get('close_note') or it.get('notes') or ''
+    how = how.replace('auto: ', '').strip(' |') or 'closed'
+    link = (it.get('source') or {}).get('permalink') or ''
+    tail = f' <{link}|thread>' if link.startswith('http') else ''
+    return f"• {it['id']} {it['owner']}: {it['what']} ({how}){tail}"
+
+def cmd_notify(args):
+    """One bot DM to the owner per run, listing every watched record that moved.
+
+    The bot, not the owner's user token: a message the owner posts to himself does not
+    notify him. The text names records from the owner's own ledger, sent only to
+    the owner, so the outbound approval gate for messages to colleagues does not apply."""
+    state = load_state()
+    items = moved_items(state, 0, only_notify=True)
+    if not items:
+        print('notify: nothing moved')
+        return
+    lines = ['Moved, ready to continue:'] + [moved_line(i) for i in items]
+    text = '\n'.join(lines)
+    if args.dry_run:
+        print(text)
+        return
+    token = load_bot_token()
+    if not token:
+        sys.exit('FATAL: SLACK_BOT_TOKEN not found (env or slack-connector/token.env)')
+    owner = os.environ.get('OWNER_SLACK_ID', '<SLACK_ID>')
+    data = urllib.parse.urlencode({'channel': owner, 'text': text, 'unfurl_links': 'false'}).encode()
+    req = urllib.request.Request('https://slack.com/api/chat.postMessage', data=data,
+                                 headers={'Authorization': f'Bearer {token}'})
+    try:
+        resp = json.load(urllib.request.urlopen(req, timeout=30))
+    except Exception as e:
+        sys.exit(f'notify failed: {e}')
+    if not resp.get('ok'):
+        sys.exit(f"notify failed: {resp.get('error')}")
+    now = time.time()
+    for it in items:
+        state['items'][it['id']]['notified_at'] = now
+    save_state(state)
+    print(f'notify: sent 1 DM to the owner covering {len(items)} record(s)')
+
+def cmd_moved(args):
+    state = load_state()
+    items = moved_items(state, time.time() - args.hours * 3600)
+    if not items:
+        print(f'Nothing moved in the last {args.hours:g}h.')
+        return
+    print(f'## Moved since {args.hours:g}h ago ({len(items)})\n')
+    for it in items:
+        print(moved_line(it).replace('• ', '- '))
+
+def cmd_watch(args):
+    state = load_state()
+    it = state['items'].get(args.item_id)
+    if not it:
+        sys.exit(f'item not found: {args.item_id}')
+    it['notify'] = bool(args.on)
+    if args.on:
+        it['notified_at'] = None
+    save_state(state)
+    print(f"{args.item_id}: notify {'on' if args.on else 'off'}")
+
+def cmd_set_probe(args):
+    state = load_state()
+    it = state['items'].get(args.item_id)
+    if not it:
+        sys.exit(f'item not found: {args.item_id}')
+    it['done_probe'] = args.probe
+    save_state(state)
+    print(f'{args.item_id}: done_probe={args.probe}')
 
 # ------------------------------------------------------------------ report --
 
@@ -527,6 +667,10 @@ def main():
                     help='Jira/Linear key whose Done state IS the answer; closes automatically')
     ap.add_argument('--no-link-why', default=None,
                     help='only when the ask has no link (said in a meeting): where it was asked')
+    ap.add_argument('--done-probe', default=None,
+                    help='a check that is not a reply, e.g. github-repo:yourcompany/team-os')
+    ap.add_argument('--no-notify', action='store_true',
+                    help='do not DM the owner when this record moves')
 
     sd = sub.add_parser('set-done', help='add or change done_when / done_ticket on a record')
     sd.add_argument('item_id')
@@ -540,6 +684,23 @@ def main():
 
     sp = sub.add_parser('sweep')
     sp.add_argument('--check-slack', action='store_true')
+    sp.add_argument('--check-probes', action='store_true')
+
+    np_ = sub.add_parser('notify', help='DM the owner the watched records that moved')
+    np_.add_argument('--dry-run', action='store_true')
+
+    mp = sub.add_parser('moved', help='records answered in the last N hours')
+    mp.add_argument('--hours', type=float, default=24)
+
+    wp = sub.add_parser('watch', help='turn the move notification on or off for a record')
+    wp.add_argument('item_id')
+    g = wp.add_mutually_exclusive_group(required=True)
+    g.add_argument('--on', action='store_true')
+    g.add_argument('--off', action='store_true')
+
+    pp = sub.add_parser('set-probe', help='set a done-check that is not a reply')
+    pp.add_argument('item_id')
+    pp.add_argument('probe')
 
     rp = sub.add_parser('report')
     rp.add_argument('--all', action='store_true')
@@ -567,10 +728,11 @@ def main():
     {'add': cmd_add, 'sweep': cmd_sweep, 'report': cmd_report,
      'close': cmd_close, 'drop': cmd_drop, 'touch': cmd_touch,
      'reopen': cmd_reopen, 'link': cmd_link, 'refile': cmd_refile,
-     'set-done': cmd_set_done}.get(
+     'set-done': cmd_set_done, 'notify': cmd_notify, 'moved': cmd_moved,
+     'watch': cmd_watch, 'set-probe': cmd_set_probe}.get(
         args.cmd or 'sweep', cmd_sweep)(args)
 
-READONLY_CMDS = {'report', 'list', 'show'}
+READONLY_CMDS = {'report', 'list', 'show', 'moved'}
 
 if __name__ == '__main__':
     # See .agent/scripts/ledger_lock.py: atomic replace protects the write,
