@@ -101,3 +101,5 @@ threads the owner posted in, Jira, and Doc comments are adapters now, not extras
    Each `brief` must carry the item's real context: who is asking, what they
    asked, the link back, and what you think the answer is. A sub-session
    starts with no memory of this sweep.
+
+8. **Routine memory.** First step of the sweep: `python3 .agent/scripts/routine_memory.py recall sweep` and use the note to skip searches the last run already settled. Last step: `python3 .agent/scripts/routine_memory.py retain sweep --text "<2 to 4 lines: sources that were empty or failed, threads still waiting, what to check first next time>"`.

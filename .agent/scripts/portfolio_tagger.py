@@ -16,9 +16,10 @@ work, not on who happens to be invited.
 Resolution order (first hit wins, highest trust first):
   1. `portfolio_source == "manual"` -- sticky, never auto-overwritten
   2. `initiative_id` joined against journal/state/portfolio.json (authoritative)
-  3. ALIASES matched against the item's own text/project field
-  4. initiative + workstream names from portfolio.json matched against the text
-  5. "unknown" -- deliberately NOT guessed from the owner, that was the bug
+  3. the record's work-tree `node`, by nearest ancestor (NODE_PORTFOLIO)
+  4. ALIASES matched against the item's own text/project field
+  5. initiative + workstream names from portfolio.json matched against the text
+  6. "unknown" -- deliberately NOT guessed from the owner, that was the bug
 
 Usage:
   python3 .agent/scripts/portfolio_tagger.py              # dry-run report
@@ -191,6 +192,36 @@ def build_portfolio_index():
         name_keywords[tid] = kws
     return ini_to_team, name_keywords
 
+# Nearest ancestor wins, so Platform Services beats the Old World it sits in.
+# Nodes outside these subtrees (people, harness, admin, Work ID, GTM) say
+# nothing about a squad, and fall through to the older rules.
+NODE_PORTFOLIO = {
+    'root-b2c': 'b2c',
+    'platsvc': 'platform',
+    'old': 'marketplace',
+    'new': 'ecom-solution',
+}
+_NODE_PARENTS = None
+
+def portfolio_from_node(node_id):
+    global _NODE_PARENTS
+    if not node_id or node_id == 'unfiled':
+        return None
+    if _NODE_PARENTS is None:
+        try:
+            sys.path.insert(0, os.path.join(BASE_DIR, '.agent', 'scripts'))
+            from work_tree import node_index
+            _NODE_PARENTS = {nid: m['parent'] for nid, m in node_index().items()}
+        except Exception:  # a missing or broken tree must not stop tagging
+            _NODE_PARENTS = {}
+    seen = set()
+    while node_id and node_id not in seen:
+        if node_id in NODE_PORTFOLIO:
+            return NODE_PORTFOLIO[node_id]
+        seen.add(node_id)
+        node_id = _NODE_PARENTS.get(node_id)
+    return None
+
 def item_text(item):
     parts = [
         item.get('what') or '',
@@ -209,7 +240,14 @@ def classify(item, ini_to_team, name_keywords):
     if iid and iid in ini_to_team:
         return ini_to_team[iid], 'initiative_id'
 
-    text_raw = ' '.join([item.get('what') or '', item.get('text') or '',
+    # The record's work-tree node is filed on purpose and checked by the CLI,
+    # so it outranks every text guess below (15 Oct 2026: the node is the one
+    # taxonomy, portfolio is derived from it where the tree says which team).
+    from_node = portfolio_from_node(item.get('node'))
+    if from_node:
+        return from_node, 'node'
+
+    text_raw =' '.join([item.get('what') or '', item.get('text') or '',
                          item.get('project') or ''])
     for prefix, tid in TICKET_PREFIXES:
         if tid and re.search(rf'\b{prefix}\d+', text_raw, re.IGNORECASE):

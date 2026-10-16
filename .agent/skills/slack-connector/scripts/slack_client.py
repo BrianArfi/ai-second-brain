@@ -15,6 +15,9 @@ REPO_ROOT = os.path.abspath(os.path.join(SKILL_DIR, '..', '..', '..', '..'))
 
 sys.path.insert(0, os.path.join(REPO_ROOT, '.agent', 'scripts'))
 from file_utils import require_send_approval  # Outbound send gate (CLAUDE.md)
+from gates import outbound as _outbound_gate  # em-dash + Fathom link gate, shared with the hook
+from gates import claims as _claims_gate      # reply-router conversation claim, shared with the hook
+from gates import handles as _handles_gate    # named person without a <@ID>, shared with the hook
 
 # Ensure terminal outputs are always encoded in UTF-8 to prevent Windows UnicodeEncodeError
 try:
@@ -750,6 +753,12 @@ def post_message(token, channel_id, text, thread_ts=None, unfurl=False, allow_sp
     """
     import re
 
+    # Gates that used to live only in .claude/hooks (B4): they run here, before the
+    # first network call, so they hold under any harness, model or cron job.
+    _outbound_gate.enforce(text, "slack post")
+    _handles_gate.enforce(text, "slack post")
+    _claims_gate.enforce_slack_post(channel_id, thread_ts)
+
     if not check_length(text, allow_split=allow_split, label="message"):
         return False
 
@@ -802,6 +811,9 @@ def update_message(token, channel_id, message_ts, text, unfurl=False, allow_spli
     Prints the permalink on success.
     """
     import re
+
+    _outbound_gate.enforce(text, "slack edit")
+    _handles_gate.enforce(text, "slack edit")
 
     # An edit is truncated rather than split, which is worse: the tail simply
     # disappears with no second message to hint that anything is missing.
@@ -1002,7 +1014,9 @@ def main():
     # even though the gate itself no longer consults the environment. This
     # keeps a future re-introduction of an env flag from silently becoming
     # writable by a credentials file.
-    _TOKEN_ENV_DENYLIST = {"SLACK_SEND_UNATTENDED"}
+    # The gate overrides join the list for the same reason: they are set on the command
+    # (SLOP_GUARD_ALLOW_EMDASH=1 python3 ...), never granted by a credentials file.
+    _TOKEN_ENV_DENYLIST = {"SLACK_SEND_UNATTENDED", *_outbound_gate.OVERRIDE_ENV_NAMES}
     _token_env = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "token.env")
     if os.path.exists(_token_env):
         with open(_token_env) as _f:
@@ -1099,6 +1113,9 @@ def main():
             print("Error: --channel and --path are required for upload action.", file=sys.stderr)
             sys.exit(1)
         require_send_approval("upload a file to Slack", args.approved)
+        if args.comment:
+            _outbound_gate.enforce(args.comment, "slack upload --comment")
+        _claims_gate.enforce_slack_post(args.channel, args.thread_ts)
         upload_file(token, args.channel, args.path, args.comment, args.thread_ts)
     elif args.action == "post":
         text = args.text

@@ -1,66 +1,161 @@
 {
-  "_source": "Bundled claude-api skill (Claude Code v2.1.205, model/pricing table cached 2026-06-24; extracted 2026-07-11). Cache multipliers from the same skill's shared/prompt-caching.md Economics section: cache read = 0.1x input, cache write = 1.25x input (5m TTL) / 2x input (1h TTL). claude-sonnet-5 uses introductory pricing ($2/$10 per MTok, valid through 2026-08-31); standard is $3/$15 - swap after that date.",
-  "_units": "USD per 1M tokens (MTok)",
+  "source": "https://platform.claude.com/docs/en/about-claude/pricing.md",
+  "checked_at": "2026-10-15",
   "models": {
-    "claude-fable-5": {
-      "input": 10.0,
-      "output": 50.0,
-      "cache_read": 1.0,
+    "claude-fable-5-1": {
+      "input": 10,
       "cache_write_5m": 12.5,
-      "cache_write_1h": 20.0
+      "cache_write_1h": 20,
+      "cache_read": 0.25,
+      "output": 50
+    },
+    "claude-mythos-5-1": {
+      "input": 10,
+      "cache_write_5m": 12.5,
+      "cache_write_1h": 20,
+      "cache_read": 0.25,
+      "output": 50
+    },
+    "claude-fable-5": {
+      "input": 10,
+      "cache_write_5m": 12.5,
+      "cache_write_1h": 20,
+      "cache_read": 1,
+      "output": 50
+    },
+    "claude-mythos-5": {
+      "input": 10,
+      "cache_write_5m": 12.5,
+      "cache_write_1h": 20,
+      "cache_read": 1,
+      "output": 50
+    },
+    "claude-opus-5-5": {
+      "input": 4,
+      "cache_write_5m": 5,
+      "cache_write_1h": 8,
+      "cache_read": 0.2,
+      "output": 20
     },
     "claude-opus-5": {
-      "input": 5.0,
-      "output": 25.0,
-      "cache_read": 0.5,
+      "input": 5,
       "cache_write_5m": 6.25,
-      "cache_write_1h": 10.0
+      "cache_write_1h": 10,
+      "cache_read": 0.5,
+      "output": 25
     },
     "claude-opus-4-8": {
-      "input": 5.0,
-      "output": 25.0,
-      "cache_read": 0.5,
+      "input": 5,
       "cache_write_5m": 6.25,
-      "cache_write_1h": 10.0
+      "cache_write_1h": 10,
+      "cache_read": 0.5,
+      "output": 25
     },
     "claude-opus-4-7": {
-      "input": 5.0,
-      "output": 25.0,
-      "cache_read": 0.5,
+      "input": 5,
       "cache_write_5m": 6.25,
-      "cache_write_1h": 10.0
+      "cache_write_1h": 10,
+      "cache_read": 0.5,
+      "output": 25
     },
     "claude-opus-4-6": {
-      "input": 5.0,
-      "output": 25.0,
-      "cache_read": 0.5,
+      "input": 5,
       "cache_write_5m": 6.25,
-      "cache_write_1h": 10.0
+      "cache_write_1h": 10,
+      "cache_read": 0.5,
+      "output": 25
+    },
+    "claude-opus-4-5": {
+      "input": 5,
+      "cache_write_5m": 6.25,
+      "cache_write_1h": 10,
+      "cache_read": 0.5,
+      "output": 25
+    },
+    "claude-opus-4-1": {
+      "input": 15,
+      "cache_write_5m": 18.75,
+      "cache_write_1h": 30,
+      "cache_read": 1.5,
+      "output": 75
+    },
+    "claude-opus-4": {
+      "input": 15,
+      "cache_write_5m": 18.75,
+      "cache_write_1h": 30,
+      "cache_read": 1.5,
+      "output": 75
+    },
+    "claude-sonnet-5-5": {
+      "input": 2,
+      "cache_write_5m": 2.5,
+      "cache_write_1h": 4,
+      "cache_read": 0.1,
+      "output": 10
     },
     "claude-sonnet-5": {
-      "input": 2.0,
-      "output": 10.0,
-      "cache_read": 0.2,
+      "input": 2,
       "cache_write_5m": 2.5,
-      "cache_write_1h": 4.0,
-      "_note": "introductory pricing through 2026-08-31; standard = 3.0 in / 15.0 out"
+      "cache_write_1h": 4,
+      "cache_read": 0.2,
+      "output": 10
     },
     "claude-sonnet-4-6": {
-      "input": 3.0,
-      "output": 15.0,
-      "cache_read": 0.3,
+      "input": 3,
       "cache_write_5m": 3.75,
-      "cache_write_1h": 6.0
+      "cache_write_1h": 6,
+      "cache_read": 0.3,
+      "output": 15
+    },
+    "claude-sonnet-4-5": {
+      "input": 3,
+      "cache_write_5m": 3.75,
+      "cache_write_1h": 6,
+      "cache_read": 0.3,
+      "output": 15
+    },
+    "claude-sonnet-4": {
+      "input": 3,
+      "cache_write_5m": 3.75,
+      "cache_write_1h": 6,
+      "cache_read": 0.3,
+      "output": 15
+    },
+    "claude-haiku-5-5": {
+      "input": 0.1,
+      "cache_write_5m": 0.125,
+      "cache_write_1h": 0.2,
+      "cache_read": 0.01,
+      "output": 0.5,
+      "over": {
+        "threshold": 100000,
+        "input": 0.5,
+        "cache_write_5m": 0.625,
+        "cache_write_1h": 1,
+        "cache_read": 0.05,
+        "output": 2.5
+      }
     },
     "claude-haiku-4-5": {
-      "input": 1.0,
-      "output": 5.0,
-      "cache_read": 0.1,
+      "input": 1,
       "cache_write_5m": 1.25,
-      "cache_write_1h": 2.0
+      "cache_write_1h": 2,
+      "cache_read": 0.1,
+      "output": 5
+    },
+    "claude-haiku-3-5": {
+      "input": 0.8,
+      "cache_write_5m": 1,
+      "cache_write_1h": 1.6,
+      "cache_read": 0.08,
+      "output": 4
     }
   },
   "aliases": {
-    "claude-haiku-4-5-20251001": "claude-haiku-4-5"
+    "fable": "claude-fable-5-1",
+    "opus": "claude-opus-5-5",
+    "sonnet": "claude-sonnet-5-5",
+    "haiku": "claude-haiku-5-5",
+    "claude-3-5-haiku": "claude-haiku-3-5"
   }
 }

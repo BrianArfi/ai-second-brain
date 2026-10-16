@@ -33,19 +33,23 @@ Move an email from Inbox to Archive.
 
 ### `send`
 Send a plain-text email from `you@yourcompany.com` (appears in Sent). The `gmail.modify` scope already permits sending. Always confirm with the owner before sending.
+
+**`--approved` is mandatory (since 15 Oct 2026).** Without it the script refuses before any network call, with the same wording as `slack_client.py`. Add `--approved` only at the post-approval step, after the owner has signed off on this exact draft. A recipient outside `yourcompany.com` needs two approvals in two separate turns (content first, then the final text with To/Cc); `--approved` goes on the command only after the second. There is no environment bypass for it. Do not retry with `--approved` on a guess. The examples below show the command as it runs at that step.
 - **Command**:
   ```bash
   python .agent/skills/gmail-connector/gmail_manager.py send \
     --to "teammate@yourcompany.com" \
     --cc "teammate@yourcompany.com, other@yourcompany.com" \
     --subject "Subject" \
-    --body-file /tmp/body.txt
+    --body-file /tmp/body.txt \
+    --approved
   ```
 - **Arguments**:
   - `--to`: recipient(s), comma-separated (required).
   - `--cc`: cc recipient(s), comma-separated (optional).
   - `--subject`: subject line (required **unless** `--reply-to` is used).
   - `--reply-to`: Gmail message id to reply INTO. The new message inherits that message's `threadId`, subject, and `In-Reply-To`/`References` chain, so Gmail and Outlook both keep it inside the existing thread. `--subject` is ignored in this mode.
+  - `--approved`: required. Set it only after the owner approved this exact draft (see above).
   - `--body` OR `--body-file`: inline text, or a file with the body (use `--body-file` for multi-line to avoid shell escaping).
   - `--attach`: path to a file to attach. Repeat the flag once per file. MIME type is guessed from the extension; a missing path or a total over Gmail's 35 MB message limit fails **before** any network call.
     ```bash
@@ -53,7 +57,8 @@ Send a plain-text email from `you@yourcompany.com` (appears in Sent). The `gmail
       --to "you@yourcompany.com" \
       --subject "Travel documents" \
       --body-file /tmp/body.txt \
-      --attach /tmp/eticket.pdf --attach /tmp/voucher.pdf
+      --attach /tmp/eticket.pdf --attach /tmp/voucher.pdf \
+      --approved
     ```
 
 - **Threading gotcha**: without `--reply-to`, Gmail starts a **new** thread even when the subject matches the original character for character. Any reply on a live client thread must pass `--reply-to <last_message_id>`, or the client sees a second, orphaned thread. To reply-all, copy the To/Cc set off the message you are replying to (`get <msg_id>` prints them) and pass them explicitly; the script does not expand reply-all for you.
@@ -62,7 +67,8 @@ Send a plain-text email from `you@yourcompany.com` (appears in Sent). The `gmail
     --reply-to <last_message_id> \
     --to "someone@example.com" \
     --cc "other@example.com,third@example.com" \
-    --body-file /tmp/body.txt
+    --body-file /tmp/body.txt \
+    --approved
   ```
 
 ## Setup & Authentication

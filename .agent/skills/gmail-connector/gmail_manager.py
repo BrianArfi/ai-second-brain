@@ -18,6 +18,11 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
+# Outbound text gate shared with .claude/hooks/send_slop_guard.py (em-dash, internal Fathom link).
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'scripts'))
+from gates import outbound as _outbound_gate  # noqa: E402
+from file_utils import require_send_approval  # noqa: E402  Outbound send gate (CLAUDE.md)
+
 # Windows consoles default to cp1252; subjects and bodies carry non-ascii.
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -206,7 +211,7 @@ def get_profile():
     except Exception as e:
         print(f"An error occurred: {e}")
 
-def send_email(to, subject, body, cc=None, reply_to=None, attachments=None):
+def send_email(to, subject, body, cc=None, reply_to=None, attachments=None, approved=False):
     """Send a plain-text email. gmail.modify scope is sufficient to send.
 
     reply_to: a Gmail message id to reply INTO. When given, the new message
@@ -214,7 +219,22 @@ def send_email(to, subject, body, cc=None, reply_to=None, attachments=None):
     chain, so Gmail AND Outlook keep it inside the existing thread instead of
     starting a new one. Without it Gmail always starts a fresh thread, even if
     the subject matches character for character.
+
+    approved: must be True, set by the CLI `--approved` flag only after the owner has signed
+    off on this exact draft (two turns for a recipient outside yourcompany.com, see
+    CLAUDE.md). Sent email cannot be recalled, so there is no environment bypass.
     """
+    # Approval first, before any other work and before the first network call. Same gate
+    # and wording as slack_client.py (file_utils.require_send_approval).
+    require_send_approval("send an email", approved, destination="Gmail")
+
+    # Gate the text before anything touches the network (auth included). Subject is
+    # checked too: in reply mode it is replaced by the parent's, so a bad one is moot,
+    # but a new thread's subject goes to the recipient exactly like the body.
+    _outbound_gate.enforce(body, "gmail body")
+    if subject:
+        _outbound_gate.enforce(subject, "gmail subject")
+
     # Fail before touching the network if an attachment path is wrong.
     attachments = attachments or []
     total_bytes = 0
@@ -365,6 +385,9 @@ if __name__ == '__main__':
                                   'subject and In-Reply-To/References chain')
     send_parser.add_argument('--attach', action='append', default=[], metavar='PATH',
                              help='File to attach; repeat the flag for multiple attachments')
+    send_parser.add_argument('--approved', action='store_true',
+                             help="Required. Pass only after the owner approved this exact draft "
+                                  "(a recipient outside yourcompany.com needs two approvals)")
     body_group = send_parser.add_mutually_exclusive_group(required=True)
     body_group.add_argument('--body', help='Inline body text')
     body_group.add_argument('--body-file', help='Path to a file containing the body text')
@@ -389,7 +412,7 @@ if __name__ == '__main__':
             send_parser.error('--subject is required unless --reply-to is given')
         body = open(args.body_file, encoding='utf-8').read() if args.body_file else args.body
         send_email(args.to, args.subject, body, cc=args.cc, reply_to=args.reply_to,
-                   attachments=args.attach)
+                   attachments=args.attach, approved=args.approved)
     elif args.command == 'auth-url':
         auth_url()
     elif args.command == 'auth-save':

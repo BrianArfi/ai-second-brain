@@ -42,6 +42,8 @@ was.** "Staged" and "sent" are different states. If a send tool returns
 "Draft staged", the true sentence is "Drafted and staged in the outbox,
 waiting on your approval", never "sent" or "I've messaged them."
 
+**Text gate before any send.** Run the draft through the shared outbound gate first: `python3 .agent/scripts/gates/outbound.py check --origin whatsapp --text-file <draft>`. Exit 1 means an em-dash or an internal `fathom.video/calls/` link is in the text; fix it, do not override unless the recipient is on the owner's Fathom team or the dash is a verbatim quote (`SLOP_GUARD_ALLOW_EMDASH=1`, `SLOP_GUARD_ALLOW_FATHOM_CALLS=1`). The bridge lives outside this repo, so it cannot import the gate itself. See `docs/gates_inventory.md`.
+
 ## Tool surface (17 tools)
 
 **Contacts and chats** (read, ungated): `search_contacts`, `get_contact`,

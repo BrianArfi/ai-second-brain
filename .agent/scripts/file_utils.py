@@ -48,7 +48,7 @@ def assert_drive_result(result, operation, id_keys=('id', 'documentId', 'fileId'
         sys.exit(1)
     return found
 
-def require_send_approval(action_label, approved):
+def require_send_approval(action_label, approved, destination='Slack'):
     """
     Shared outbound-send gate (CLAUDE.md Slack rule): every action that posts a
     message, uploads a file, or otherwise mutates outbound state must call this
@@ -64,6 +64,8 @@ def require_send_approval(action_label, approved):
     callers pass approval explicitly at their own call site (see
     dashboard/server.py, which passes --approved on the click path).
 
+    `destination` only changes the wording ("sends to Gmail"); the rule is the same.
+
     Refuses (message to stderr, exit nonzero) otherwise; never returns on
     refusal, so callers do not need to branch on a return value.
     """
@@ -71,7 +73,7 @@ def require_send_approval(action_label, approved):
         return
     print(
         f"Error: refusing to {action_label} without approval. This action sends "
-        "to Slack and needs the owner's explicit sign-off before it hits the network. "
+        f"to {destination} and needs the owner's explicit sign-off before it hits the network. "
         "Pass --approved once the owner has approved this specific draft. Do not "
         "retry with --approved on a guess.",
         file=sys.stderr,

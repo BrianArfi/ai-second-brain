@@ -34,6 +34,7 @@ Usage:
   python3 .agent/scripts/ai_call.py --task draft --prompt "..." --plan
 """
 import argparse
+import glob
 import json
 import os
 import shlex
@@ -129,6 +130,20 @@ def claude_bin():
     found = shutil.which("claude")
     if found and not found.startswith("/mnt/"):
         return found
+    # Last resort: the binary the VS Code / Cursor extension ships. The WSL host
+    # had no standalone install from early October, so every unattended Claude
+    # job resolved to agy-bridge and the Saturday ledger audit skipped itself
+    # ("tools-unavailable", 10 Oct 2026). The extension binary shares
+    # ~/.claude credentials, and its folder name changes on every update, so
+    # take the newest one.
+    pattern = "anthropic.claude-code-*/resources/native-binary/claude"
+    hits = []
+    for root in ("~/.vscode-server/extensions", "~/.vscode/extensions",
+                 "~/.cursor-server/extensions"):
+        hits += glob.glob(os.path.join(os.path.expanduser(root), pattern))
+    hits = [h for h in hits if os.access(h, os.X_OK)]
+    if hits:
+        return max(hits, key=os.path.getmtime)
     return None
 
 def agy_available():

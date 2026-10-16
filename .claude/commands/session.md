@@ -20,3 +20,5 @@ Arguments: `$ARGUMENTS`
 **A session that is still running** can be asked directly: `ListAgents`, then `SendMessage` to its name.
 
 Transcripts are per machine and not in git: Windows, WSL and macOS sessions cannot see each other's. `--all-projects` searches other repos' sessions on this machine.
+
+**Session Cards, notes and claims.** Each session keeps a card (`journal/sessions/<id>.json`: spoken name, purpose, nodes, outputs, open items). Saying "sesi lain" or "yang tadi" makes a hook print the top three matching cards on one line. Leave work for another session with `python3 .agent/scripts/session_notes.py post --to <session id | node:<id>> --text "..."`; the target gets it at its next start. Before editing a shared Doc, ticket, file or branch, check `python3 .agent/scripts/claims.py who <gdoc:ID | jira:KEY | linear:KEY | file:path | branch:repo:name | slack:key>`. A claim older than 12h, or held by a done session, is free to take. Doc writers warn on a live claim and claim the Doc automatically.

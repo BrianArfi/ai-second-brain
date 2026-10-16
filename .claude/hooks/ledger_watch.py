@@ -81,7 +81,7 @@ DISCHARGES = [
      "publish_cf.py", re.compile(r"pages\.dev")),
     ("Chase queue sent", re.compile(r"chase_queue\.py\s+send.*--approved"),
      "chase_queue.py", re.compile(r"slack\.com/archives/")),
-    ("Email sent", re.compile(r"gmail_connector.*\bsend\b|gmail\.py\s+send"),
+    ("Email sent", re.compile(r"gmail_connector.*\bsend\b|gmail\.py\s+send|gmail_manager\.py\s+send.*--approved"),
      None, None),
 ]
 

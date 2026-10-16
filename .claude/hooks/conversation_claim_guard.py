@@ -24,13 +24,17 @@ import json
 import os
 import shlex
 import sys
-import time
 from pathlib import Path
 
+# The claim logic lives in .agent/scripts/gates/claims.py so slack_client.py can run the
+# same check in-process (Grok Bot lessons plan, B4). This hook keeps the command-line
+# parsing and the permissionDecision output; the decision itself is the shared function.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / ".agent" / "scripts"))
+from gates.claims import (  # noqa: E402
+    DONE_WINDOW_SECONDS, OPEN_STATUSES, candidates, evaluate,
+)
+
 STATE = Path(__file__).resolve().parent.parent.parent / "journal" / "state" / "reply_router_state.json"
-OPEN_STATUSES = ("open", "claimed", "active")
-# A conversation closed longer ago than this is history, not a live duplicate.
-DONE_WINDOW_SECONDS = 7 * 24 * 3600
 
 def emit(decision, reason):
     print(json.dumps({
@@ -67,33 +71,6 @@ def parse_target(command):
             thread_ts = tok.split("=", 1)[1]
     return channel, thread_ts
 
-def candidates(convs, channel, thread_ts):
-    """Conversations this send could land in, most specific first."""
-    found = []
-    if thread_ts:
-        key = "%s:t%s" % (channel, thread_ts)
-        if key in convs:
-            found.append((key, convs[key]))
-    for key, conv in convs.items():
-        if (key, conv) in found or not key.startswith(channel + ":"):
-            continue
-        if thread_ts:
-            # A reply whose parent ts the router filed under a different key
-            # (channel-level `:u<user>` conversations carry their messages here).
-            msgs = conv.get("messages") or []
-            if not any(len(m) > 1 and m[1] == thread_ts for m in msgs):
-                continue
-        elif key.startswith(channel + ":t"):
-            # A top-level post cannot land inside a thread. Matching it against
-            # every open thread in the channel blocked a new announcement on
-            # 28 Sep 2026 because an unrelated six-day-old thread was claimed.
-            continue
-        elif conv.get("status") not in OPEN_STATUSES:
-            # No thread-ts to disambiguate: only a live conversation is evidence.
-            continue
-        found.append((key, conv))
-    return found
-
 def main():
     if os.environ.get("CLAIM_GUARD_DISABLE") == "1":
         sys.exit(0)
@@ -120,33 +97,9 @@ def main():
     me = str(payload.get("session_id") or "")
 
     convs = (json.loads(STATE.read_text(encoding="utf-8")) or {}).get("conversations") or {}
-    for key, conv in candidates(convs, channel, thread_ts):
-        owner = conv.get("session_id")
-        status = conv.get("status")
-
-        if status in OPEN_STATUSES and owner and owner != me:
-            emit("deny", (
-                "ANOTHER SESSION OWNS THIS CONVERSATION. The reply-router opened "
-                "`%s` as session %s, and it is still open. Two sessions replying to one "
-                "thread is how the same thread got two drafts and nearly two Jira tickets "
-                "on 20 Sep 2026.\n"
-                "Do this instead: open that session and send from there, or close it first "
-                "(`reply_router.py close --conv '%s' --summary ...`). Check what it already "
-                "produced before drafting anything new.\n"
-                "Override for this call only: CLAIM_GUARD_DISABLE=1."
-                % (key, owner, key)
-            ))
-
-        if status == "done":
-            closed_at = conv.get("closed_at") or 0
-            if time.time() - closed_at < DONE_WINDOW_SECONDS:
-                emit("ask", (
-                    "This conversation is already CLOSED in the reply-router (`%s`, reason: %s).\n"
-                    "What it was closed with: %s\n"
-                    "Confirm this is a genuinely new message and not a duplicate of the reply "
-                    "that session already sent."
-                    % (key, conv.get("closed_reason") or "?", conv.get("summary") or "(no summary)")
-                ))
+    result = evaluate(convs, channel, thread_ts, me)
+    if result:
+        emit(*result)
 
     sys.exit(0)
 

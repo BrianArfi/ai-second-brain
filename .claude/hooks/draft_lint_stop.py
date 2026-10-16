@@ -39,7 +39,7 @@ ASKS_APPROVAL = re.compile(
     r'reply "?(ok|send|kirim|go)|send as is|siap dikirim|tinggal (bilang|balas))')
 DRAFT_HINT = re.compile(r'(?i)(slack|whatsapp|\bDM\b|thread|draft|message|balasan|pesan|email|comment|reply)')
 NOISE = ('<system-reminder>', '<task-notification>', '<command-name>', '<local-command', '[Request interrupted')
-LOG = ROOT / 'journal' / 'draft_feedback' / 'lint_events.jsonl'
+LOG = pathlib.Path(os.environ.get('DRAFT_LINT_LOG') or (ROOT / 'journal' / 'draft_feedback' / 'lint_events.jsonl'))
 
 def _text(content):
     if isinstance(content, str):

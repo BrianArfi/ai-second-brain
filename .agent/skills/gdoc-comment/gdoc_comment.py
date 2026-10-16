@@ -32,6 +32,7 @@ REPO_ROOT = SKILL_DIR.parents[2]
 
 sys.path.insert(0, str(REPO_ROOT / '.agent' / 'scripts'))
 from file_utils import assert_drive_result  # Drive Operation Verification (CLAUDE.md)
+from gates import outbound as _outbound_gate  # em-dash + Fathom link gate, shared with the hook
 
 ACCOUNT_TOKENS = {
     "work": REPO_ROOT / ".agent/skills/work-drive-connector/token.json",
@@ -157,6 +158,9 @@ def cmd_comment(args):
     items = (json.load(sys.stdin) if args.items == "-"
              else json.load(open(args.items)))
     assert isinstance(items, list) and items, "items must be a non-empty JSON list"
+    # Before the browser launches: a comment with a banned dash is cheaper to fix now than to delete.
+    for n, it in enumerate(items, 1):
+        _outbound_gate.enforce(str((it or {}).get("text") or ""), f"gdoc comment {n}/{len(items)}")
 
     from playwright.sync_api import sync_playwright
     exe = chromium_executable()
