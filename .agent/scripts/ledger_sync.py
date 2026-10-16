@@ -96,6 +96,9 @@ RENDERERS = [
         BASE_DIR,
         '.agent/skills/project-tracking-update/scripts/render_followup_tracker.py')],
      'master_followup_tracker.md'),
+    # node -> records, the reverse of the `node` field on every record
+    (['python3', os.path.join(BASE_DIR, '.agent/scripts/work_tree_rollup.py'), '--write'],
+     'work_tree_rollup.index.json'),
 ]
 
 # --------------------------------------------------------------------------

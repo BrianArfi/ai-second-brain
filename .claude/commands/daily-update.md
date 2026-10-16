@@ -61,4 +61,9 @@ In both modes also follow [`.agent/protocols/phased_update_protocol.md`](../../.
 - If the owner corrected your output or process at any point today, offer to run `/learn` to persist the lesson.
 - **Branch the decision queue before you finish (standing pre-approval, do not ask).** After the recap is written, take the items that still need the owner himself: a reply he owes, a decision only he can make, an approval only he can give. Drop anything you already finished and anything that only needed recording. Group what is left so items turning on the same underlying call stay in one session. Then write ONE request file to `.asb/branches/requests/` covering every branch, per `## Branching Into Sub-Sessions` in [`CLAUDE.md`](../../CLAUDE.md), and say in one line per branch what you split. Each `brief` carries the real context: who is waiting, what they asked, the link back, the draft you already wrote, and your recommendation. A sub-session starts blank and sees nothing from this run. If only one thing needs the owner, do not branch. Branching creates sessions, it never sends: Slack and WhatsApp approval gates are untouched.
 
+## Routine memory (first and last step)
+
+- **First step:** run `python3 .agent/scripts/routine_memory.py recall daily-update` and use the note to skip searches the last run already settled.
+- **Last step:** run `python3 .agent/scripts/routine_memory.py retain daily-update --text "<2 to 4 lines: what you searched, what was empty, what to check first next time>"`.
+
 Focus hint from the owner: $ARGUMENTS

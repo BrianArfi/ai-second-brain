@@ -14,6 +14,10 @@ try:
 except Exception:
     pass
 
+# Em-dash gate shared with .claude/hooks/send_slop_guard.py (ticket text is team-facing).
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'scripts'))
+from gates import outbound as _outbound_gate  # noqa: E402
+
 # Credentials come from env vars or a token.env next to this skill
 # (token.env is gitignored from the public template; see token.env.example).
 def _load_token_env():
@@ -590,6 +594,9 @@ def markdown_to_adf(md):
 
 def create_issue(project_key, summary, issue_type="Story", priority="High", description_text="", assignee_account_id=None, domain=None, parent=None, labels=None, components=None, epic_link_field="customfield_10014"):
     """Create a Jira issue. Returns (key, url) on success or raises on error."""
+    # Em-dash ban on text a colleague reads, before any network call (gates inventory, gap 3).
+    _outbound_gate.enforce_dashes(summary, "jira issue summary")
+    _outbound_gate.enforce_dashes(description_text, "jira issue description")
     domain = domain or domain_for_key(project_key)
     url = f"https://{domain}/rest/api/3/issue"
     auth = HTTPBasicAuth(EMAIL, TOKEN)
@@ -736,6 +743,8 @@ def edit_issue(issue_key, domain=None, summary=None, description_text=None,
                priority=None, assignee_account_id=None, labels=None,
                add_labels=None, components=None, dry_run=False):
     """Update fields on an existing issue. Only the fields passed are touched."""
+    _outbound_gate.enforce_dashes(summary, "jira issue summary")
+    _outbound_gate.enforce_dashes(description_text, "jira issue description")
     domain = domain_for_key(issue_key, domain)
     fields = {}
     if summary:
@@ -775,6 +784,7 @@ def comment_issue(issue_key, body_text, domain=None, comment_id=None, dry_run=Fa
     Replacing matters: a comment that stated a spec which later turned out to be
     wrong is worse than no comment, because the ticket then contradicts itself.
     """
+    _outbound_gate.enforce_dashes(body_text, "jira comment")
     domain = domain_for_key(issue_key, domain)
     payload = {"body": markdown_to_adf(body_text)}
     if dry_run:

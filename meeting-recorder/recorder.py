@@ -10,10 +10,8 @@ Per platform:
   windows  Run with WINDOWS Python (not WSL): pip install pyaudiowpatch
            Captures WASAPI loopback (system) and mic as TWO wav parts
            (<base>.sys.wav + <base>.mic.wav); the WSL watcher mixes them.
-  macos    ffmpeg avfoundation, one device. The app ships `asb-systemaudio`, which
-           builds a Core Audio tap + mic aggregate for the length of the capture
-           (macOS 14.2+, no driver). A BlackHole aggregate set in
-           `avfoundation_audio_device` still wins when configured.
+  macos    ffmpeg avfoundation, one device (use a BlackHole aggregate device to
+           get system+mic in one stream). recorder.py --list-devices to find it.
   linux    ffmpeg PulseAudio: default mic + default sink .monitor, mixed live.
 
 Usage:
@@ -50,8 +48,7 @@ def warn(msg):
     sees. Which is how a recording could lose its video and still look fine."""
     print("WARNING: " + msg, file=sys.stderr, flush=True)
 
-def write_sidecar(base, title, start, parts, plat, ad_hoc=False, attendees=None,
-                  audio_route=None):
+def write_sidecar(base, title, start, parts, plat, ad_hoc=False, attendees=None):
     """ad_hoc=True marks a meeting you started yourself (a huddle, a phone call,
     anything not on the calendar). The watcher then skips the calendar match
     entirely, so the recording cannot inherit the title, attendees, or dedupe
@@ -67,11 +64,6 @@ def write_sidecar(base, title, start, parts, plat, ad_hoc=False, attendees=None,
         "attendees": [a.strip() for a in (attendees or []) if a.strip()],
         "parts": [os.path.basename(p) for p in parts],
     }
-    if audio_route:
-        # "mic_only" here means the file holds one voice, not the meeting. Kept
-        # on the recording itself so a write-up can say so instead of presenting
-        # half a conversation as the whole one.
-        meta["audio_route"] = audio_route
     with open(base + ".json", "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
     print(f"\nSaved: {', '.join(parts)}\nMeta:  {base}.json "
@@ -356,81 +348,11 @@ class ScreenRecorder:
 
 # ---------- macos / linux (ffmpeg) ----------
 
-# How long `asb-systemaudio hold` gets to build its device. Creating a tap and an aggregate is a
-# few hundred milliseconds; the first run can also sit behind the audio-capture permission prompt.
-HELPER_READY_TIMEOUT_S = 20
-
-def macos_audio_route(machine, mic_only):
-    """Pick what a Mac records from. Returns (device, route, reason, helper).
-
-    `route` is one of:
-      configured  the user pointed `avfoundation_audio_device` at something
-                  (a BlackHole aggregate, usually). Trusted as is.
-      system_tap  the app's Core Audio helper built "ASB Meeting Capture": the
-                  meeting plus the microphone.
-      mic_only    the microphone and nothing else. `reason` says why.
-
-    `helper` is the running `asb-systemaudio hold` process when route is
-    system_tap. It owns the tap, so it must stay alive until ffmpeg stops;
-    close_helper() tears the device down.
-
-    Before this existed nothing on this path ever ran the helper. The app
-    stopped warning once the helper file was present, and the recording was
-    still the microphone alone, so a Mac could look fixed and record one voice.
-    """
-    configured = str(machine.get("avfoundation_audio_device") or "").strip()
-    if configured and configured != ":0":
-        return configured, "configured", "", None
-    if mic_only:
-        return ":0", "mic_only", "mic_only_requested", None
-
-    helper = os.environ.get("ASB_SYSTEMAUDIO", "").strip()
-    if not helper:
-        local = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                             "macos", "asb-systemaudio")
-        helper = local if os.path.isfile(local) else ""
-    if not helper or not os.path.isfile(helper):
-        return ":0", "mic_only", "no_helper", None
-
-    try:
-        proc = subprocess.Popen([helper, "hold"], stdin=subprocess.PIPE,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True)
-    except OSError as e:
-        return ":0", "mic_only", f"helper_spawn_failed: {e}", None
-
-    import select
-    ready, _, _ = select.select([proc.stdout], [], [], HELPER_READY_TIMEOUT_S)
-    line = proc.stdout.readline().strip() if ready else ""
-    if line.startswith("READY\t"):
-        name = line.split("\t")[1]
-        return ":" + name, "system_tap", "", proc
-
-    close_helper(proc)
-    err = ""
-    try:
-        err = (proc.stderr.read() or "").strip()
-    except Exception:
-        pass
-    why = err.splitlines()[0] if err else (line or "no answer in time")
-    return ":0", "mic_only", f"helper_failed: {why[:200]}", None
-
-def close_helper(proc):
-    """Stop `asb-systemaudio hold`. Closing its stdin is the signal; it
-    destroys the tap and the aggregate device on the way out."""
-    if proc is None or proc.poll() is not None:
-        return
-    try:
-        proc.stdin.close()
-        proc.wait(timeout=5)
-    except Exception:
-        proc.terminate()
-
-def record_ffmpeg(base, plat, machine, mic_only, system_only, device=None):
+def record_ffmpeg(base, plat, machine, mic_only, system_only):
     ffmpeg = machine.get("ffmpeg", "ffmpeg")
     out = base + ".wav"
     if plat == "macos":
-        dev = device or machine.get("avfoundation_audio_device", ":0")
+        dev = machine.get("avfoundation_audio_device", ":0")
         cmd = [ffmpeg, "-hide_banner", "-f", "avfoundation", "-i", dev,
                "-ac", "1", "-ar", "48000", out]
     else:  # linux
@@ -539,22 +461,6 @@ def main():
     os.makedirs(rec_dir, exist_ok=True)
     base = os.path.join(rec_dir, f"{now_stamp()}_{slugify(args.title)}")
     marker = base + ".recording"
-
-    # Decided before the marker exists, and written beside it, so the app can
-    # read what this capture actually holds the moment it sees the marker.
-    # A Mac that falls back to the microphone is a recording of one person;
-    # the app reports that instead of letting it pass as a meeting.
-    audio_device, audio_route, route_reason, helper = None, None, "", None
-    route_file = base + ".route"
-    if plat == "macos":
-        audio_device, audio_route, route_reason, helper = macos_audio_route(
-            machine, args.mic_only)
-        if audio_route == "mic_only" and route_reason != "mic_only_requested":
-            warn("recording the microphone only, not the other people in the "
-                 f"call ({route_reason}).")
-        with open(route_file, "w", encoding="utf-8") as fh:
-            json.dump({"route": audio_route, "reason": route_reason}, fh)
-
     # The marker carries this process's pid, not just its existence.
     #
     # The app decides whether a leftover marker is a live capture or the debris of a crash. Without
@@ -620,20 +526,15 @@ def main():
                                    args.mic_only, args.system_only)
         else:
             parts = record_ffmpeg(base, plat, machine,
-                                  args.mic_only, args.system_only,
-                                  device=audio_device)
+                                  args.mic_only, args.system_only)
         if screen:
             video = screen.stop()
             if video:
                 parts = list(parts) + [video]
         write_sidecar(base, args.title, start, parts, plat,
                       ad_hoc=args.ad_hoc,
-                      attendees=args.attendees.split(","),
-                      audio_route=audio_route)
+                      attendees=args.attendees.split(","))
     finally:
-        close_helper(helper)
-        if os.path.exists(route_file):
-            os.remove(route_file)
         if os.path.exists(marker):
             os.remove(marker)
 

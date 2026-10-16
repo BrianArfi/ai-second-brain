@@ -73,39 +73,20 @@ import sys
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 MAX_FILE_BYTES = 200_000
 
-# A fathom.video/calls/<id> link is the INTERNAL one: it needs a Fathom account
-# and a manual approval from the owner before anybody can watch. On 31 Aug 2026
-# one went into a Slack thread with ExampleVendor, and the next morning Teammate Meer was
-# asking the owner for access instead of watching the demo. Fathom already gives every
-# recording a public share_url that opens with no account. So this is a link that
-# is simply the wrong one, always, in any message leaving the machine, which makes
-# it a deny rather than a warning.
-FATHOM_CALL_RE = re.compile(r'https?://(?:www\.)?fathom\.video/calls/([A-Za-z0-9_-]+)')
-FATHOM_CACHE = os.path.join(
-    os.path.dirname(__file__), '..', '..', 'journal', 'state', 'fathom_share_links.json')
-
-def fathom_share_hint(call_ids):
-    """The share link for each call id, when share-link has already cached it.
-
-    Read-only and local by design. A PreToolUse hook must not make a network call
-    on the way to a send, so an uncached id gets the command to run instead of a
-    silent stall.
-    """
-    try:
-        with open(os.path.abspath(FATHOM_CACHE)) as f:
-            cache = json.load(f)
-    except Exception:
-        cache = {}
-    lines = []
-    for cid in call_ids:
-        hit = (cache.get(cid) or {}).get('share_url')
-        if hit:
-            lines.append(f'{cid} -> {hit}')
-        else:
-            lines.append(
-                f'{cid} -> not cached, run: python3 .agent/skills/fathom-connector/'
-                f'scripts/fathom_client.py --action share-link --id {cid}')
-    return lines
+# The em-dash and Fathom link checks live in .agent/scripts/gates/outbound.py so the
+# sending scripts (slack_client.py, gmail_manager.py, gdoc_comment.py) run the very same
+# check in-process, before their network call (Grok Bot lessons plan, B4). This hook
+# keeps the command-line parsing and the permissionDecision output.
+sys.path.insert(0, os.path.join(REPO_ROOT, '.agent', 'scripts'))
+from gates.outbound import (  # noqa: E402
+    FATHOM_CALL_RE, FATHOM_CACHE, fathom_share_hint, fathom_refusal, dash_refusal,
+    command_allows, ENV_ALLOW_EMDASH, ENV_ALLOW_FATHOM,
+)
+# The Slack handle gate lives in gates/handles.py too, so `slack_client.py post` runs the
+# very same check in-process. The hook keeps the parsing and the permissionDecision.
+from gates.handles import (  # noqa: E402
+    missing_handles, handle_refusal, ambiguous_warning, ENV_ALLOW_PLAIN_NAMES,
+)
 
 # Banned outright (SKILL.md "Words to cut"). `harness` is deliberately omitted:
 # this repo calls the Claude setup "the harness" in almost every message, so
@@ -361,20 +342,6 @@ def outbound_text(command):
                 return comment_text(tok.split('=', 1)[1])
     return None, None
 
-def missing_handles(text):
-    """People named in an outbound Slack message with no `<@ID>` behind the name.
-
-    Returns (resolvable, ambiguous). Never raises: a broken index must not stop a send.
-    """
-    try:
-        sys.path.insert(0, os.path.join(REPO_ROOT, '.agent', 'scripts'))
-        from slack_mentions import unmentioned
-        people = unmentioned(text)
-    except Exception:
-        return [], []
-    return ([p for p in people if len(p['ids']) == 1],
-            [p for p in people if len(p['ids']) > 1])
-
 def send_target(command):
     """(channel, word ceiling) for the first marker this command matches."""
     for marker, target in SEND_TARGETS.items():
@@ -430,22 +397,14 @@ def main():
 
     channel, ceiling = send_target(command)
 
-    fathom_calls = list(dict.fromkeys(FATHOM_CALL_RE.findall(text)))
-    if fathom_calls and not re.search(
-            r'(?<![\w-])SLOP_GUARD_ALLOW_FATHOM_CALLS=1(?![\w-])', command):
+    fathom_reason = fathom_refusal(
+        text, origin, allowed=command_allows(ENV_ALLOW_FATHOM, command))
+    if fathom_reason:
         print(json.dumps({
             'hookSpecificOutput': {
                 'hookEventName': 'PreToolUse',
                 'permissionDecision': 'deny',
-                'permissionDecisionReason': (
-                    'FATHOM LINK GATE - the text about to be sent ({}) carries an '
-                    'internal fathom.video/calls/ link. That link needs a Fathom '
-                    'account and a manual approval from the owner, so the recipient '
-                    'cannot open it and will ask for access instead. Send the '
-                    'public share link: {}. Then re-run the send. Override with '
-                    'SLOP_GUARD_ALLOW_FATHOM_CALLS=1 only when the recipient is '
-                    'already on the owner\'s Fathom team.'
-                ).format(origin, '; '.join(fathom_share_hint(fathom_calls))),
+                'permissionDecisionReason': fathom_reason,
             }
         }))
         sys.exit(0)
@@ -453,25 +412,11 @@ def main():
     ambiguous_names = []
     # Slack only: a person named without a handle gets no ping. Runs before the dash
     # gate so one refusal can carry both fixes rather than costing two round trips.
-    if 'slack_client.py' in command and not re.search(
-            r'(?<![\w-])SLOP_GUARD_ALLOW_PLAIN_NAMES=1(?![\w-])', command):
+    if 'slack_client.py' in command and not command_allows(ENV_ALLOW_PLAIN_NAMES, command):
         resolvable, ambiguous = missing_handles(text)
         ambiguous_names = ambiguous
-        if resolvable:
-            fixes = '; '.join('%s -> <@%s>' % (p['name'], p['ids'][0]) for p in resolvable[:8])
-            reason = (
-                'SLACK HANDLE GATE - the message about to be sent (%s) names %s '
-                'without a Slack handle, so Slack posts the name as plain text and '
-                'nobody gets a ping. Replace the first mention of each with: %s. '
-                'Then re-run the send. Override with SLOP_GUARD_ALLOW_PLAIN_NAMES=1 '
-                'when the person is being talked about rather than addressed. '
-                'Resolve any other name with: python3 .agent/scripts/slack_mentions.py '
-                'check --file <draft>'
-            ) % (origin, ', '.join(p['name'] for p in resolvable), fixes)
-            if ambiguous:
-                reason += '. Ambiguous, pick by hand: ' + '; '.join(
-                    '%s (%s)' % (p['name'], ', '.join('<@%s>' % i for i in p['ids']))
-                    for p in ambiguous[:4])
+        reason = handle_refusal(origin, resolvable, ambiguous)
+        if reason:
             print(json.dumps({
                 'hookSpecificOutput': {
                     'hookEventName': 'PreToolUse',
@@ -481,7 +426,6 @@ def main():
             }))
             sys.exit(0)
 
-    dashes = [c for c in ('—', '–') if c in text]
     words = find_words(text)
     phrases = find_phrases(text)
     rationale = find_rationale(text)
@@ -489,37 +433,27 @@ def main():
     count = payload_words(text)
     over = ceiling and count > ceiling
 
-    # verbatim-quote escape hatch, set on the command itself
-    if dashes and re.search(r'(?<![\w-])SLOP_GUARD_ALLOW_EMDASH=1(?![\w-])', command):
-        dashes = []
+    extra = []
+    if words:
+        extra.append('banned words: ' + ', '.join(words[:6]))
+    if phrases:
+        extra.append('slop phrases: ' + ', '.join(phrases[:4]))
+    if over:
+        extra.append(f'{count} words against a {ceiling}-word budget for {channel}')
+    if rationale:
+        extra.append('unrequested rationale: ' + ', '.join(rationale[:3]))
+    if voice:
+        extra.append('not his voice: ' + '; '.join(voice[:3]))
 
-    if dashes:
-        found = ' and '.join(f'"{c}"' for c in dashes)
-        reason = (
-            f'NO-AI-SLOP GATE - {found} in the text about to be sent ({origin}). '
-            'The repo override bans em-dash and en-dash outright: reframe the '
-            'sentence rather than swapping in a hyphen, then re-run the send. '
-            'Quoting someone verbatim is the one exception: prefix the command '
-            'with SLOP_GUARD_ALLOW_EMDASH=1.'
-        )
-        extra = []
-        if words:
-            extra.append('banned words: ' + ', '.join(words[:6]))
-        if phrases:
-            extra.append('slop phrases: ' + ', '.join(phrases[:4]))
-        if over:
-            extra.append(f'{count} words against a {ceiling}-word budget for {channel}')
-        if rationale:
-            extra.append('unrequested rationale: ' + ', '.join(rationale[:3]))
-        if voice:
-            extra.append('not his voice: ' + '; '.join(voice[:3]))
-        if extra:
-            reason += ' Also present, fix in the same pass: ' + '; '.join(extra) + '.'
+    # verbatim-quote escape hatch, set on the command itself
+    dash_reason = dash_refusal(
+        text, origin, allowed=command_allows(ENV_ALLOW_EMDASH, command), extra=extra)
+    if dash_reason:
         print(json.dumps({
             'hookSpecificOutput': {
                 'hookEventName': 'PreToolUse',
                 'permissionDecision': 'deny',
-                'permissionDecisionReason': reason,
+                'permissionDecisionReason': dash_reason,
             }
         }))
         sys.exit(0)
@@ -528,13 +462,7 @@ def main():
         print(json.dumps({
             'hookSpecificOutput': {
                 'hookEventName': 'PreToolUse',
-                'additionalContext': (
-                    'slack handles: %s match more than one live Slack account, so no '
-                    'handle was added and nobody gets a ping. Pick one by hand: %s. '
-                    'The People page for that person is the place to record the answer.'
-                ) % (', '.join(p['name'] for p in ambiguous_names),
-                     '; '.join('%s (%s)' % (p['name'], ', '.join('<@%s>' % i for i in p['ids']))
-                               for p in ambiguous_names[:4])),
+                'additionalContext': ambiguous_warning(ambiguous_names),
             }
         }))
         sys.exit(0)

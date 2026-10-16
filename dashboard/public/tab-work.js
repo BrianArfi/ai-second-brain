@@ -368,6 +368,16 @@ window.Tabs = window.Tabs || {};
 
   const WT_STATUS_KIND = { critical: 'serious', risk: 'warn', ok: 'good', plan: 'muted', archived: 'muted' };
   const WT_STATUS_LABEL = { critical: 'blocked', risk: 'at risk', ok: 'on track', plan: 'planning', archived: 'archived' };
+  /* Ledger health per node (work_tree_rollup.py): critical = something slipped
+     in the last 7 days, risk = overdue / due soon / stale, ok = live records
+     and none of those, quiet = no live records. */
+  const WT_HEALTH = {
+    critical: { kind: 'serious', label: 'critical' },
+    risk: { kind: 'warn', label: 'at risk' },
+    ok: { kind: 'good', label: 'on track' },
+    quiet: { kind: 'muted', label: 'quiet' },
+  };
+  const wtHealth = h => WT_HEALTH[h] || WT_HEALTH.quiet;
   const WT_FILTERS = [
     { key: 'all', label: 'All' },
     { key: 'owner', label: 'Needs the owner' },
@@ -484,14 +494,85 @@ window.Tabs = window.Tabs || {};
   function wtKidCards(kids) {
     return `<div class="wt-kids-grid">${kids.map(k => {
       const r = k.roll || { threads: 0, attn: 0 };
+      const L = k.ledger;
+      const led = L
+        ? ` · <span class="wt-led-h wt-led-h-${U.esc(L.health || 'quiet')}">${U.esc(wtHealth(L.health).label)}</span> · ${(L.sub && L.sub.live) || 0} live`
+        : '';
       return `<button type="button" class="wt-kid" data-wt-go="${U.esc(k.id)}">
         <span class="wt-kid-top">${Comp.badge(WT_STATUS_KIND[k.status] || 'muted', WT_STATUS_LABEL[k.status] || k.status)}
           <span class="wt-kind">${U.esc(k.kind)}</span></span>
         <span class="wt-kid-name">${U.esc(k.label)}</span>
         ${k.summary ? `<span class="wt-kid-sum">${U.esc(k.summary)}</span>` : ''}
-        <span class="wt-kid-foot">${r.threads ? `${r.threads} threads` : 'no threads'}${r.attn ? ` · <b>${r.attn} need attention</b>` : ''}</span>
+        <span class="wt-kid-foot">${r.threads ? `${r.threads} threads` : 'no threads'}${r.attn ? ` · <b>${r.attn} need attention</b>` : ''}${led}</span>
       </button>`;
     }).join('')}</div>`;
+  }
+
+  /* Ledger section of the detail pane: the COM / WAIT / DEC records filed
+     under the selected node. Data comes from /api/work-tree (`node.ledger` per
+     node, `live_records` at the top level), both built by work_tree_rollup.py.
+     Counts are for the node plus everything below it; the rows are the node's
+     own live records, slipped first, then due soon, then the rest. */
+  function wtLedger(n) {
+    const L = n.ledger;
+    if (!L) return '';
+    const live = (state.workTree && state.workTree.live_records) || {};
+    const s = L.sub || {};
+    const own = L.own || {};
+    const ownLive = (L.own_counts && L.own_counts.live) || 0;
+    const h = wtHealth(L.health);
+    const ov = L.health_override;
+    const slipped = new Set(own.slipped || []);
+    const soon = new Set(own.soon || []);
+    const rank = id => (slipped.has(id) ? 0 : soon.has(id) ? 1 : 2);
+    const ids = [...(own.COM || []), ...(own.WAIT || []), ...(own.DEC || [])]
+      .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+
+    const flagLabel = { soon: 'due soon' };
+    const row = id => {
+      const r = live[id] || {};
+      const fl = (r.flags || []).filter(f => !(f === 'overdue' && (r.flags || []).includes('slipped')));
+      return `<div class="wt-led-row">
+        ${wtRefChips([id])}
+        <span class="wt-led-text">${U.esc(r.text || '')}</span>
+        <span class="wt-led-meta">${fl.map(f => `<span class="wt-led-flag wt-led-flag-${U.esc(f)}">${U.esc(flagLabel[f] || f)}</span>`).join('')}${r.who ? `<span>${U.esc(String(r.who))}</span>` : ''}${r.due ? `<span>due ${U.esc(String(r.due))}</span>` : ''}</span>
+      </div>`;
+    };
+
+    const last = L.last_activity_wib ? L.last_activity_wib.slice(0, 16).replace('T', ' ') : '';
+    const counts = `${s.live || 0} live · ${s.slipped || 0} slipped · ${s.overdue || 0} overdue · ${s.soon || 0} due soon · ${s.stale || 0} stale · ${s.closed_14d || 0} closed in 14 days`
+      + (last ? ` · last activity ${last}` : '');
+
+    const below = (s.live || 0) - ownLive;
+    let rows;
+    if (ids.length) {
+      rows = `<div class="wt-led-rows">${ids.map(row).join('')}</div>`
+        + (below > 0 ? `<p class="wt-empty">${below} more live record${below === 1 ? '' : 's'} below this node.</p>` : '');
+    } else if (below > 0) {
+      rows = `<p class="wt-empty">No records filed on this node itself. ${below} live record${below === 1 ? ' sits' : 's sit'} below it.</p>`;
+    } else {
+      rows = '<p class="wt-empty">No live ledger records on this node or below.</p>';
+    }
+
+    const refs = L.next_refs || [];
+    const nextHtml = refs.length
+      ? `<div class="wt-led-line"><span class="wt-led-key">Next</span>${refs.map(r =>
+        `<span class="wt-led-nref">${wtRefChips([r.id])}<span class="wt-led-st">${U.esc(r.status || 'unknown')}</span></span>`).join('')}</div>`
+      : '';
+    const stale = L.stale_mentions || [];
+    const staleHtml = stale.length
+      ? `<div class="wt-led-line"><span class="wt-led-key">Prose names closed records</span>${wtRefChips(stale)}</div>`
+      : '';
+
+    return `<div class="wt-ledger">
+      <div class="wt-sec-label">Ledger${ids.length ? ` · ${ids.length} on this node` : ''}</div>
+      <div class="wt-led-head">
+        ${Comp.badge(h.kind, h.label)}
+        ${ov ? `<span class="wt-led-manual">manual: ${U.esc(ov.why)}${ov.until ? ` (until ${U.esc(String(ov.until))})` : ''}</span>` : ''}
+        <span class="wt-led-counts">${U.esc(counts)}</span>
+      </div>
+      ${rows}${nextHtml}${staleHtml}
+    </div>`;
   }
 
   function wtDetail(nodes, parent) {
@@ -533,6 +614,7 @@ window.Tabs = window.Tabs || {};
       </div>
       ${n.summary ? `<p class="wt-sum">${U.esc(n.summary)}</p>` : ''}
       ${wtSourceChips(n.sources)}
+      ${wtLedger(n)}
       ${body}
     </div>`;
   }
@@ -636,6 +718,40 @@ window.Tabs = window.Tabs || {};
        rather than merely unimplemented. */
     return true;
   }
+
+  /* Select a node by id, as if its outline row had been clicked: open every
+     ancestor, and switch the filter to one under which the node is visible
+     (a record can sit on an archived node, which only the Archived filter
+     shows). State only; the caller repaints. False when the id is unknown or
+     the tree is not loaded yet. */
+  function wtSelectNode(id) {
+    if (!state.workTree) return false;
+    const { nodes, parent } = wtIndex();
+    if (!nodes[id]) return false;
+    let archived = nodes[id].status === 'archived';
+    for (let p = parent[id]; p; p = parent[p]) if (nodes[p].status === 'archived') archived = true;
+    state.wtFilter = archived ? 'archived' : 'all';
+    state.wtSelected = id;
+    for (let p = parent[id]; p; p = parent[p]) state.wtOpen.add(p);
+    if ((nodes[id].children || []).length) state.wtOpen.add(id);
+    /* the Work Tree card may have been collapsed by hand; a link into it must land on it */
+    if (window.UI) { UI.openKeys.add('work-tree'); UI.closedKeys.delete('work-tree'); UI.save(); }
+    return true;
+  }
+
+  /* bring the detail pane into view after a routed selection */
+  function wtReveal() {
+    requestAnimationFrame(() => {
+      const el = document.querySelector('#tab-work .wt-split');
+      if (el) el.scrollIntoView({ block: 'start' });
+    });
+  }
+
+  /* Route: #work/node/<id> selects a node. The 60s refresh calls load() with
+     the same hash again, so the route is applied once per hash change; a
+     hashchange re-arms it (listener below). */
+  let wtRouted = null;
+  window.addEventListener('hashchange', () => { wtRouted = null; });
 
   /* ── Decisions ── */
   function contextFields(it) {
@@ -1022,7 +1138,17 @@ window.Tabs = window.Tabs || {};
      page isn't left rendering underneath an open drawer showing the same
      content twice. */
   document.addEventListener('click', e => {
-    if (e.target.closest('[data-drawer-nav]')) Drawer.close();
+    const nav = e.target.closest('[data-drawer-nav]');
+    if (!nav) return;
+    Drawer.close();
+    /* A record card's work-tree link (quickfind.js) points at #work/node/<id>.
+       When the hash already is that, no hashchange fires, so select it here. */
+    if (nav.dataset.wtOpen && location.hash === nav.getAttribute('href')
+        && wtSelectNode(nav.dataset.wtOpen)) {
+      wtRouted = `node/${nav.dataset.wtOpen}`;
+      render();   /* full paint on purpose: the Work Tree card may have been collapsed */
+      wtReveal();
+    }
   });
 
   /* ── render / load ── */
@@ -1050,7 +1176,8 @@ window.Tabs = window.Tabs || {};
   async function load(filter) {
     const panel = document.getElementById('tab-work');
     if (!panel || !canRender(panel)) return;
-    state.filter = filter || null;
+    /* `node/<id>` is a work-tree route, not a tracker filter */
+    state.filter = (filter && !filter.startsWith('node/')) ? filter : null;
 
     if (filter && filter.startsWith('init/')) {
       const id = decodeURIComponent(filter.slice('init/'.length));
@@ -1083,7 +1210,18 @@ window.Tabs = window.Tabs || {};
     state.workTree = wtR.status === 'fulfilled' ? wtR.value : null;
     state.workTreeError = wtR.status === 'rejected' ? (wtR.reason && wtR.reason.message) || 'unknown error' : null;
 
+    let routed = false;
+    if (filter && filter.startsWith('node/')) {
+      if (filter !== wtRouted) {
+        wtRouted = filter;
+        routed = wtSelectNode(decodeURIComponent(filter.slice('node/'.length)));
+      }
+    } else {
+      wtRouted = null;
+    }
+
     render();
+    if (routed) wtReveal();
   }
 
   /* ── delegated clicks: initiative slide-over + filter chips + new-ticket toggle/create ── */

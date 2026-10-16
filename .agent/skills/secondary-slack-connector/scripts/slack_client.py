@@ -13,6 +13,8 @@ REPO_ROOT = os.path.abspath(os.path.join(SKILL_DIR, '..', '..', '..', '..'))
 
 sys.path.insert(0, os.path.join(REPO_ROOT, '.agent', 'scripts'))
 from file_utils import require_send_approval  # Outbound send gate (CLAUDE.md)
+from gates import outbound as _outbound_gate  # em-dash + Fathom link gate, shared with the hook
+from gates import claims as _claims_gate      # reply-router conversation claim, shared with the hook
 
 # Ensure terminal outputs are always encoded in UTF-8 to prevent Windows UnicodeEncodeError
 try:
@@ -585,6 +587,8 @@ def main():
             print("Error: --channel and --text are required for post action.", file=sys.stderr)
             sys.exit(1)
         require_send_approval("post a Slack message", args.approved)
+        _outbound_gate.enforce(args.text, "slack post")
+        _claims_gate.enforce_slack_post(args.channel)
         post_message(token, args.channel, args.text)
 
 if __name__ == "__main__":

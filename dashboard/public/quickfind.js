@@ -64,6 +64,19 @@
     return `${Number.isInteger(hours) ? hours : hours.toFixed(1)}h${d}`;
   }
 
+  /* The record's work-tree home as a link into the Work tab. It reuses the
+     #work/<filter> route (tab-work.js reads `node/<id>` the way it reads
+     `init/<id>`) and the data-drawer-nav hook, which closes this drawer so the
+     tab is visible. 'unfiled' stays plain text: there is no node to open. */
+  function nodeLine(r) {
+    if (r.node === 'unfiled') return detailLine('Work tree', 'unfiled — needs a node');
+    if (!r.node) return '';
+    return `<div class="qf-d-line"><span class="qf-d-key">Work tree</span>` +
+      `<span class="qf-d-val"><a class="qf-node" data-drawer-nav data-wt-open="${U.esc(r.node)}" ` +
+      `href="#work/node/${encodeURIComponent(r.node)}" title="Open ${U.esc(r.node)} in the Work tab">` +
+      `${U.esc(r.node_path || r.node)}</a></span></div>`;
+  }
+
   /* the detail body: what the item is, who owns it, how it is defined, and its
      timeline. Shared by the collapsed rows and the deep-linked card. */
   function detailBody(r) {
@@ -88,9 +101,7 @@
       /* Where this sits in the work tree. 'unfiled' is a real state, not a
          missing value, so it prints rather than being hidden: it means the
          record needs a home and is waiting on the owner to say which. */
-      detailLine('Work tree', r.node === 'unfiled'
-        ? 'unfiled — needs a node'
-        : (r.node_path || r.node || '')),
+      nodeLine(r),
       detailLine('Project', r.project),
       detailLine('Scope', scope),
       detailLine('Opened', created),

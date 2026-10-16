@@ -36,6 +36,7 @@ SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO_ROOT = os.path.abspath(os.path.join(SKILL_DIR, '..', '..', '..'))
 sys.path.insert(0, os.path.join(REPO_ROOT, '.agent', 'scripts'))
 from file_utils import require_send_approval  # noqa: E402
+from gates import outbound as _outbound_gate  # noqa: E402  em-dash gate, shared with the hook
 
 TEAMS_PATH = os.path.join(SKILL_DIR, "teams.json")
 API_URL = "https://api.linear.app/graphql"
@@ -490,6 +491,9 @@ def _state_id(team_key, state_name):
 
 def create_issue(team, title, description=None, assignee=None, project=None, approved=False):
     require_send_approval(f"create Linear issue in {team}", approved)
+    # Em-dash ban on text a colleague reads, before any network call (gates inventory, gap 3).
+    _outbound_gate.enforce_dashes(title, "linear issue title")
+    _outbound_gate.enforce_dashes(description, "linear issue description")
     payload = {"teamId": _team_id(team), "title": title}
     if description:
         payload["description"] = description
@@ -515,6 +519,7 @@ def create_issue(team, title, description=None, assignee=None, project=None, app
 
 def update_issue(key, state=None, assignee=None, title=None, approved=False):
     require_send_approval(f"update Linear issue {key}", approved)
+    _outbound_gate.enforce_dashes(title, "linear issue title")
     current = get_issue(key)
     payload = {}
     if title:
@@ -540,6 +545,7 @@ def update_issue(key, state=None, assignee=None, title=None, approved=False):
 
 def comment(key, body, approved=False):
     require_send_approval(f"comment on Linear issue {key}", approved)
+    _outbound_gate.enforce_dashes(body, "linear comment")
     data = gql("""
         mutation($input: CommentCreateInput!) {
           commentCreate(input: $input) { success comment { id url createdAt } }

@@ -111,6 +111,7 @@ is still open. No evidence either way is a question for the owner, never a chase
 | Open waiting-on | 60 or fewer | morning update health line |
 | Breached waiting-on | 15 or fewer | morning update health line |
 | Open records with no node | 0 | `work_tree.py coverage` |
+| Live records on a top-level area | 0 | `work_tree.py coverage` |
 
 ## Who does what
 

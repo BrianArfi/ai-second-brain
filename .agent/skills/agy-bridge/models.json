@@ -278,6 +278,10 @@
       "Gemini 3.8 Flash (High)",
       "Gemini 3.1 Pro (High)",
       {
+        "backend": "zai",
+        "model": "glm-5.3-flash"
+      },
+      {
         "backend": "gemini",
         "model": "gemini-3.8-flash"
       },
@@ -286,6 +290,7 @@
         "model": "gpt-oss:120b"
       }
     ],
+    "_draft_glm_restored_note": "glm-5.3-flash re-added to draft 2026-10-15 after a passing probe: the 21 Sep z.ai restore re-added it to reasoning and cross-lineage but missed draft, so an agy quota lockout (3 mornings, 13-15 Oct) sent every premeeting card to the Claude sentinel.",
     "_draft_flash_note": "OWNER DECISION 2026-07-22: Gemini 3.5 Flash promoted to HEAD of the draft chain (was glm-5.2-first), same rationale as bulk-cheap -> utilize the idle Gemini/agy subscription. glm-5.2 stays fallback #2. reasoning/critic intentionally NOT changed: GLM keeps the lead there for reasoning depth + cross-lineage diversity.",
     "image": "NOT handled by the bridge -> use the gemini-image skill. Default image model is gemini-3-pro-image ('Nano Banana', pro 3.1 tier; set 2026-07-22); imagen-4.0 only when true aspect-ratio control is needed.",
     "_zai_restored_note": "z.ai RESTORED 2026-09-21 after the owner resubscribed: glm-5.3 leads reasoning, glm-5.3-flash re-entered cross-lineage, both after passing live probes. The 2026-07-27 retirement (subscription lapsed, guaranteed failed attempts) is the precedent: retire again only on repeated probe failures, and never re-add without a passing probe first."

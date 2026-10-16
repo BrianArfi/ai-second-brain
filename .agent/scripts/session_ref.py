@@ -15,8 +15,10 @@ A reference looks like `/session f245e1e3`: paste it into any other session.
 session whose text contains it wins. The current session (CLAUDE_CODE_SESSION_ID,
 else the newest transcript) is skipped unless --include-current is passed.
 
-Transcripts are per machine and not in git: a Windows session cannot see a
-WSL or macOS session's transcript, and vice versa. Stdlib only.
+Session cards (session_cards.py, journal/sessions/ in git) are read first: they cross
+machines, so a Windows session sees a WSL or macOS session through its card. A transcript
+is opened only when the card is missing or the brief needs the detail, and transcripts are
+per machine and not in git. Stdlib only.
 """
 from __future__ import annotations
 
@@ -160,11 +162,34 @@ def cmd_here(a, _files):
     print(f"Full id: {s['id']}")
     print(f"Transcript: {s['path'].as_posix()}")
 
+def _cards():
+    """Session cards for this workspace, or [] when the card module or folder is missing."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import session_cards
+        return session_cards, session_cards.load_cards()
+    except Exception:
+        return None, []
+
 def cmd_list(a, files):
     cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=a.days)
+    mod, cards = _cards()
+    cur = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    covered = set()
+    for c in cards:
+        covered.add(c["session_id"])
+        last = mod.parse_ts(c.get("last_active_at"))
+        if (c["session_id"] == cur and not a.include_current) or not last or last < cutoff:
+            continue
+        if a.grep and not mod.matches(c, a.grep):
+            continue
+        print(f"{c['short_id']}  {local_time(c.get('created_at'))} -> {local_time(c.get('last_active_at'))}  "
+              f"{c.get('status', '?'):<15} [{c.get('machine', '?')}] {c.get('spoken_name')} - {clip(c.get('purpose', ''), 80)}")
     for f in files:
         if dt.datetime.fromtimestamp(f.stat().st_mtime, dt.timezone.utc) < cutoff:
             break
+        if f.stem in covered:
+            continue
         if a.grep and a.grep.lower() not in f.read_text(encoding="utf-8", errors="replace").lower():
             continue
         s = parse(f)
@@ -195,9 +220,25 @@ def brief(s: dict, max_chars: int) -> str:
         text = text[:max_chars] + "\n\n[truncated; read the transcript for the rest]"
     return text
 
+def _brief_for(ref: str, files: list[Path], per: int, mod, cards: list[dict]) -> str:
+    """Card first. With a local transcript the card header sits on top of the full brief;
+    without one (another machine) the card alone is the brief."""
+    r = ref.strip().removeprefix("session:").removeprefix("/session").strip()
+    cur = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    pool = [c for c in cards if c["session_id"] != cur] if cur else cards
+    card = None if re.fullmatch(r"last(?:-\d+)?", r) else (mod.find_card(r, pool) if mod else None)
+    if card:
+        local = next((f for f in files if f.stem == card["session_id"]), None)
+        head = mod.card_brief(card)
+        if local:
+            return head + "\n\n" + brief(parse(local), per)
+        return head
+    return brief(parse(resolve(ref, files)), per)
+
 def cmd_brief(a, files):
     per = max(2000, a.max_chars // len(a.refs))
-    print("\n\n".join(brief(parse(resolve(r, files)), per) for r in a.refs))
+    mod, cards = _cards()
+    print("\n\n".join(_brief_for(r, files, per, mod, cards) for r in a.refs))
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)

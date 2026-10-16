@@ -31,7 +31,14 @@ Command line:
     python3 .agent/scripts/work_tree.py archive-node apple-stc --why "shipped"
     python3 .agent/scripts/work_tree.py unarchive-node apple-stc   # restores the old status
     python3 .agent/scripts/work_tree.py alias --initiative mp-exampleprogram-eshop --node exampleprogram
+    python3 .agent/scripts/work_tree.py set-health d4 --status critical --why "..." [--until 2026-10-31]
+    python3 .agent/scripts/work_tree.py clear-health d4
+    python3 .agent/scripts/work_tree.py set-next d4 --refs COM-1386,DEC-0421 [--text "..."]
     python3 .agent/scripts/work_tree.py validate
+
+`show` prints the node's ledger rollup too (work_tree_rollup.py): its live
+COM / WAIT / DEC, computed health and last activity. Records never go on a
+top-level area that has nodes under it; `resolve_or_die` refuses them.
 """
 import argparse
 import datetime
@@ -133,6 +140,17 @@ def suggest(query, idx=None, n=5):
 class UnknownNode(Exception):
     pass
 
+def is_container_root(node_id, idx=None):
+    """A top-level area with live nodes under it. Records filed there are
+    tracked in name only: "B2C Super App" says nothing about which piece of
+    work the record moves (the owner, 15 Oct 2026). A top-level node with no live
+    children is a leaf in practice, so records may still go there."""
+    idx = idx if idx is not None else node_index()
+    m = idx.get(node_id)
+    if not m or m["parent"] is not None:
+        return False
+    return any(c.get("status") != "archived" for c in m["node"].get("children") or [])
+
 def resolve_or_die(node_id, allow_unfiled=False, idx=None):
     """Return the node id, or exit with the closest matches printed.
 
@@ -153,6 +171,14 @@ def resolve_or_die(node_id, allow_unfiled=False, idx=None):
     if node_id in idx:
         if idx[node_id]["archived"]:
             raise UnknownNode(f"node '{node_id}' is archived; file under a live node.")
+        if is_container_root(node_id, idx):
+            kids = [c["id"] for c in idx[node_id]["node"].get("children") or []
+                    if c.get("status") != "archived"]
+            raise UnknownNode(
+                f"node '{node_id}' is a top-level area; file under one of its nodes "
+                f"instead: {', '.join(kids)}.\n"
+                f"  No fit? Create one: python3 .agent/scripts/work_tree.py add-node "
+                f"--parent {node_id} ...")
         return node_id
     close = suggest(node_id, idx)
     hint = "\n".join(f"    {c}  ({idx[c]['path']})" for c in close) or "    (no close match)"
@@ -220,6 +246,80 @@ def cmd_show(args):
     kids = n.get("children") or []
     if kids:
         print(f"  children: {', '.join(k['id'] for k in kids)}")
+    # The reverse link: every ledger record filed here, computed fresh.
+    from work_tree_rollup import build, format_node
+    roll = build()["nodes"].get(args.node_id)
+    if roll:
+        print(format_node(args.node_id, roll))
+    return 0
+
+def _ledger_ids():
+    from work_tree_rollup import load_records
+    return {rid: r.get("status") for rid, (_, _, r) in load_records().items()}
+
+def cmd_set_health(args):
+    """Manual health, overriding the computed one. A reason is required, so
+    the override says why the records do not tell the whole story."""
+    if args.status not in ("critical", "risk", "ok", "quiet"):
+        print("--status must be critical, risk, ok or quiet", file=sys.stderr)
+        return 1
+    if args.until:
+        try:
+            datetime.date.fromisoformat(args.until)
+        except ValueError:
+            print("--until must be YYYY-MM-DD", file=sys.stderr)
+            return 1
+    tree = load_tree()
+    idx = node_index(tree)
+    if args.node_id not in idx:
+        print(f"unknown node '{args.node_id}'", file=sys.stderr)
+        return 1
+    n = idx[args.node_id]["node"]
+    n["health_override"] = {"status": args.status, "why": args.why,
+                            "set_wib": wib_now(), "until": args.until}
+    n["updated_wib"] = wib_now()
+    save_tree(tree)
+    print(f"{args.node_id}: health {args.status} (manual"
+          f"{', until ' + args.until if args.until else ''}): {args.why}")
+    return 0
+
+def cmd_clear_health(args):
+    tree = load_tree()
+    idx = node_index(tree)
+    if args.node_id not in idx:
+        print(f"unknown node '{args.node_id}'", file=sys.stderr)
+        return 1
+    n = idx[args.node_id]["node"]
+    if n.pop("health_override", None) is None:
+        print(f"{args.node_id}: no manual health set")
+        return 0
+    n["updated_wib"] = wib_now()
+    save_tree(tree)
+    print(f"{args.node_id}: manual health cleared; computed health applies")
+    return 0
+
+def cmd_set_next(args):
+    """The node's next step, with the ledger records it waits on as ids
+    instead of names buried in prose, so the rollup can show each one's
+    status and flag the step once they all close."""
+    refs = [r.strip() for r in (args.refs or "").split(",") if r.strip()]
+    known = _ledger_ids()
+    bad = [r for r in refs if r not in known]
+    if bad:
+        print(f"unknown ledger id(s): {', '.join(bad)}", file=sys.stderr)
+        return 1
+    tree = load_tree()
+    idx = node_index(tree)
+    if args.node_id not in idx:
+        print(f"unknown node '{args.node_id}'", file=sys.stderr)
+        return 1
+    n = idx[args.node_id]["node"]
+    if args.text is not None:
+        n["next"] = args.text
+    n["next_refs"] = refs
+    n["updated_wib"] = wib_now()
+    save_tree(tree)
+    print(f"{args.node_id}: next_refs = {', '.join(refs) or '(none)'}")
     return 0
 
 def cmd_list(args):
@@ -346,6 +446,20 @@ def cmd_validate(args):
             problems.append(f"alias '{pid}' points at archived node '{nid}'")
     unmapped = [p for p in inis if p not in alias.get("map", {})]
 
+    # Both directions of the record <-> node link.
+    status = _ledger_ids()
+    for node, _, _ in walk(tree):
+        for ref in node.get("next_refs") or []:
+            if ref not in status:
+                problems.append(f"node '{node['id']}' next_refs names unknown record {ref}")
+    from work_tree_rollup import build
+    roll = build()
+    for rid in roll["dangling"]:
+        problems.append(f"record {rid} points at a node that does not exist")
+    if roll["live_on_container_root"]:
+        print(f"live records on a top-level area ({len(roll['live_on_container_root'])}): "
+              + ", ".join(roll["live_on_container_root"]))
+
     print(f"nodes: {len(idx)}   archived: {sum(1 for m in idx.values() if m['archived'])}")
     print(f"portfolio initiatives: {len(inis)}   mapped: {len(inis) - len(unmapped)}   unmapped: {len(unmapped)}")
     if unmapped:
@@ -384,6 +498,10 @@ def cmd_coverage(args):
     pct = 100.0 * (tot - unfiled) / max(tot, 1)
     print(f"{'TOTAL':<12} {tot:>4} records   unfiled {unfiled:>4}   "
           f"open+unfiled {open_unfiled:>4}   filed {pct:.0f}%")
+    from work_tree_rollup import build
+    on_root = build()["live_on_container_root"]
+    print(f"{'live on a top-level area':<26} {len(on_root):>4}"
+          + (f"   {', '.join(on_root)}" if on_root else ""))
     if open_unfiled:
         print(f"\n{open_unfiled} open record(s) have no work-tree node. Triage list: "
               f"journal/state/work_tree_triage.json")
@@ -427,6 +545,20 @@ def main():
     al.add_argument("--node")
     al.add_argument("--list", action="store_true")
 
+    sh = sub.add_parser("set-health", help="manual health, overriding the computed one")
+    sh.add_argument("node_id")
+    sh.add_argument("--status", required=True, help="critical | risk | ok | quiet")
+    sh.add_argument("--why", required=True, help="what the records do not show")
+    sh.add_argument("--until", help="YYYY-MM-DD; the computed health returns after it")
+
+    ch = sub.add_parser("clear-health", help="drop the manual health")
+    ch.add_argument("node_id")
+
+    sn = sub.add_parser("set-next", help="next step, with the records it waits on")
+    sn.add_argument("node_id")
+    sn.add_argument("--refs", default="", help="comma separated ledger ids, e.g. COM-1386,DEC-0421")
+    sn.add_argument("--text", help="the next step in words; omit to keep the current one")
+
     sub.add_parser("validate")
 
     cv = sub.add_parser("coverage", help="how many records have a node")
@@ -438,7 +570,8 @@ def main():
           "add-node": cmd_add_node, "archive-node": cmd_archive_node,
           "unarchive-node": cmd_unarchive_node,
           "alias": cmd_alias, "validate": cmd_validate,
-          "coverage": cmd_coverage}.get(args.cmd)
+          "coverage": cmd_coverage, "set-health": cmd_set_health,
+          "clear-health": cmd_clear_health, "set-next": cmd_set_next}.get(args.cmd)
     if not fn:
         p.print_help()
         return 2

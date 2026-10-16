@@ -2208,6 +2208,8 @@ a.ticket-chip:hover { border-color: var(--border-active); color: var(--text-acce
   text-transform: uppercase; letter-spacing: .03em; font-size: 10px;
 }
 .qf-d-val { color: var(--text-primary); }
+.qf-node { color: var(--text-accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.qf-node:hover { color: var(--text-primary); }
 .qf-d-breach .qf-d-val { color: var(--danger, #ef6d6d); font-weight: 600; }
 .qf-d-notes { margin-top: 6px; }
 .qf-d-note {
@@ -2400,6 +2402,36 @@ a.ticket-chip:hover { border-color: var(--border-active); color: var(--text-acce
 .wt-f-progress { color: var(--st-good); }
 .wt-f-next     { color: var(--text-accent); }
 .wt-empty { font-size: var(--fs-sm); color: var(--text-muted); font-style: italic; }
+
+/* Ledger section of the node detail (work_tree_rollup.py via /api/work-tree) */
+.wt-ledger { display: flex; flex-direction: column; gap: 7px; }
+.wt-led-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--fs-xs); }
+.wt-led-manual { color: var(--st-warn); font-weight: 600; }
+.wt-led-counts { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.wt-led-rows {
+  display: flex; flex-direction: column; max-height: 280px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.wt-led-row {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 10px; align-items: baseline;
+  padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: var(--fs-xs);
+}
+.wt-led-row:last-child { border-bottom: 0; }
+.wt-led-text { color: var(--text-secondary); line-height: 1.45; }
+.wt-led-meta { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; color: var(--text-muted); white-space: nowrap; }
+.wt-led-flag { font-weight: 650; }
+.wt-led-flag-slipped, .wt-led-flag-overdue { color: var(--st-serious); }
+.wt-led-flag-soon, .wt-led-flag-stale { color: var(--st-warn); }
+.wt-led-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--fs-xs); color: var(--text-secondary); }
+.wt-led-key { font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-muted); font-weight: 650; }
+.wt-led-nref { display: inline-flex; align-items: center; gap: 4px; }
+.wt-led-st { color: var(--text-muted); }
+.wt-led-h { font-weight: 650; }
+.wt-led-h-critical { color: var(--st-serious); }
+.wt-led-h-risk { color: var(--st-warn); }
+.wt-led-h-ok { color: var(--st-good); }
+.wt-led-h-quiet { color: var(--text-muted); }
+@media (max-width: 700px) { .wt-led-row { grid-template-columns: auto minmax(0, 1fr); } .wt-led-meta { grid-column: 1 / -1; justify-content: flex-start; } }
 
 /* ═══════════════════════════════════════════════════════════════════
    Ledger hover popover (ledger-hover.js)

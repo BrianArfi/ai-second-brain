@@ -232,7 +232,7 @@ Use `pdftotext`, not the `Read` tool. Use `Read` only when the user directly ask
 
 ### Issue trackers (Jira today, Linear from the 25 Aug cutover)
 - **Jira** -- [`.agent/skills/jira-connector/scripts/jira_client.py`](../.agent/skills/jira-connector/scripts/jira_client.py): `verify-connections`, `daily-digest`, `sprint-status --portfolio`, `create-issue`. Two instances (`examplevendor.atlassian.net` = MSP/MBA/STOR, `yourcompany.atlassian.net` = MP/MPS); `PORTFOLIO_BOARDS` is the mechanical portfolio boundary, **never mix boards across portfolios in one review**. [`dump_all_issues.py`](../.agent/skills/jira-connector/scripts/dump_all_issues.py) feeds the work tree.
-- **Linear** -- [`.agent/skills/linear-connector/scripts/linear_client.py`](../.agent/skills/linear-connector/scripts/linear_client.py): `verify-connection`, `teams --write`, `projects`, `cycles`, `cycle-status --team|--portfolio`, `issue`, `issues`, `daily-digest`; writes (`create-issue`, `update-issue`, `comment`) **refuse without `--approved`**. Key in `token.env`; **team keys are discovered into `teams.json`, never guessed** -- a key colliding with a Jira project key (MP/MPS/MSP/MBA/STOR) makes an identifier ambiguous and is skipped by the work-tree pass until source-qualified. [`dump_all_issues.py`](../.agent/skills/linear-connector/scripts/dump_all_issues.py) emits the same shape as the Jira dump so both merge into one work-tree pass. Also registered as a project-scope MCP server (`.mcp.json`, OAuth via `/mcp`) for in-session use; scripts and cron use the CLI, which the MCP is invisible to.
+- **Linear** -- [`.agent/skills/linear-connector/scripts/linear_client.py`](../.agent/skills/linear-connector/scripts/linear_client.py): `verify-connection`, `teams --write`, `projects`, `cycles`, `cycle-status --team|--portfolio`, `issue`, `issues`, `daily-digest`; writes (`create-issue`, `update-issue`, `comment`) **refuse without `--approved`** and refuse an em-dash or en-dash in the text (`SLOP_GUARD_ALLOW_EMDASH=1` to quote someone verbatim). Key in `token.env`; **team keys are discovered into `teams.json`, never guessed** -- a key colliding with a Jira project key (MP/MPS/MSP/MBA/STOR) makes an identifier ambiguous and is skipped by the work-tree pass until source-qualified. [`dump_all_issues.py`](../.agent/skills/linear-connector/scripts/dump_all_issues.py) emits the same shape as the Jira dump so both merge into one work-tree pass. Also registered as a project-scope MCP server (`.mcp.json`, OAuth via `/mcp`) for in-session use; scripts and cron use the CLI, which the MCP is invisible to.
 
 ### Work product tracking
 - **Master Product List** -- [`.agent/skills/master-product-list/register_prd.py`](../.agent/skills/master-product-list/register_prd.py): register a PRD into the MPL sheet + local md.
@@ -335,7 +335,7 @@ Contract test: `python3 tests/test_automation_settings.py`.
 
 *Slack mechanics (moved from CLAUDE.md ## PM Partner Rules)*
 
-**Every person named in a Slack message carries their handle.** Slack posts a bare "Teammate" as plain text: no ping, no badge, no notification, so the message waits until somebody scrolls past it. Resolve the ids before the send with `python3 .agent/scripts/slack_mentions.py check --file <draft>`, or rewrite the draft in place with `apply --file <draft> --in-place` (it mentions the first occurrence of each person and leaves later references as plain text). `send_slop_guard.py` refuses a send that still names a resolvable person without a handle; `SLOP_GUARD_ALLOW_PLAIN_NAMES=1` is the override for a person talked about rather than addressed. A name matching two live accounts is reported, never guessed: pick the id and record it on that person's page in `Clients/Work/People/`. The index rebuilds from `users.list` weekly inside the daily sweep, or on demand with `slack_mentions.py refresh`.
+**Every person named in a Slack message carries their handle.** Slack posts a bare "Teammate" as plain text: no ping, no badge, no notification, so the message waits until somebody scrolls past it. Resolve the ids before the send with `python3 .agent/scripts/slack_mentions.py check --file <draft>`, or rewrite the draft in place with `apply --file <draft> --in-place` (it mentions the first occurrence of each person and leaves later references as plain text). `send_slop_guard.py` and `slack_client.py post`/`update` (shared logic in `.agent/scripts/gates/handles.py`) refuse a send that still names a resolvable person without a handle; the chase queue and the dashboard click-send are warn-only; `SLOP_GUARD_ALLOW_PLAIN_NAMES=1` is the override for a person talked about rather than addressed. A name matching two live accounts is reported, never guessed: pick the id and record it on that person's page in `Clients/Work/People/`. The index rebuilds from `users.list` weekly inside the daily sweep, or on demand with `slack_mentions.py refresh`.
 
 **One conversation, one session. Check the claim before you draft.** The reply-router opens a session per Slack conversation and records the owner in `journal/state/reply_router_state.json`. Nothing enforced that record until 20 Sep 2026, when two sessions worked the same thread: one filed ABC-123 plus a reply draft, the other drafted a second reply and came within one command of a duplicate ticket. `.claude/hooks/conversation_claim_guard.py` (PreToolUse, Bash) now resolves the conversation key from `--channel` and `--thread-ts` on any `slack_client.py --action post` and **denies** the send when a different session holds an open claim, naming the session that owns it. A conversation closed inside the last seven days downgrades to an ask, with the closing summary shown, because a closed conversation usually means the reply already went out. Reads, probes, and a command that merely quotes a send are untouched. It fails open, so a guard that cannot read its own state never blocks a real reply. See who owns what with `reply_router.py list`; off switch `CLAIM_GUARD_DISABLE=1`. Regression test: `python3 tests/test_conversation_claim_guard.py`.
 
@@ -439,7 +439,7 @@ Kill switches: `LEDGER_GUARD_WARN_ONLY=0` makes the guard actually block (it war
 
 Three layers, because any single one gets bypassed:
 
-1. **CLI**, the real gate. `--node` required on `add` in all four ledger CLIs; unknown ids rejected with the closest matches printed. `--node ?` plus a search string prints candidate nodes.
+1. **CLI**, the real gate. `--node` required on `add` in all four ledger CLIs; unknown ids rejected with the closest matches printed. `--node ?` plus a search string prints candidate nodes. A top-level area with live nodes under it (`root-ecom`, `root-b2c`, ...) is refused too, on `add` and `refile`: the record goes on one of its nodes, or a new one (15 Oct 2026). A top-level node with no live children (`asb-app`) still takes records.
 2. **Stop hook**, the safety net. `.claude/hooks/ledger_guard.py` blocks the end of a turn that created an unfiled record.
 3. **Sweep**, the drift check. `work_tree_link.py --check` reports unfiled and orphaned-node counts; the count goes in the morning update and in `/weekly-planning`.
 
@@ -447,7 +447,11 @@ Three layers, because any single one gets bypassed:
 
 ```bash
 python3 .agent/scripts/work_tree.py find "apple store"        # which node is this?
-python3 .agent/scripts/work_tree.py show apple-uat            # one node in full
+python3 .agent/scripts/work_tree.py show apple-uat            # one node in full, plus its live COM/WAIT/DEC and health
+python3 .agent/scripts/work_tree_rollup.py show apple-uat     # just the ledger side of one node
+python3 .agent/scripts/work_tree.py set-health d4 --status critical --why "..." [--until YYYY-MM-DD]
+python3 .agent/scripts/work_tree.py clear-health d4           # back to the computed health
+python3 .agent/scripts/work_tree.py set-next d4 --refs COM-1386,DEC-0421 [--text "..."]
 python3 .agent/scripts/work_tree.py add-node --id x --label "..." --kind item --parent apple
 python3 .agent/scripts/work_tree.py archive-node x --why "shipped"   # hidden from the Work tab, id still resolves
 python3 .agent/scripts/work_tree.py unarchive-node x                 # restores the status it had before
@@ -460,6 +464,19 @@ python3 .agent/scripts/work_tree_backfill.py                  # dry run over the
 ```
 
 Linkage lives **on the record**, not on the tree. `work_tree.json.refs` is derived from the records by `work_tree_link.py`, never hand-curated. Hand-curating refs is what let 659 records drift out of the tree unnoticed.
+
+### The reverse link: node to records
+
+`work_tree_rollup.py` derives the other direction from the `node` field and writes `journal/state/work_tree_rollup.index.json` on every ledger sync (it is a `ledger_sync.py` renderer). Ledger ids are never written into `work_tree.json`: two writers of one link drift apart. Per node it gives the live records, counts for the node and everything under it, last activity, and a computed health:
+
+| Health | When |
+| :--- | :--- |
+| `critical` | something slipped in the last 7 days: commitment past due, decision past deadline, waiting-on breached |
+| `risk` | overdue for longer, due within 3 days, or live for more than 30 days |
+| `ok` | live records, none of the above |
+| `quiet` | no live records |
+
+A parent takes the worst health below it. `set-health` overrides it, and needs `--why`; `--until` lets it lapse. The only hand-written state on a node is its `summary` and `next`. `next_refs` names the records the next step waits on, so the rollup shows each one's status; ledger ids written in a node's prose that have since closed are listed as `stale_mentions`. The dashboard Work tab and record cards read the same rollup. `portfolio_tagger.py` now takes a record's squad from its node before any text guess.
 
 ## quality-gate-mechanics
 
