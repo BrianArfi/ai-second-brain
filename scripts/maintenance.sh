@@ -56,5 +56,13 @@ else
 fi
 echo "[$(date)] model drift check exit $?" >> "$LOG_FILE"
 
+# Claude model pins: settings and Telegram bridges name full model ids, so they
+# never drift to an old model -- and never move to a new one either. This moves
+# each pin to the newest model of its family (sonnet stays sonnet) and restarts
+# a bridge whose .env changed. Never fatal, same as the drift check above.
+echo "[$(date)] Moving Claude model pins to newest..." >> "$LOG_FILE"
+timeout 120s python3 "$REPO_DIR/.agent/scripts/claude_model_pins.py" --apply --heartbeat >> "$LOG_FILE" 2>&1
+echo "[$(date)] claude model pins exit $?" >> "$LOG_FILE"
+
 echo "Daily Maintenance Finished: $(date)" >> "$LOG_FILE"
 echo "-----------------------------------------------" >> "$LOG_FILE"

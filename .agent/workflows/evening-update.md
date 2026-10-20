@@ -16,6 +16,10 @@ Execute the daily runner in evening mode for a thorough data harvest.
 python .agent/scripts/daily_update_runner.py --mode evening
 ```
 
+## Claude Cost Line (mandatory)
+
+Run `python3 .agent/scripts/claude_usage_today.py --top 3` and paste its output into the recap under **AI cost today**, unchanged. If one session is above $25, add one line with the cheaper route for that kind of work (split the session, prepare the material outside the model, shorter output, or glm-flash / agy-bridge for light tasks).
+
 ## Email Check (mandatory)
 
 the owner acts off email too, so sweep it every evening (the runner does NOT pull email).

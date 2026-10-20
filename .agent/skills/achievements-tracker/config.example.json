@@ -1,0 +1,43 @@
+{
+  "_note": "Copy to config.json and fill in. Paths are relative to `root`, which is relative to this file. See SKILL.md.",
+  "root": "../../..",
+  "product": "the Acme mobile app",
+  "currency": "USD",
+  "money_metrics": ["revenue"],
+  "total_metrics": ["orders", "revenue"],
+  "lead_metric": "orders",
+  "total_bullet_label": "Product Growth",
+  "metric_labels": {"orders": "monthly orders", "revenue": "monthly revenue", "active_users": "monthly active users"},
+  "group_metric": "revenue",
+  "group_labels": {},
+  "floors": {"orders": 100, "revenue": 10000},
+  "min_ratio": 1.5,
+  "lookback_months": 6,
+  "grace_days": 7,
+  "timezone_offset_hours": 0,
+  "unreachable_alert_day": 10,
+  "cv_path": "career/cv.md",
+  "cv_section": "**Acme Inc**",
+  "evidence_path": "career/achievements_evidence.md",
+  "state_path": "career/achievements_state.json",
+  "source": {
+    "kind": "series-file",
+    "label": "monthly numbers in career/metrics_series.json",
+    "path": "career/metrics_series.json",
+    "_other_kinds": "metabase: {db_id, sql_total, sql_groups} with columns m (YYYY-MM), one per metric, grp for groups | command: {argv} printing the series JSON"
+  },
+  "unreachable_hint": {
+    "unreachable": "Check that the data source is connected, then ask Claude to run the scan.",
+    "needs_reauth": "The data source sign-in expired. Sign in again, then ask Claude to run the scan."
+  },
+  "decisions": {
+    "path": "",
+    "decider_match": "",
+    "total_keywords": "acme",
+    "group_keywords": {}
+  },
+  "notify": {
+    "kind": "none",
+    "_other_kinds": "whatsapp-bridge: {server_dir, api_url, recipient} | command: {argv} reading the message on stdin"
+  }
+}
