@@ -37,10 +37,9 @@ than an unfiled one, because it reads as tracked and never surfaces again.
 - **Long descriptions go in a file**, never inline: `--description-file /tmp/spec.md` converts markdown to ADF properly.
 - **Naming a specific service or repo?** Check it against `Clients/Work/work_github_estate_index.md` (CLAUDE.md "Technical ground truth") first -- "Example Program" and "Marketplace" are not repo names, and GitHub's mirror of Bitbucket can be 5 minutes stale.
 
-## 4. Show the owner, then file
+## 4. File it, then tell the owner
 
-Present the full ticket text, the target project or team, the node, and one line on why it exists.
-Wait for explicit approval.
+Standing approval (20 Oct 2026, [`request_triage.md`](../../.agent/protocols/request_triage.md) kind 1): create and edit tickets in Jira, Linear and Legal (MLSP) without waiting, passing `--approved` yourself. Then tell the owner in one line: the key, the link, the node. Stop and ask first only when the ticket commits a date, scope or money for someone else, or conflicts with a logged decision (kind 3).
 
 Dry run first on any edit to an existing ticket:
 

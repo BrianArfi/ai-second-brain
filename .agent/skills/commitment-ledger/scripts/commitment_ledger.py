@@ -143,6 +143,13 @@ YOU_RE = re.compile(
     r'dibimbing|repliz|hyperframe)\b',
     re.IGNORECASE)
 
+def _notes(item):
+    """Return item['notes'] as a list; older records stored a plain string."""
+    cur = item.get('notes')
+    if not isinstance(cur, list):
+        item['notes'] = [cur] if cur else []
+    return item['notes']
+
 def _cell_names_brian(cell):
     c = (cell or '').strip().lower()
     return any(tok in c for tok in BRIAN_NAME_TOKENS) or c in ('owner', 'owner arfi you')
@@ -385,11 +392,11 @@ def merge_items(primary, secondary):
         'id': secondary['id'], 'source_type': stype, 'source_ref': sref,
         'text': secondary.get('text'),
     })
-    primary.setdefault('notes', []).append(
+    _notes(primary).append(
         f"merged {secondary['id']} ({stype}) into this item")
     secondary.update(status='dropped', closed_at=time.time(), closed_by='dedupe',
                      merged_into=primary['id'])
-    secondary.setdefault('notes', []).append(f"duplicate of {primary['id']}")
+    _notes(secondary).append(f"duplicate of {primary['id']}")
     return primary
 
 ADJUDICATE_BATCH = 40   # one 162-pair call came back unparseable on 28 Jul 2026
@@ -1298,7 +1305,7 @@ def cmd_close(args):
         sys.exit(f'item not found: {args.item_id}')
     it.update(status='done', closed_at=time.time(), closed_by='manual')
     if args.note:
-        it.setdefault('notes', []).append(args.note)
+        _notes(it).append(args.note)
     save_state(state)
     print(f'closed: {args.item_id}')
 
@@ -1309,7 +1316,7 @@ def cmd_drop(args):
         sys.exit(f'item not found: {args.item_id}')
     it.update(status='dropped', closed_at=time.time(), closed_by='manual')
     if args.note:
-        it.setdefault('notes', []).append(args.note)
+        _notes(it).append(args.note)
     save_state(state)
     print(f'dropped: {args.item_id}')
 
@@ -1335,7 +1342,7 @@ def cmd_reopen(args):
                 if m.get('id') != args.item_id]
             if not primary['merged_from']:
                 primary.pop('merged_from', None)
-            primary.setdefault('notes', []).append(
+            _notes(primary).append(
                 f'{args.item_id} un-merged (reopened); no longer treated as a duplicate')
             # Record the verdict on BOTH sides so a later dedupe run cannot
             # simply re-merge the pair and overturn this correction.
@@ -1349,7 +1356,7 @@ def cmd_reopen(args):
 
     it.update(status='open', closed_at=None, closed_by=None)
     if args.note:
-        it.setdefault('notes', []).append(args.note)
+        _notes(it).append(args.note)
     save_state(state)
     if primary_id:
         print(f'reopened: {args.item_id} (un-merged from {primary_id})')
