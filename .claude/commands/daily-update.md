@@ -44,7 +44,7 @@ In both modes also follow [`.agent/protocols/phased_update_protocol.md`](../../.
 - Step 1 runs `python3 .agent/scripts/daily_update_runner.py --mode <morning|evening>` from the repo root.
 - No em-dashes in any output.
 - **Linear rules check (morning and evening).** Read [`journal/linear_rules/latest.md`](../../journal/linear_rules/latest.md) (written daily at 13:00 WIB by `linear_rules_check.py`) and list the violation count per rule with the people who must fix them; say so if the file is older than one day.
-- **Refresh the ledger Sheet once a day, when this workspace has `.agent/scripts/team_os_sheet_sync.py`** (standing approval from the owner, 14 Oct 2026, for this refresh only): in Step 4, run `python3 .agent/scripts/team_os_sheet_sync.py --approved`. It mirrors the team-os git ledger into the read-only Work Sheet, and a second run on the same day is a no-op. Report the Sheet link it prints, or the error. Creating the Sheet (`--create`) is not covered by this approval.
+- **Snapshot the Work Ledger Sheet once a day, when this workspace has `.agent/scripts/team_os_sheet_sync.py`**: in Step 4, run `python3 .agent/scripts/team_os_sheet_sync.py` (read only, no Drive write). Since 20 Oct 2026 the Sheet is the ledger itself and people edit it; the script never writes to it. It saves `Clients/Work/Operating/ledger_snapshot.json`. Report the counts it prints, and list any Blockers row with Status Open and a Needed by date in the past.
 
 ## Morning mode only
 

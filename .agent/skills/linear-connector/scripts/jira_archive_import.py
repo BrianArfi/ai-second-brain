@@ -26,6 +26,15 @@ Rules (from Clients/Work/linear_jira_status_mapping.json and the Linear handbook
   nothing links back to Jira attachments.
 - Jira issue links become Linear relations when both ends are imported, else a footer line.
 - Idempotent: the state file maps Jira key -> Linear id; a rerun skips finished items.
+- --fill-synced (21 Oct 2026): Linear's own Jira sync owns the OPEN issues (an issue joins the sync after
+  one update in Jira; see jira_touch_for_sync.py). For each open archive issue the importer finds the
+  synced Linear issue (attachment with sourceType jira and url .../browse/KEY, one paginated query) and
+  FILLS it instead of creating a copy: posts the import footer as ONE top-level comment (never the description, which
+  syncs to Jira; a footer an older run left there is stripped), adds archive comments, uploads files, sets the epic project (the project Linear's sync made for the epic, found by its externalLink key; a new one only
+  when none exists) and the sub-issue parent. An open
+  issue with no synced issue is recorded in state["missing_sync"] and skipped (no duplicate). Closed issues
+  and closed children of open epics stay plain copies. Jira links become real relations when both ends
+  are in the team (synced or copied), skipping ones that already exist; the footer keeps the rest. Use a fresh state file for a fill run.
 - Writes only to the one team given in --team. Every create call carries that team id.
 """
 import argparse
@@ -263,6 +272,46 @@ class Importer:
         m = json.load(open(MAPPING_PATH, encoding="utf-8"))[self.a.project]
         self.status_map = {x["jira_status"].upper(): x for x in m["mappings"]}
         self.team_id = self.team["id"]
+        self.synced = self.load_synced() if self.a.fill_synced else {}
+        self.synced_projects = self.load_synced_projects() if self.a.fill_synced else {}
+
+    def load_synced(self):
+        """Jira key -> Linear issue created by Linear's Jira sync, in the target team (one paginated query)."""
+        out = {}
+        after = None
+        q = ('query($a:String){attachments(first:50,after:$a,filter:{url:{startsWith:"%s/browse/"}}){nodes{id url sourceType '
+             'issue{id identifier url description team{key} parent{id} project{id}}} pageInfo{hasNextPage endCursor}}}' % JIRA_HOST)
+        while True:
+            d = self.L.gql(q, {"a": after})["attachments"]
+            for n in d["nodes"]:
+                i = n.get("issue")
+                if not i or i["team"]["key"] != self.a.team or n.get("sourceType") != "jira":
+                    continue
+                key = n["url"].rsplit("/browse/", 1)[1].split("?")[0].strip("/")
+                out.setdefault(key, {"id": i["id"], "identifier": i["identifier"], "url": i["url"],
+                                     "description": i.get("description") or "",
+                                     "parent_id": (i.get("parent") or {}).get("id"),
+                                     "project_id": (i.get("project") or {}).get("id")})
+            if not d["pageInfo"]["hasNextPage"]:
+                return out
+            after = d["pageInfo"]["endCursor"]
+
+    def load_synced_projects(self):
+        """Jira epic key -> project Linear's Jira sync created (externalLink .../browse/KEY), in the target team."""
+        out = {}
+        after = None
+        q = ('query($a:String){projects(first:50,after:$a,filter:{accessibleTeams:{some:{key:{eq:"%s"}}}}){nodes{id url name '
+             'content externalLinks{nodes{url}}} pageInfo{hasNextPage endCursor}}}' % self.a.team)
+        while True:
+            d = self.L.gql(q, {"a": after})["projects"]
+            for n in d["nodes"]:
+                for e in n["externalLinks"]["nodes"]:
+                    if "/browse/" in e["url"]:
+                        out.setdefault(e["url"].rsplit("/browse/", 1)[1].split("?")[0].strip("/"),
+                                       {"id": n["id"], "url": n["url"], "name": n["name"], "content": n.get("content") or ""})
+            if not d["pageInfo"]["hasNextPage"]:
+                return out
+            after = d["pageInfo"]["endCursor"]
 
     def state_id(self, jira_status):
         m = self.status_map.get(jira_status.upper())
@@ -277,6 +326,7 @@ class Importer:
         op = [r for r in rows if r["fields"]["status"]["statusCategory"]["key"] != "done"]
         epics = {r["key"] for r in rows if r["fields"]["issuetype"]["name"] == "Epic"}
         self.open_all = op
+        self.open_keys = {r["key"] for r in op if r["key"] not in epics}
         self.open_epics = [r for r in op if r["key"] in epics]
         children = {}
         for r in op:
@@ -461,6 +511,8 @@ class Importer:
             return
         self.ensure_projects()
         for r in self.order:
+            if self.a.closed_only and r["key"] in self.open_keys:
+                continue
             try:
                 self.do_issue(r)
             except Exception as e:  # keep going, record
@@ -503,6 +555,12 @@ class Importer:
         print("comments on issues:", com, "; comments on project epics:", ecom)
         print("files:", nf, "on", fi, "issues; issues with links:", li)
         print("assignee matched:", dict(mt), "unmatched:", dict(unm))
+        if self.a.fill_synced:
+            op = [r["key"] for r in o if r["key"] in self.open_keys]
+            hit = [k for k in op if k in self.synced]
+            print("fill-synced: open in this run %d, synced issue found %d, missing_sync %d (%s); closed plain copies %d"
+                  % (len(op), len(hit), len(op) - len(hit), ", ".join(k for k in op if k not in self.synced) or "-",
+                     len(o) - len(op)))
 
     def match_user(self, a):
         em = (a.get("emailAddress") or "").lower()
@@ -521,6 +579,17 @@ class Importer:
             if (e["key"] not in need and not whole) or e["key"] in self.state["projects"]:
                 continue
             f = e["fields"]
+            sp = self.synced_projects.get(e["key"])
+            if sp:
+                # --fill-synced: reuse the project Linear's sync made for this epic. Its content may sync to Jira, so
+                # the footer goes in a project comment, never the content.
+                self.state["projects"][e["key"]] = {"id": sp["id"], "url": sp["url"], "name": sp["name"]}
+                if not self.dry:
+                    self.L.gql('mutation($i:CommentCreateInput!){commentCreate(input:$i){success}}',
+                               {"i": {"projectId": sp["id"], "body": self.footer(e, None, None).split("\n", 1)[1][:60000]}})
+                self.save()
+                print("project", e["key"], "-> synced project", sp["url"])
+                continue
             used = set()
             body = self.md_of(f.get("description"), e, used)
             content = (body + "\n\n" if body else "") + self.footer(e, None, None)
@@ -535,6 +604,8 @@ class Importer:
             print("project", e["key"], p["url"])
 
     def do_issue(self, r):
+        if self.a.fill_synced and r["key"] in self.open_keys:
+            return self.fill_issue(r)
         key = r["key"]
         st = self.state["issues"].get(key)
         f = r["fields"]
@@ -581,6 +652,9 @@ class Importer:
                 labels.append(self.labels[areas[0].lower()])
             if len(areas) > 1 and not closed:
                 self.state.setdefault("needs_split", {})[r["key"]] = areas
+            # a Jira description can leave a code fence open; close it so the footer stays readable text
+            if desc and desc.count("```") % 2:
+                desc += "\n```"
             inp = {"teamId": self.team_id, "title": f["summary"][:250],
                    "description": (desc + "\n\n" if desc else "") + self.footer(r, note, None),
                    "labelIds": sorted(set(labels)), "createdAt": iso(f["created"])}
@@ -620,6 +694,86 @@ class Importer:
             if p and p["key"] in self.issue_keys:
                 self.bump("sub_issues")
             print(key, "->", iss["identifier"])
+        self.finish_issue(r, st, attach_jira=True)
+
+    def fill_issue(self, r):
+        """--fill-synced: enrich the issue Linear's Jira sync already created; never create a new one."""
+        key = r["key"]
+        f = r["fields"]
+        syn = self.synced.get(key)
+        st = self.state["issues"].get(key)
+        if not syn:
+            ms = self.state.setdefault("missing_sync", [])
+            if key not in ms:
+                ms.append(key)
+            self.save()
+            self.bump("missing_sync")
+            print(key, "-> MISSING SYNC (skipped, no duplicate created)")
+            return
+        if st and not st.get("synced"):
+            self.state.setdefault("skipped", {})[key] = "already a plain copy %s; use a fresh state file for --fill-synced" % st.get("identifier")
+            self.save()
+            print(key, "-> skipped: already a plain copy", st.get("identifier"))
+            return
+        if not st:
+            st = {"id": syn["id"], "identifier": syn["identifier"], "url": syn["url"], "synced": True,
+                  "assignee_matched": True, "state": f["status"]["name"]}
+            self.state["issues"][key] = st
+            self.save()
+        upd = {}
+        # The description syncs both ways to Jira, so the import footer goes in ONE top-level comment (comments do
+        # not sync), never the description. A footer left in the description by an older run is stripped.
+        fk = "%s:footer" % key
+        if fk not in self.state["comments"]:
+            imgs = []
+            for fl in self.files_of(r):
+                if fl["filename"].lower().endswith(IMG_EXT):
+                    imgs.append("![%s](%s)" % (fl["filename"], self.upload(fl)))
+            block = self.footer(r, None, None).split("\n", 1)[1] + (("\n\n" + "\n\n".join(imgs)) if imgs else "")
+            d = self.L.gql('mutation($i:CommentCreateInput!){commentCreate(input:$i){success comment{id}}}',
+                           {"i": {"issueId": syn["id"], "body": block[:60000], "doNotSubscribeToIssue": True}})
+            self.state["comments"][fk] = d["commentCreate"]["comment"]["id"]
+            self.save()
+        m = re.search(r"\n*-{3}[ \t]*\n+Imported from Jira %s \(" % re.escape(key), syn["description"])
+        if m:
+            upd["description"] = syn["description"][:m.start()]
+        # sub-issue parent (both ends must exist) and the epic project
+        p = f.get("parent")
+        if p:
+            if p["key"] in self.state["projects"]:
+                prj = self.state["projects"][p["key"]]["id"]
+                if syn["project_id"] != prj:
+                    upd["projectId"] = prj
+            else:
+                if p["key"] in self.state["issues"]:
+                    pid = self.state["issues"][p["key"]]["id"]
+                    if syn["parent_id"] != pid and pid != syn["id"]:
+                        upd["parentId"] = pid
+                pe = self.by.get(p["key"])
+                pp = (pe["fields"].get("parent") if pe else None)
+                if pp and pp["key"] in self.state["projects"]:
+                    prj = self.state["projects"][pp["key"]]["id"]
+                    if syn["project_id"] != prj:
+                        upd["projectId"] = prj
+        if upd:
+            self.L.gql('mutation($id:String!,$i:IssueUpdateInput!){issueUpdate(id:$id,input:$i){success}}',
+                       {"id": syn["id"], "i": upd})
+            self.bump("synced_filled")
+            print(key, "->", syn["identifier"], "filled:", ", ".join(sorted(upd)))
+        else:
+            print(key, "->", syn["identifier"], "nothing to fill")
+        self.finish_issue(r, st, attach_jira=False)
+
+    def finish_issue(self, r, st, attach_jira=True):
+        key = r["key"]
+        # link back to the Jira ticket as an attachment, titled with the old key, so people find it from the issue
+        jk = "%s:jira" % key
+        if attach_jira and jk not in self.state["attachments"]:
+            d = self.L.gql('mutation($i:AttachmentCreateInput!){attachmentCreate(input:$i){success attachment{id}}}',
+                           {"i": {"issueId": st["id"], "title": "Jira %s" % key,
+                                  "url": "%s/browse/%s" % (JIRA_HOST, key), "subtitle": "Original Jira ticket"}})
+            self.state["attachments"][jk] = d["attachmentCreate"]["attachment"]["id"]
+            self.save()
         # comments
         for c in r["comments_all"]:
             cid = "%s:%s" % (key, c["id"])
@@ -649,22 +803,52 @@ class Importer:
             self.save()
             self.bump("attachments")
 
+    def linear_id(self, key):
+        """Linear issue id of a Jira key in the target team: this run's state (copy or filled), else the sync map."""
+        st = self.state["issues"].get(key)
+        if st:
+            return st["id"]
+        return (getattr(self, "synced", None) or {}).get(key, {}).get("id")
+
+    def existing_relations(self, lid, cache={}):
+        """Set of (other issue id, type) already related to this issue, either direction."""
+        if lid not in cache:
+            d = self.L.gql('query($id:String!){issue(id:$id){relations(first:100){nodes{type relatedIssue{id}}} '
+                           'inverseRelations(first:100){nodes{type issue{id}}}}}', {"id": lid})["issue"]
+            s = {(n["relatedIssue"]["id"], n["type"]) for n in d["relations"]["nodes"]}
+            s |= {(n["issue"]["id"], n["type"]) for n in d["inverseRelations"]["nodes"]}
+            cache[lid] = s
+        return cache[lid]
+
     def do_relations(self):
-        done = set(self.state["issues"])
+        fill = self.a.fill_synced
+        seen = set()
         for r in self.order:
             for l in r["fields"].get("issuelinks") or []:
-                if "outwardIssue" not in l:
-                    continue  # each link appears on both ends; use the outward side once
-                a, b = r["key"], l["outwardIssue"]["key"]
-                if a not in done or b not in done:
+                if "outwardIssue" in l:
+                    a, b = r["key"], l["outwardIssue"]["key"]
+                elif fill:
+                    a, b = l["inwardIssue"]["key"], r["key"]  # the partner may be outside this run
+                else:
+                    continue  # default mode: each link appears on both ends; use the outward side once
+                if l["id"] in seen:
                     continue
+                seen.add(l["id"])
+                ia, ib = (self.linear_id(a), self.linear_id(b)) if fill else (
+                    (self.state["issues"].get(a) or {}).get("id"), (self.state["issues"].get(b) or {}).get("id"))
+                if not ia or not ib:
+                    continue  # an end is not in the team: the footer "Links:" line keeps it
                 rk = "%s>%s:%s" % (a, b, l["id"])
                 if rk in self.state["relations"]:
                     continue
                 typ = "blocks" if l["type"]["name"] == "Blocks" else "related"
                 try:
+                    if fill and ((ib, typ) in self.existing_relations(ia)):
+                        self.state["relations"][rk] = "existing"
+                        self.save()
+                        continue
                     d = self.L.gql('mutation($i:IssueRelationCreateInput!){issueRelationCreate(input:$i){success issueRelation{id}}}',
-                                   {"i": {"issueId": self.state["issues"][a]["id"], "relatedIssueId": self.state["issues"][b]["id"], "type": typ}})
+                                   {"i": {"issueId": ia, "relatedIssueId": ib, "type": typ}})
                     self.state["relations"][rk] = d["issueRelationCreate"]["issueRelation"]["id"]
                     self.bump("relations")
                 except Exception as e:
@@ -717,6 +901,11 @@ def main():
     ap.add_argument("--no-open-epics-all-children", dest="open_epics_all_children", action="store_false")
     ap.add_argument("--closed-children-of", default="", help="comma list of epic keys; limits the closed-children pass to them")
     ap.add_argument("--project-prefix", default="[TEST] ")
+    ap.add_argument("--fill-synced", dest="fill_synced", action="store_true",
+                    help="open issues: fill the issue Linear's Jira sync created (footer, comments, files, project, parent) "
+                         "instead of creating a copy; missing ones go to state missing_sync")
+    ap.add_argument("--closed-only", dest="closed_only", action="store_true",
+                    help="skip open issues; create only the closed plain copies (use after a --fill-synced run)")
     ap.add_argument("--approved", action="store_true", help="required for any write")
     ap.add_argument("--offline", action="store_true", help="dry run without calling Linear")
     a = ap.parse_args()

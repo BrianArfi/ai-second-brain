@@ -20,6 +20,8 @@ python .agent/scripts/daily_update_runner.py --mode evening
 
 Run `python3 .agent/scripts/claude_usage_today.py --top 3` and paste its output into the recap under **AI cost today**, unchanged. If one session is above $25, add one line with the cheaper route for that kind of work (split the session, prepare the material outside the model, shorter output, or glm-flash / agy-bridge for light tasks).
 
+Then run `python3 .agent/scripts/subscription_quota.py` and paste its output under **Plan limits**, unchanged. If a weekly window is at 75% or more with over a day left before it resets, add one line: move that day's bulk work to the plan with the most room.
+
 ## Email Check (mandatory)
 
 the owner acts off email too, so sweep it every evening (the runner does NOT pull email).

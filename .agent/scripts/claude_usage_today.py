@@ -113,6 +113,7 @@ def scan(day):
                         "file": fp, "session": os.path.basename(fp)[:8], "cwd": e.get("cwd", ""),
                         "models": collections.Counter(), "cost": 0.0, "reqs": 0,
                         "out": 0, "cache_read": 0, "other_reqs": 0, "last": t,
+                        "first_ctx": None, "big_cost": 0.0,
                     })
                     if p:
                         s["cost"] += cost
@@ -120,6 +121,11 @@ def scan(day):
                         s["reqs"] += 1
                         s["out"] += out
                         s["cache_read"] += cr
+                        ctx = inp + w5 + w1 + cr
+                        if s["first_ctx"] is None and not e.get("isSidechain"):
+                            s["first_ctx"] = ctx
+                        if ctx > 200_000:
+                            s["big_cost"] += cost
                     else:
                         s["other_reqs"] += 1
                     s["last"] = max(s["last"], t)
@@ -157,6 +163,14 @@ def main():
     models = ", ".join(f"{m.replace('claude-', '')} ${c:.0f}" for m, c in by_model.most_common())
     print(f"Claude cost {day.isoformat()} (API-rate equivalent): ${total:.0f} total ({models}); "
           f"{other} requests on non-Claude models (no Claude quota).")
+    # Two health numbers from the 23 Oct 2026 audit. Targets: big-context share under 25%,
+    # median first-request context under 45k.
+    big = sum(s["big_cost"] for s in sessions.values())
+    firsts = sorted(s["first_ctx"] for s in sessions.values() if s["first_ctx"])
+    med = firsts[len(firsts) // 2] // 1000 if firsts else 0
+    share = (100 * big / total) if total else 0
+    print(f"Context health: {share:.0f}% of cost from requests over 200k context (target <25%); "
+          f"median first-request context {med}k tokens (target <45k).")
     for i, s in enumerate(top, 1):
         m = s["models"].most_common(1)[0][0].replace("claude-", "")
         print(f"{i}. ${s['cost']:.0f} {m}, {s['reqs']} requests, {s['session']}: {s['prompt']}")

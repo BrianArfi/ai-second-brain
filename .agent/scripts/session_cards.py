@@ -41,6 +41,12 @@ please pls can could would you i we me us do does did make create write build ru
 tolong coba bisa mau ayo yuk dong ya yang di ke dari untuk dan atau dengan ini itu aku kamu kita
 buat buatkan bikin bikinin tambah tambahin lanjut lanjutin cek check""".split())
 TAIL_STRIP_RE = re.compile(r"^(save this as a rule\?|branchable:)", re.I)
+# A final reply that reports the tracked item closed (or says the task is finished) marks the card done.
+DONE_RE = re.compile(
+    r"\b(?:COM|WAIT)-\d{3,5}\b[^.\n]{0,40}?\b(?:is|are|was|now)\s+(?:closed|done)\b"
+    r"|\bclosed\s+(?:COM|WAIT)-\d{3,5}\b"
+    r"|\bthis (?:task|session|chat) is (?:done|finished|complete)\b"
+    r"|\b(?:tugas(?:mu)?|item(?:mu)?)(?: ini)? sudah (?:ditutup|selesai)\b", re.I)
 
 # ---------- locations ----------
 
@@ -182,6 +188,14 @@ def ends_in_question(reply: str) -> bool:
     last = body.splitlines()[-1].strip().rstrip("*_`\")]> ")
     return last.endswith("?")
 
+def reports_done(reply: str) -> bool:
+    """The reply closes the session's work: a closure line, no question, no open checkbox, no branch offer."""
+    if not reply or ends_in_question(reply) or re.search(r"^\s*[-*]\s*\[ \]", reply, re.M):
+        return False
+    if re.search(r"^\s*branchable:", reply, re.I | re.M):
+        return False
+    return bool(DONE_RE.search(reply))
+
 def last_question(reply: str) -> str:
     body = strip_reply_tail(reply)
     last = body.splitlines()[-1].strip() if body else ""
@@ -265,7 +279,7 @@ def build_card(transcript: Path, workspace=None, existing: dict | None = None, s
     last_reply = s["replies"][-1] if s["replies"] else ""
     waiting = bool(last_reply) and ends_in_question(last_reply)
     last_active = norm_iso(s["end"]) or now_iso()
-    status = "waiting_on_user" if waiting else "active"
+    status = "waiting_on_user" if waiting else "done" if reports_done(last_reply) else "active"
     if ex.get("status") in ("done", "abandoned") and last_active <= (ex.get("last_active_at") or ""):
         status = ex["status"]                                 # no new activity since it was closed
 
@@ -304,7 +318,25 @@ def update_from_transcript(transcript: Path, workspace=None, session_id: str | N
     cards = card_dir(workspace)
     sid = session_id or transcript.stem
     ex = read_card(cards / f"{sid}.json")
-    return write_card(build_card(transcript, workspace, ex, sid), workspace)
+    card = build_card(transcript, workspace, ex, sid)
+    if card["status"] == "done" and (ex or {}).get("status") != "done":
+        report_done_to_app(sid, workspace)
+    return write_card(card, workspace)
+
+def report_done_to_app(session_id: str, workspace=None) -> Path | None:
+    """Tell the ASB app the session is finished, so its rail shows a check, not a hollow circle.
+    The app reads .asb/branches/status/<id>.json for any session, applies it, and moves the file.
+    A later turn sets the app status back to idle by itself. Skipped outside an ASB workspace."""
+    status_dir = workspace_root(workspace) / ".asb" / "branches" / "status"
+    if not status_dir.parent.is_dir():
+        return None
+    status_dir.mkdir(exist_ok=True)
+    path = status_dir / f"{session_id}.json"
+    fd, tmp = tempfile.mkstemp(dir=status_dir, suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump({"status": "done"}, fh)
+    os.replace(tmp, path)
+    return path
 
 def current_transcript(session_id: str | None, hinted: str | None = None) -> tuple[str, Path] | None:
     """Locate this session's transcript: the path the hook was given, else by session id, else newest."""
@@ -539,6 +571,8 @@ def main() -> None:
             sys.exit(f"No card matches '{a.ref}'.")
         c["status"] = a.status
         write_card(c, a.workspace)
+        if a.status == "done":
+            report_done_to_app(c["session_id"], a.workspace)
         print(f"{c['short_id']} -> {a.status}")
 
 if __name__ == "__main__":
