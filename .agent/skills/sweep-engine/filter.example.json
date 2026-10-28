@@ -1,0 +1,8 @@
+{
+ "me": {"ids": [], "emails": [], "names": []},
+ "allow_senders": [],
+ "deny_senders": [],
+ "deny_conversations": [],
+ "deny_patterns": [],
+ "vip": []
+}

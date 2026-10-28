@@ -1,0 +1,7 @@
+{
+ "_comment": "Copy to config.json. Every key is optional: Slack id and host come from auth.test, the Google Drive app is matched by name, the calendar uses the default profile.",
+ "slack_user_id": "",
+ "slack_host": "",
+ "gdrive_slack_app": "",
+ "calendar_profile": "default"
+}
