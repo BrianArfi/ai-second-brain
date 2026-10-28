@@ -73,12 +73,23 @@ def registry_lookup(m_id):
 
 # Calendar Helper (adapted from gcal_sweep_raw.py)
 DEFAULT_TOKEN = os.path.join(os.getcwd(), "token_calendar.json")
+WORK_TOKEN = os.path.join(os.getcwd(), ".agent", "skills", "work-drive-connector", "token_calendar_work.json")
+
+def _load_token_file(path):
+    # An empty or corrupt token file is treated as missing, not as a crash.
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, 'r') as f:
+            return json.load(f)
+    except (ValueError, OSError):
+        print(f"  [cal] unreadable token file, skipping: {path}", file=sys.stderr)
+        return None
 
 def refresh_gcal_token():
-    if not os.path.exists(DEFAULT_TOKEN):
+    data = _load_token_file(DEFAULT_TOKEN) or _load_token_file(WORK_TOKEN)
+    if not data:
         return None
-    with open(DEFAULT_TOKEN, 'r') as f:
-        data = json.load(f)
     refresh_url = data.get('token_uri', 'https://oauth2.googleapis.com/token')
     payload = {
         'client_id': data.get('client_id'),

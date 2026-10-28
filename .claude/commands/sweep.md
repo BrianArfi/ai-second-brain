@@ -1,5 +1,5 @@
 ---
-description: Comms - Sweep every connected source (Slack threads, Gmail, Jira, Docs, calendar, GitHub) for what needs the owner, minus the noise
+description: Comms - Sweep every connected source (Slack threads, Gmail, Jira, Linear, Docs, calendar, GitHub) for what needs the owner, minus the noise
 ---
 
 Sweep every connected source and turn what is waiting on the owner into notes in
@@ -14,9 +14,12 @@ threads the owner posted in, Jira, and Doc comments are adapters now, not extras
 0. **Run the sweep engine. It is the sweep, not a supplement.**
 
    ```
-   python3 .agent/skills/sweep-engine/run_sweep.py --refresh-ledger
+   python3 .agent/skills/sweep-engine/run_sweep.py --refresh-ledger --stream journal/sweep/stream
    python3 .agent/skills/access-watch/scripts/access_watch.py report --days 90
    ```
+
+   Start the first line in the background and watch its output (step 0b). Run
+   the access pass while it runs.
 
    The first line runs seven adapters, each in its own process with its own
    timeout: `slack_ledger` (open items in the mention ledger), `slack_threads`
@@ -25,7 +28,10 @@ threads the owner posted in, Jira, and Doc comments are adapters now, not extras
    notification mail routed into the ticket or doc it is about), `jira` (both
    sites: assigned, reported, watched, plus any key a notification mail named),
    `calendar` (invites without an RSVP, 14 days, recurring series collapsed),
-   `linear` (unread notifications) and `github` (review requests). Then
+   `linear` (every notification in 7 days, read or not, plus every issue the owner
+   is assigned, created or subscribed to that moved in 7 days, with its
+   comments; Linear's own bot comments such as Jira sync errors are dropped) and
+   `github` (review requests). Then
    `sweep_core.py` collapses each thread, ticket or doc into one item, closes
    what the owner already answered, and drops noise by rule.
 
@@ -39,6 +45,23 @@ threads the owner posted in, Jira, and Doc comments are adapters now, not extras
    **Read the Sources block of the report first.** Any adapter marked `FAILED`
    or `skipped` is a hole in this sweep. Name it in the summary. Never report a
    clean sweep with a failed adapter.
+
+0b. **Branch as each source finishes; do not wait for the whole sweep** (the owner,
+   28 Oct 2026). `--stream` prints `STREAM <adapter> <n> <survivors path>` the
+   moment one adapter is done (Linear, GitHub and calendar land in about a
+   minute; Slack threads can take seven). For every line with `n` above 0:
+   - Label it: a `haiku` subagent with `label_prompt.md`, input that
+     `survivors.json`, output `labels.json` in the same folder. Then
+     `sweep_core.py label --state journal/sweep/stream/<adapter>/state.json --labels journal/sweep/stream/<adapter>/labels.json --filter .agent/skills/sweep-engine/filter.json --out journal/sweep/stream/<adapter>`.
+   - Read that folder's `report.md` "Needs you", write the inbox notes (step 3)
+     and the branch requests (step 7) for those items right away, and append each
+     branched key to `journal/sweep/stream/branched.txt`.
+   The stream runs on a copy of the state; the real state changes only in the
+   final run. After `STREAM done`, merge every `journal/sweep/stream/*/labels.json`
+   into `journal/sweep/latest/labels.json` so step 1 labels only what is left,
+   and skip any key in `branched.txt` in steps 3 and 7. The final report still
+   covers the cross-source work (Gmail mail about a Jira ticket collapses into
+   that ticket only in the final run).
 
    **Do not substitute `slack_client.py --action search` for this.** On 5 Aug 2026
    a sweep did exactly that and returned 7 items while the ledger had 76. A
@@ -95,6 +118,8 @@ threads the owner posted in, Jira, and Doc comments are adapters now, not extras
    notes are written, follow the **Branching Into Sub-Sessions** protocol in
    `CLAUDE.md` for the items that genuinely need the owner's own reply or
    decision, with `conversationKey` set to the item's `key` from the report.
+   Most of this already happened per source in step 0b; here, branch only what
+   the final report adds that is not in `journal/sweep/stream/branched.txt`.
    Items that only needed capturing stay as notes and do not branch, and
    neither does anything you can simply finish yourself.
 

@@ -19,6 +19,20 @@ for s in "$HOME"/wa-for-pm/whatsapp-bridge/store/status@broadcast /mnt/c/Users/y
   [ -d "$s" ] && find "$s" -type f -mtime +"$STATUS_DAYS" -delete 2>/dev/null
 done
 
+# 2b. Rust build output (target dirs) in repo copies with no file touched for TARGET_DAYS days.
+# Rebuildable; the first build after a delete is slower. Skipped while cargo or rustc runs.
+# Added 21 Oct 2026 after ~150 GB of stale target dirs filled the WSL disk and C: dropped to 11 GB.
+TARGET_DAYS=${TARGET_DAYS:-7}
+if ! pgrep -f 'cargo|rustc' >/dev/null; then
+  for t in "$HOME"/repos/*/src-tauri/target "$HOME"/repos/*-target "$HOME"/repos/*/*-target "$HOME"/repos/*/relay/target; do
+    [ -d "$t" ] || continue
+    if [ -z "$(find "$t" -type f -mtime -"$TARGET_DAYS" -print -quit 2>/dev/null)" ]; then
+      sz=$(du -sm "$t" 2>/dev/null | cut -f1)
+      rm -rf "$t" && echo "removed stale target: $t (${sz} MB)"
+    fi
+  done
+fi
+
 # 3. Report
 after=$(df -BG --output=avail / | tail -1 | tr -dc 0-9)
 cfree=$(df -BG --output=avail /mnt/c 2>/dev/null | tail -1 | tr -dc 0-9)
@@ -31,7 +45,7 @@ for d in c d e f g h; do
   echo "drive ${d^^}: ${free} GB free (warn under ${lim})"
   [ "$free" -lt "$lim" ] && echo "WARNING: ${d^^}: under ${lim} GB free"
 done
-echo "report-only (not deleted): rust target dirs, old worktrees, video output"
+echo "report-only (not deleted): old worktrees, video output"
 du -sh "$HOME"/repos/*/src-tauri/target 2>/dev/null | sort -rh | head -5
 } >> "$LOG" 2>&1
 tail -12 "$LOG"

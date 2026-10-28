@@ -62,6 +62,10 @@ python3 $L members
 python3 $L restrict-admins --keep you@yourcompany.com,teammate@yourcompany.com
 python3 $L restrict-admins --keep ... --approved   # needs an API key from an admin account
 
+# points and load per squad (Basic plan: one team per World, so cycles are per World;
+# this splits a World cycle by the Squad label). --cycle active|next|<n>, --team W1
+python3 .agent/skills/linear-connector/scripts/squad_load.py --out _output/linear/squad_load_<date>.md
+
 # work-tree feed
 python3 .agent/skills/linear-connector/scripts/dump_all_issues.py \
     --out _temp/linear_all_issues.json

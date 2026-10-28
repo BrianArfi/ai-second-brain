@@ -110,7 +110,12 @@ def fetch_fathom(token, known_ids, backfill=False, max_pages=200):
 def refresh_cal_token(token_path):
     if not token_path.exists():
         return None
-    data = json.loads(token_path.read_text())
+    try:
+        data = json.loads(token_path.read_text())
+    except ValueError:
+        # Empty or corrupt token file: skip this calendar instead of crashing the sync.
+        print(f"  [cal] unreadable token file, skipping: {token_path}", file=sys.stderr)
+        return None
     payload = {
         "client_id": data.get("client_id"),
         "client_secret": data.get("client_secret"),
