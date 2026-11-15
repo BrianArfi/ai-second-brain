@@ -107,6 +107,37 @@ def _winpath(p):
     return subprocess.run(["wslpath", "-w", p], capture_output=True,
                           text=True, check=True).stdout.strip()
 
+def _detect_language(bin_path, model, wav16, td, ffmpeg, cfg, win_interop):
+    """Vote on the language over three 30 s windows, limited to the languages
+    this machine's meetings are actually held in.
+
+    whisper's own auto-detect reads only the first 30 s, and a short greeting
+    in an accent is enough to fool it: the 2026-10-27 ExampleVendor x Work call is in
+    English, opened with Arabic-accented small talk, was detected as `ar`, and
+    came back as invented Arabic. Anything outside `transcription.languages`
+    is ignored; with no allowed vote at all it falls back to the first entry
+    (`en`), which is what whisper-cli did before -l was passed at all."""
+    allowed = (cfg.get("transcription") or {}).get("languages") or ["en", "id"]
+    dur = audio_duration(wav16, ffmpeg) or 0
+    votes = []
+    for frac in (0.1, 0.4, 0.7):
+        clip = os.path.join(td, f"probe{int(frac * 10)}.wav")
+        start = max(0.0, min(dur * frac, dur - 30)) if dur > 30 else 0.0
+        subprocess.run([ffmpeg, "-y", "-v", "quiet", "-ss", f"{start:.1f}",
+                        "-t", "30", "-i", wav16, clip], check=True, timeout=120)
+        args = [bin_path, "-m", _winpath(model) if win_interop else model,
+                "-f", _winpath(clip) if win_interop else clip, "-l", "auto", "-dl"]
+        d = subprocess.run(args, capture_output=True, text=True, timeout=600)
+        m = re.search(r"auto-detected language: (\w+)", d.stderr)
+        if m and m.group(1) in allowed:
+            votes.append(m.group(1))
+        if dur <= 30:
+            break
+    lang = max(votes, key=votes.count) if votes else allowed[0]
+    print(f"[transcribe] language probe: {votes or 'no allowed vote'} -> {lang}",
+          file=sys.stderr, flush=True)
+    return lang
+
 def run_whispercpp(audio, cfg, lang):
     machine = cfg["machine"]
     bin_path = machine.get("whispercpp_bin") or ""
@@ -120,23 +151,52 @@ def run_whispercpp(audio, cfg, lang):
     tmp_parent = os.path.dirname(bin_path) if win_interop else None
 
     ffmpeg = machine.get("ffmpeg", "ffmpeg")
+    # Short recordings get the full large-v3 model. Compared 2026-10-31 on two
+    # Suami Qawwam takes: it hears words turbo gets wrong ("menuntut", turbo
+    # "menonton") but runs ~2.5x slower, which is minutes on a 4-minute tip and
+    # an extra half hour on a 1-hour meeting. the owner's call: full under 15 min.
+    short_model = machine.get("whispercpp_model_short") or ""
+    short_max = float(machine.get("whispercpp_short_max_minutes") or 0) * 60
+    if short_model and os.path.exists(short_model) and short_max:
+        if 0 < audio_duration(audio, ffmpeg) < short_max:
+            model = short_model
     with tempfile.TemporaryDirectory(dir=tmp_parent) as td:
         wav16 = os.path.join(td, "audio16k.wav")
         subprocess.run([ffmpeg, "-y", "-v", "quiet", "-i", audio,
                         "-ac", "1", "-ar", "16000", wav16], check=True, timeout=600)
         prefix = os.path.join(td, "out")
         if win_interop:
-            cmd = [bin_path, "-m", _winpath(model), "-f", _winpath(wav16),
-                   "-oj", "-of", _winpath(prefix)]
+            base = [bin_path, "-m", _winpath(model), "-f", _winpath(wav16)]
         else:
-            cmd = [bin_path, "-m", model, "-f", wav16, "-oj", "-of", prefix]
-        # -mc 0 drops the cross-segment text prompt. Carrying it is what lets
-        # whisper lock into a repetition loop on quiet or crosstalk-heavy audio
-        # (the 2026-08-19 ExampleVendor standup produced 45 identical segments across
-        # a full minute). Costs a little context, buys back the lost minute.
-        cmd += ["-mc", "0"]
-        if lang != "auto":
-            cmd += ["-l", lang]
+            base = [bin_path, "-m", model, "-f", wav16]
+        # Always pass -l, "auto" included. whisper-cli's default is `en`, not
+        # auto-detect, so leaving the flag off forced English on every
+        # Indonesian recording: the 2026-10-30 Suami Qawwam take came back half
+        # translated into English from 01:52 on. Detect first so the language
+        # can also pick the style prompt below.
+        lang = lang or "auto"
+        if lang == "auto":
+            lang = _detect_language(bin_path, model, wav16, td, ffmpeg, cfg,
+                                    win_interop)
+        cmd = base + ["-oj", "-of", _winpath(prefix) if win_interop else prefix,
+                      "-l", lang]
+        # A per-language style prompt (config transcription.prompts). Without
+        # one, large-v3 writes spoken Indonesian as formal text ("tidak",
+        # "saja") and drops "tuh"/"gitu"; a casual sample sentence keeps the
+        # speaker's register and spells recurring names right. Tested
+        # 2026-10-31 on two Suami Qawwam takes: "tidak" 9 -> 1.
+        style = (cfg.get("transcription") or {}).get("prompts", {}).get(lang)
+        if style:
+            # The prompt only works with some text context: at -mc 0 whisper
+            # ignores it entirely (identical output, word for word). 64 tokens
+            # keeps it, and the repeat filter below still catches a loop.
+            cmd += ["--prompt", style, "--carry-initial-prompt", "-mc", "64"]
+        else:
+            # -mc 0 drops the cross-segment text prompt. Carrying it is what lets
+            # whisper lock into a repetition loop on quiet or crosstalk-heavy audio
+            # (the 2026-08-19 ExampleVendor standup produced 45 identical segments across
+            # a full minute). Costs a little context, buys back the lost minute.
+            cmd += ["-mc", "0"]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=3 * 3600)
         if r.returncode != 0:
             raise EngineSkip(f"whisper.cpp failed: {r.stderr[-300:]}")
@@ -167,7 +227,12 @@ def run_whispercpp(audio, cfg, lang):
         lines.append(f"**[{fmt_ts(start_s)}]** {text}")
     if not lines:
         raise EngineSkip("whisper.cpp produced an empty transcript")
-    return lines, f"whisper.cpp `{os.path.basename(model)}` (GPU)"
+    note = f"whisper.cpp `{os.path.basename(model)}` (GPU)"
+    if lang != "auto":
+        note += f", language: {lang}"
+    if style:
+        note += ", style prompt"
+    return lines, note
 
 # ---------- engine: cli (Gemini API, audio-in) ----------
 
@@ -628,6 +693,56 @@ def run_provider(provider, audio, cfg, lang, verified=False):
         return run_openai_audio(audio, cfg, lang, provider)
     raise EngineSkip(f"unknown provider kind '{kind}'")
 
+# ---------- language drift check ----------
+
+_STOP = {
+    "id": {"yang", "itu", "dan", "ini", "gak", "nggak", "tidak", "kita", "aku",
+           "saya", "kalau", "dari", "dengan", "untuk", "ada", "jadi", "juga",
+           "sama", "udah", "sudah", "nah", "ya", "kan", "aja", "karena", "tapi",
+           "akan", "bisa", "mau", "dia", "mereka", "kamu", "lagi", "di", "ke"},
+    "en": {"the", "and", "is", "are", "that", "this", "you", "they", "we",
+           "don't", "it's", "of", "to", "with", "have", "what", "so", "but",
+           "because", "not", "was", "were", "be", "if", "there", "who", "do"},
+}
+_LINE_TEXT = re.compile(r"^\*\*\[[^\]]+\]\*\*\s*(?:\*\*[^*]+\*\*:?\s*)?")
+
+def _seg_lang(text):
+    words = re.findall(r"[a-z']+", text.lower())
+    if len(words) < 3:
+        return None
+    hits = {k: sum(w in v for w in words) for k, v in _STOP.items()}
+    if hits["id"] == hits["en"]:
+        return None
+    return max(hits, key=hits.get)
+
+def language_drift(lines, min_run=3):
+    """Find stretches where the transcript secondarys language mid-recording.
+
+    Exists because a wrong-language decode is silent: whisper does not fail, it
+    translates. The 2026-10-30 Suami Qawwam take went English from 01:52 and
+    nothing flagged it. Real code-switching secondarys for a sentence; a decode that
+    went wrong stays secondaryped, so only a run of `min_run` segments counts.
+    Returns (dominant_lang, [(start_ts, n_segments), ...])."""
+    tagged = []
+    for ln in lines:
+        ts = re.match(r"^\*\*\[([^\]]+)\]\*\*", ln)
+        tagged.append((ts.group(1) if ts else "?", _seg_lang(_LINE_TEXT.sub("", ln))))
+    known = [l for _, l in tagged if l]
+    if len(known) < 6:
+        return None, []
+    dominant = max(set(known), key=known.count)
+    if known.count(dominant) / len(known) < 0.6:
+        return dominant, []  # a genuinely bilingual meeting, nothing to flag
+    runs, start, n = [], None, 0
+    for ts, l in tagged + [("?", dominant)]:
+        if l and l != dominant:
+            start, n = (start or ts), n + 1
+        elif l == dominant:
+            if n >= min_run:
+                runs.append((start, n))
+            start, n = None, 0
+    return dominant, runs
+
 def transcribe(audio, out_md, engine=None, lang=None, cfg=None):
     """Returns (out_md, engine_note). Raises RuntimeError if all providers fail."""
     cfg = cfg or load_config()
@@ -642,10 +757,19 @@ def transcribe(audio, out_md, engine=None, lang=None, cfg=None):
             print(f"[transcribe] trying provider: {eng}", flush=True)
             lines, note = run_provider(provider, audio, cfg, lang)
             dur = audio_duration(audio, cfg["machine"].get("ffmpeg", "ffmpeg"))
+            dominant, drift = language_drift(lines)
+            warn = ""
+            if drift:
+                where = ", ".join(f"{ts} ({n} segments)" for ts, n in drift)
+                warn = (f"- WARNING language drift: mostly '{dominant}', but secondarys "
+                        f"at {where}. Check those parts against the audio.\n")
+                print(f"[transcribe] WARNING language drift via {eng}: {where}",
+                      file=sys.stderr, flush=True)
             header = (f"# Transcript: {os.path.basename(audio)}\n\n"
                       f"- Engine: {note}\n"
                       f"- Audio duration: {fmt_ts(dur)}\n"
-                      f"- Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n---\n\n")
+                      f"- Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+                      f"{warn}\n---\n\n")
             os.makedirs(os.path.dirname(os.path.abspath(out_md)) or ".", exist_ok=True)
             with open(out_md, "w", encoding="utf-8") as f:
                 f.write(header + "\n".join(lines) + "\n")

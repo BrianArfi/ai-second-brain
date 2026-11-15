@@ -65,6 +65,9 @@ python3 $L restrict-admins --keep ... --approved   # needs an API key from an ad
 # points and load per squad (Basic plan: one team per World, so cycles are per World;
 # this splits a World cycle by the Squad label). --cycle active|next|<n>, --team W1
 python3 .agent/skills/linear-connector/scripts/squad_load.py --out _output/linear/squad_load_<date>.md
+# Squad auto-label (rule 1): dry run prints the plan; --apply --approved adds Squad labels from
+# parent squad, project Product label, or Jira source board. Never removes a label.
+python3 .agent/skills/linear-connector/scripts/linear_squad_autolabel.py [--team W1] [--out PATH] [--apply --approved]
 
 # work-tree feed
 python3 .agent/skills/linear-connector/scripts/dump_all_issues.py \

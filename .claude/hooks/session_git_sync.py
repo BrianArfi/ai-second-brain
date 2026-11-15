@@ -48,6 +48,37 @@ def emit(ctx, sysmsg=None):
     print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
     sys.exit(0)
 
+def clear_untracked_collisions(repo):
+    """Move aside untracked files that origin/main also tracks.
+
+    The stash below parks tracked edits only, so such a file stops the pull with
+    "could not detach HEAD" (5 Nov 2026, same fix as ledger_sync.py). An
+    identical copy is deleted; a different one moves to _temp/sync_collisions/.
+    """
+    import time
+    rc, out, _ = run_git(["ls-files", "--others", "--exclude-standard", "-z"], repo)
+    untracked = [p for p in (out or "").split("\0") if p] if rc == 0 else []
+    if not untracked:
+        return []
+    rc, out, _ = run_git(["ls-tree", "-r", "--name-only", "-z", "origin/main", "--"] + untracked[:500], repo)
+    if rc != 0:
+        return []
+    cleared, stamp = [], time.strftime("%Y%m%d-%H%M%S")
+    for path in (p for p in out.split("\0") if p):
+        rc1, blob, _ = run_git(["hash-object", "--", path], repo, timeout=10)
+        rc2, upstream, _ = run_git(["rev-parse", f"origin/main:{path}"], repo, timeout=10)
+        try:
+            if rc1 == 0 and rc2 == 0 and blob.strip() == upstream.strip():
+                (repo / path).unlink()
+            else:
+                dest = repo / "_temp" / "sync_collisions" / stamp / path
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                (repo / path).rename(dest)
+            cleared.append(path)
+        except OSError:
+            pass
+    return cleared
+
 def main():
     repo = repo_dir()
 
@@ -131,6 +162,8 @@ def main():
                 f"Git sync: {ahead} unpushed commit(s) on main",
             )
         emit("✓ Up to date with origin/main.")
+
+    clear_untracked_collisions(repo)
 
     if dirty:
         # Uncommitted changes used to end the sync here, so a session opened on a

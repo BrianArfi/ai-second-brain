@@ -1,0 +1,21 @@
+{
+  "team_key": "REQ",
+  "team_id": "dd3ec7ce-9ca0-456f-b333-23424ff48b27",
+  "labels": {
+    "growth": "c23c2ecb-a2b8-4aa0-aec7-4ee2b5ffde5e",
+    "project": "bb36478d-bf88-46ac-b388-17fd36a8f9d1"
+  },
+  "views": {
+    "growth": "https://linear.app/yourcompany/view/a9b4e967164d",
+    "project": "https://linear.app/yourcompany/view/c40d6435d231"
+  },
+  "channels": {
+    "growth": "<SLACK_ID>",
+    "project": "<SLACK_ID>"
+  },
+  "urgent_subscribers": [],
+  "intake_sheet": {
+    "spreadsheet_id": "<YOUR_DRIVE_ID>",
+    "tab": "Intake_Raw"
+  }
+}

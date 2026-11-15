@@ -15,7 +15,7 @@ The caller provides: the draft text, the draft type (PRD / MOM / Slack / weekly 
 
 1. **Language**: Work/Secondary documents and Slack messages → English. You/ClientB content (LinkedIn posts) → Indonesian.
 2. **Completeness** — required sections present:
-   - PRD: problem, goals, scope, requirements, success metrics (template: `templates/prd_work.md`)
+   - PRD: problem, goals, scope, requirements, success metrics (template: `.agent/skills/prd-pipeline/templates/prd_template.md`; rules: `.agent/skills/prd-pipeline/prd_rules.md`: page one names no solution, a named segment, 3+ non-goals, one owner)
    - MOM: Attendees, Agenda, Discussion, Decisions, Action Items (template: `templates/mom_work.md`)
    - Weekly report: 5 sections + status icons per `.agent/skills/work-weekly-report/SKILL.md`
    - Slack: target channel named + reason for sending stated

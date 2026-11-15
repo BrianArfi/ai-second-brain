@@ -108,6 +108,21 @@ timeout 180s python3 ".agent/skills/gdocs-create/gdocs_create.py" upload \
 | H4 | Calibri | 12pt |
 | Code/Pre | monospace | 11pt |
 
+### Legends and definitions: one bullet per value (rule since 30 Oct 2026)
+
+A "How to read", legend, status key or size scale lists each value as its own nested bullet under a bold field name, never several values run together in one line. the owner asked for this on the per-product roadmap Doc.
+
+```markdown
+- **Status**
+    - **Done:** live in production
+    - **In progress:** in build now
+- **Size**
+    - **XXL:** a quarter
+    - **XL:** 6 to 8 weeks
+```
+
+Indent the child bullets with 4 spaces; `update --convert` renders them as nested Doc bullets (checked on the roadmap Doc `<YOUR_DRIVE_ID>`).
+
 ---
 
 ## Account / Token Status
