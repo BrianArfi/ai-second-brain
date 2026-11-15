@@ -1,6 +1,8 @@
 # PRD Template
 
 > This template is used by the Strategist Agent in STATE 2. Every section is MANDATORY. No section may contain "TBD", "To be defined", or be left empty.
+>
+> Follow `../prd_rules.md` (Ed Biden's 23 rules). Exceptions to "every section is mandatory": a tier S PRD keeps only section 0, section 2, acceptance criteria and the owner; section 12 (Impact) stays empty until 30 days after launch; delete any section that does not apply to the tier, never pad it. A tier L PRD opens with a one-paragraph press release and 3 customer FAQs above section 0.
 
 ---
 
@@ -9,10 +11,33 @@
 | **Project** | [Project Name] |
 | **Project Code** | [Code] |
 | **Status** | Draft |
-| **Owner** | [Names] |
+| **Owner** | [ONE name. Everyone else goes in the RACI table] |
+| **Tier** | S / M / L (see `prd_rules.md`) |
+| **Stage** | Problem / Solution / Launch / Impact |
+| **Links** | [Figma, Linear/Jira tickets, MOMs, Fathom recordings, DEC ids, artifacts] |
 | **Date** | [Date] |
 | **Priority** | P0 / P1 / P2 |
 | **Dependencies** | [List all external teams/systems] |
+
+---
+
+## 0. Problem (page one, no solution allowed)
+
+> Rules 1, 2, 4, 11 in `prd_rules.md`. Name no feature, screen or service here. Show the owner this page alone first. Grow the PRD only after he agrees it.
+
+| Field | Details |
+| :--- | :--- |
+| **Problem** | [What is broken or missing, in the user's terms] |
+| **Segment** | [Who exactly: tenant, role, market, volume. Never "users"] |
+| **Evidence** | [Ticket, Slack thread, MOM, Fathom link or data point. Assumed? Say so] |
+| **Workaround today** | [What they do instead now] |
+| **Why now** | [Cost of waiting, with a number] |
+
+### Non-goals
+
+| Non-goal | Why it is out |
+| :--- | :--- |
+| [At least 3 rows] | [Reason] |
 
 ---
 
@@ -36,6 +61,14 @@
 | [Metric 1] | [Current value] | [Target value] | [Instrumentation method] |
 
 > Every metric must have a defined instrumentation method. If we can't measure it, we can't ship it.
+
+---
+
+### RACI
+
+| Person | Role in this PRD (R / A / C / I) |
+| :--- | :--- |
+| [Name] | [R/A/C/I] |
 
 ---
 
@@ -137,8 +170,39 @@ graph TD
 
 ---
 
-## 10. Open Questions & Risks
+## 10. Options Considered and Decision Log
 
-| # | Question / Risk | Owner | Due Date | Status |
+| Option | Why rejected | Decided by | Date |
+| :--- | :--- | :--- | :--- |
+| [Option] | [Reason] | [Name] | [Date] |
+
+| Question | Call | Who | When | DEC id |
 | :--- | :--- | :--- | :--- | :--- |
-| 1 | [Specific question] | [Person] | [Date] | Open / Resolved |
+| [Question] | [Decision] | [Name] | [Date] | [DEC-xxxx] |
+
+---
+
+## 11. Launch Checklist
+
+| Area | What | Owner | Date |
+| :--- | :--- | :--- | :--- |
+| Support | [Brief, macros, escalation path] | [Name] | [Date] |
+| Legal | [Review needed?] | [Name] | [Date] |
+| Marketing | [Client or tenant note] | [Name] | [Date] |
+| FAQ | [Top 5 questions] | [Name] | [Date] |
+
+---
+
+## 12. Impact (fill 30 days after launch)
+
+| Metric | Before | After | Verdict | Next step |
+| :--- | :--- | :--- | :--- | :--- |
+| [From section 2] | [Value] | [Value] | Moved / Flat / Worse | [Action] |
+
+---
+
+## 13. Open Questions & Risks
+
+| # | Question / Risk | Likelihood / Impact | Mitigation (not "monitor") | Owner | Due Date | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 | [Specific question] | [H/M/L] | [Action] | [Person] | [Date] | Open / Resolved |

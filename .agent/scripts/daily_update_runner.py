@@ -233,7 +233,7 @@ FILE_SCAN_TIMEOUT = 15
 CALENDAR_TIMEOUT = 20
 SLACK_LIST_TIMEOUT = 120  # raised from 15: listing now paginates im/mpim and sweeps users.list for DM names
 SLACK_HISTORY_TIMEOUT = 20   # per channel; threads can be slow
-SLACK_HISTORY_TIMEOUT_MORNING = 12  # faster for morning mode
+SLACK_HISTORY_TIMEOUT_MORNING = 20  # was 12; ksa-2026-stc-channel-exampleprogram and linear-help timed out on 11 Nov 2026
 BACKLOG_TIMEOUT = 10
 
 # Overall safety net: kill entire script after this many seconds
@@ -314,9 +314,15 @@ def git_sync(sections):
         print(f"      Pulling remote changes ({branch})...", end=" ", flush=True)
         env = os.environ.copy()
         env["GIT_EDITOR"] = "true"
-        pull_res = subprocess.run(["git", "pull", "--rebase", "origin", branch],
-                                  cwd=BASE_DIR, env=env, capture_output=True, text=True)
-        
+        try:
+            pull_res = subprocess.run(["git", "pull", "--rebase", "origin", branch],
+                                      cwd=BASE_DIR, env=env, capture_output=True, text=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            print("❌ TIMEOUT")
+            subprocess.run(["git", "rebase", "--abort"], cwd=BASE_DIR, capture_output=True)
+            sections.append("## GitHub Sync Status\n> [!WARNING]\n> GitHub Sync failed: `git pull --rebase` did not return within 60s. Rebase aborted.\n")
+            return
+
         if pull_res.returncode != 0:
             print("❌ CONFLICT")
             subprocess.run(["git", "rebase", "--abort"], cwd=BASE_DIR, capture_output=True)
@@ -326,8 +332,13 @@ def git_sync(sections):
 
         # 4. Push
         print(f"      Pushing to origin ({branch})...", end=" ", flush=True)
-        push_res = subprocess.run(["git", "push", "origin", branch],
-                                  cwd=BASE_DIR, capture_output=True, text=True)
+        try:
+            push_res = subprocess.run(["git", "push", "origin", branch],
+                                      cwd=BASE_DIR, capture_output=True, text=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            print("❌ TIMEOUT")
+            sections.append("## GitHub Sync Status\n> [!WARNING]\n> GitHub Sync failed: `git push` did not return within 60s.\n")
+            return
         if push_res.returncode == 0:
             print("✓")
             sections.append(f"## GitHub Sync Status\n✓ Successfully pushed latest local changes to origin/{branch}.\n")
@@ -661,7 +672,9 @@ def _main_logic(mode, dry_run=False):
         # 2026-offers-redemption-journey-saib, all carrying open the owner items
         # that day. the owner is only in ~92 conversations, so sweeping all of them
         # costs ~45s and removes a whole class of silent blind spot.
-        filtered_work = work_channels
+        # Bot-only alert feeds the owner does not read (11 Nov 2026): never swept.
+        SKIP_CHANNELS = {'system-health-grafana-alerts'}
+        filtered_work = [c for c in work_channels if c[0].lstrip('#') not in SKIP_CHANNELS]
 
         # Morning mode: all channels but fewer messages (5 per channel)
         # Evening mode: filtered channels with more messages (10 per channel)

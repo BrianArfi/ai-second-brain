@@ -746,7 +746,7 @@ def find_dm(token, user_ids):
     )
     return False
 
-def post_message(token, channel_id, text, thread_ts=None, unfurl=False, allow_split=False):
+def post_message(token, channel_id, text, thread_ts=None, unfurl=False, allow_split=False, broadcast=False):
     """
     Posts a message to a channel (or as a thread reply when thread_ts is set),
     automatically resolving @usernames to <@ID>. Prints the permalink on success.
@@ -788,6 +788,8 @@ def post_message(token, channel_id, text, thread_ts=None, unfurl=False, allow_sp
     params = {"channel": channel_id, "text": text}
     if thread_ts:
         params["thread_ts"] = thread_ts
+        if broadcast:
+            params["reply_broadcast"] = "true"
     if not unfurl:
         params["unfurl_links"] = "false"
         params["unfurl_media"] = "false"
@@ -994,6 +996,7 @@ def main():
     parser.add_argument("--bot", action="store_true", help="Force the bot token (xoxb) for post instead of the user token.")
     parser.add_argument("--thread-ts", dest="thread_ts", help="Parent message ts to reply in-thread (post action).")
     parser.add_argument("--ts", dest="message_ts", help="Timestamp of the message to edit (update action).")
+    parser.add_argument("--broadcast", action="store_true", help="With --thread-ts: also send the reply to the channel (Slack's 'Also send to #channel').")
     parser.add_argument("--text-file", dest="text_file", help="Read post text from a file instead of --text (avoids shell escaping).")
     parser.add_argument("--unfurl", action="store_true", help="Enable link/media unfurling on post (default: off).")
     parser.add_argument("--allow-split", dest="allow_split", action="store_true", help="Send a message longer than Slack's 4000-character limit and accept Slack breaking it into several messages at a point it picks. Off by default: the break usually lands mid-sentence.")
@@ -1127,7 +1130,7 @@ def main():
             print("Error: --channel and (--text or --text-file) are required for post action.", file=sys.stderr)
             sys.exit(1)
         require_send_approval("post a Slack message", args.approved)
-        post_message(token, args.channel, text, thread_ts=args.thread_ts, unfurl=args.unfurl, allow_split=args.allow_split)
+        post_message(token, args.channel, text, thread_ts=args.thread_ts, unfurl=args.unfurl, allow_split=args.allow_split, broadcast=args.broadcast)
     elif args.action == "update":
         text = args.text
         if args.text_file:

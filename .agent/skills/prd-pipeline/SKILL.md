@@ -83,6 +83,7 @@ Harvest      Draft V1     Crucible    User OK     Tickets
 5. **Mermaid diagrams required**: At least 1 architecture diagram and 1 user flow diagram.
 6. **Quantify everything**: No vague statements like "improve performance." Use numbers, percentages, time bounds.
 7. **No emdashes (`—`)**: Use regular hyphens (`-`) exclusively for all formatting and punctuation.
+8. **PRD rules**: Follow `prd_rules.md` (Ed Biden's 23 rules). Pick the tier (S/M/L) first. Tier S skips the Crucible score and the 8-story minimum. Page one is the Problem page and names no solution; it is shown to the owner alone and agreed before the rest is drafted. Write the success metric before the features.
 
 ### Output
 - A complete PRD V1 written to the appropriate `Clients/[Client]/[Project]/` directory.
@@ -134,6 +135,14 @@ Each dimension is scored 1-10. Detailed scoring criteria are in `templates/quali
 8. What happens at scale? (10x current volume)
 9. What are the dependencies? If dependency X is down, what happens?
 10. Is there a clear phase boundary? What ships in V1 vs V2?
+11. Does page one name a solution? (Fail if a feature, screen or service appears in section 0.)
+12. Is the segment specific (tenant, role, market, volume), or just "users"?
+13. Are there at least 3 non-goals, each with a reason?
+14. Are rejected options written down with who decided and when?
+15. Is there exactly one owner, with a RACI for everyone else?
+16. Does every risk have a mitigation that is an action, not "monitor"?
+17. Tier L only: is there a press release and a launch checklist covering support, legal, marketing and FAQ?
+18. Is any section padding? Name the sections a reader could delete without losing a decision.
 
 ### Output
 - Scored rubric table with justification per dimension

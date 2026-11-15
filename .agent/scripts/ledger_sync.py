@@ -61,6 +61,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 STATE_DIR = os.path.join(BASE_DIR, 'journal', 'state')
@@ -646,6 +647,93 @@ def resolve_regenerated_conflicts():
         git(['add', '--', path], timeout=GIT_LOCAL_TIMEOUT)
     return True
 
+COLLISION_DIR = '_temp/sync_collisions'
+
+def clear_untracked_collisions():
+    """Move aside untracked files that origin/main also tracks.
+
+    `--autostash` parks tracked edits only. An untracked file at a path origin
+    now tracks makes the rebase stop at its first checkout with "could not detach
+    HEAD", and every sync after it fails the same way. On 5 Nov 2026 one draft
+    written by two machines (identical bytes) held the WSL host at ahead 22,
+    behind 45 for hours. An identical copy is deleted; a different one moves to
+    COLLISION_DIR so nothing is lost. Returns the paths it moved or removed.
+    """
+    rc, out, _ = git(['ls-files', '--others', '--exclude-standard', '-z'],
+                     timeout=GIT_LOCAL_TIMEOUT)
+    if rc != 0 or not out:
+        return []
+    untracked = [p for p in out.split('\0') if p]
+    rc, out, _ = git(['ls-tree', '-r', '--name-only', '-z', 'origin/main', '--']
+                     + untracked[:500], timeout=GIT_LOCAL_TIMEOUT)
+    if rc != 0:
+        return []
+    cleared = []
+    stamp = time.strftime('%Y%m%d-%H%M%S')
+    for path in (p for p in out.split('\0') if p):
+        full = Path(BASE_DIR) / path
+        rc, blob, _ = git(['hash-object', '--', path], timeout=10)
+        rc2, upstream, _ = git(['rev-parse', f'origin/main:{path}'], timeout=10)
+        if rc == 0 and rc2 == 0 and blob.strip() == upstream.strip():
+            full.unlink()
+        else:
+            dest = Path(BASE_DIR) / COLLISION_DIR / stamp / path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            full.rename(dest)
+        cleared.append(path)
+    if cleared:
+        sys.stderr.write(f'[ledger_sync] cleared {len(cleared)} untracked file(s) that '
+                         f'origin also tracks (different copies kept under '
+                         f'{COLLISION_DIR}/{stamp}): {", ".join(cleared[:4])}\n')
+    return cleared
+
+def _reject_duplicate_keys(pairs):
+    seen = {}
+    for key, value in pairs:
+        if key in seen:
+            raise ValueError(f'duplicate key {key}')
+        seen[key] = value
+    return seen
+
+def broken_ledgers(ref='HEAD'):
+    """Return one problem string per ledger that is not sound JSON at `ref`.
+
+    Git merges these files as text, and a text merge can finish with no conflict
+    and still splice two versions into something no parser accepts. On 9 Nov 2026
+    a rebase at 13:41 WIB left commitments.json in that state for six hours: every
+    copy of it was invalid, every ledger CLI that loaded it crashed, and nothing
+    stopped the next sync from publishing it. Duplicate keys count as broken because a splice
+    that happens to parse would otherwise drop one version of a record silently.
+
+    A ledger that does not exist at `ref` is not a problem.
+    """
+    broken = []
+    for path in LEDGERS.values():
+        rc, out, _ = git(['show', f'{ref}:{path}'], timeout=GIT_LOCAL_TIMEOUT)
+        if rc != 0:
+            continue
+        try:
+            data = json.loads(out, object_pairs_hook=_reject_duplicate_keys)
+            if not isinstance(data, dict):
+                raise ValueError('top level is not an object')
+        except ValueError as exc:            # JSONDecodeError is a ValueError
+            broken.append(f'{path}: {str(exc)[:80]}')
+    return broken
+
+def _checked_rebase(before, message):
+    """Report a finished rebase as a success only if the ledgers survived it."""
+    broken = broken_ledgers('HEAD')
+    if not broken:
+        return True, message
+    if before and not broken_ledgers(before):
+        # --keep moves the branch back and leaves other dirty files alone. The
+        # commits it steps off are still on origin, and the next sync retries.
+        rc, _, err = git(['reset', '--keep', before], timeout=GIT_LOCAL_TIMEOUT)
+        undone = 'rebase undone' if rc == 0 else f'could not undo it: {(err or "")[:120]}'
+    else:
+        undone = 'the ledger was already broken before this rebase'
+    return False, f'rebase left an invalid ledger ({"; ".join(broken[:2])}); {undone}'
+
 def rebase_onto_origin():
     """Pull with rebase, autostashing whatever else is in progress.
 
@@ -692,6 +780,9 @@ def _rebase_onto_origin_locked():
                      timeout=GIT_NET_TIMEOUT)
     if rc != 0:
         return False, f'fetch failed: {(err or "")[:160]}'
+    clear_untracked_collisions()
+    _, before, _ = git(['rev-parse', 'HEAD'], timeout=10)
+    before = before.strip()
     rc, out, err = git(['rebase', '--autostash', 'origin/main'],
                        timeout=GIT_NET_TIMEOUT)
     if rc == 0:
@@ -706,7 +797,7 @@ def _rebase_onto_origin_locked():
                            + ', '.join(stuck[:4])
                            + '; your work is safe in `git stash list`. Resolve it and '
                              'run `ledger_sync.py sync` again')
-        return True, 'rebased onto origin/main'
+        return _checked_rebase(before, 'rebased onto origin/main')
 
     # Conflicts confined to the files this script regenerates are not a disagreement
     # about anything, they are two machines stamping the same bookkeeping. Resolve
@@ -719,7 +810,9 @@ def _rebase_onto_origin_locked():
         rc, out, err = git(['-c', 'core.editor=true', 'rebase', '--continue'],
                            timeout=GIT_LOCAL_TIMEOUT)
         if rc == 0 and not rebase_in_progress():
-            return True, f'rebased onto origin/main ({steps} generated-file conflict(s) taken from origin)'
+            return _checked_rebase(
+                before,
+                f'rebased onto origin/main ({steps} generated-file conflict(s) taken from origin)')
 
     # Do not leave a half-finished rebase behind.
     inprogress, _, _ = git(['rev-parse', '--verify', '--quiet', 'REBASE_HEAD'],
@@ -826,6 +919,11 @@ def _push():
     ended as commits nobody else could see.
     """
     out = {'pushed': False, 'error': None, 'note': None}
+    broken = broken_ledgers('HEAD')
+    if broken:
+        out['error'] = (f'push refused, invalid ledger: {"; ".join(broken[:2])}; '
+                        'commit is local only')
+        return out
     if not fetch(max_age=0.0):
         out['note'] = 'fetch failed; commit is local only'
         return out

@@ -178,8 +178,11 @@ STALENESS_TABLE = [
      'max_age_hours': 3, 'ts_field': 'last_sweep', 'ts_kind': 'epoch'},
     {'name': 'outcomes', 'path': 'journal/state/outcomes.json',
      'max_age_hours': 8 * 24, 'ts_field': 'last_checked', 'ts_kind': 'epoch'},
+    # tickets.json has no cron writer: it changes only when a session edits a
+    # tracker ticket by hand, so a 48h age watch fired on every quiet week
+    # (FAIL at 235h on 16 Nov 2026) without anything being broken.
     {'name': 'tickets', 'path': 'journal/state/tickets.json',
-     'max_age_hours': 48, 'ts_field': 'updated_wib', 'ts_kind': 'iso'},
+     'max_age_hours': None, 'ts_field': None, 'ts_kind': None},   # exempt
     {'name': 'decisions', 'path': 'journal/state/decisions.json',
      'max_age_hours': None, 'ts_field': None, 'ts_kind': None},   # exempt
     # The Hours tab froze on 9 Aug 2026 and nobody noticed until 3 Sep, because

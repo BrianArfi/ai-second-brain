@@ -63,16 +63,6 @@
       "max_tokens": 8192,
       "credential_hint": "Free tier: create a key at https://console.groq.com/keys, then `echo 'GROQ_API_KEY=...' >> .env` in the workspace root",
       "_note": "Free tier, very fast. Model ids move faster here than at other vendors, so confirm with `run.py --setup`, which lists what the key can actually see rather than trusting the id below."
-    },
-    "ollama": {
-      "type": "openai-compatible",
-      "base_url": "http://127.0.0.1:11434/v1",
-      "base_url_env": "OLLAMA_BASE_URL",
-      "no_auth": true,
-      "flat_rate": true,
-      "max_tokens": 4096,
-      "credential_hint": "Local Ollama, no token. Start it with `ollama serve` and pull the model with `ollama pull gpt-oss:120b`. Running in WSL or on another box: set OLLAMA_BASE_URL=http://<host>:11434/v1",
-      "_note": "Ollama's OpenAI-compatible endpoint (/v1), NOT /api/generate. /v1 is what returns parsed content and a tool_calls array; the native path leaves the model's raw harmony JSON in the body, which is how tool calls end up printed as text instead of executed. Local weights, so marginal cost is 0: flat_rate records actual_usd=0 and keeps the published gpt-oss rate in metered_equiv_usd for the counterfactual. LAST in every chain on purpose. A local 120B is the fallback for when nothing else is reachable, not the lead."
     }
   },
   "known_agy_models": [],
@@ -231,10 +221,6 @@
       {
         "backend": "groq",
         "model": "llama-3.3-70b-versatile"
-      },
-      {
-        "backend": "ollama",
-        "model": "gpt-oss:120b"
       }
     ],
     "reasoning": [
@@ -264,10 +250,6 @@
       {
         "backend": "groq",
         "model": "openai/gpt-oss-120b"
-      },
-      {
-        "backend": "ollama",
-        "model": "gpt-oss:120b"
       }
     ],
     "long-context": [
@@ -284,10 +266,6 @@
       {
         "backend": "gemini",
         "model": "gemini-3.8-flash"
-      },
-      {
-        "backend": "ollama",
-        "model": "gpt-oss:120b"
       }
     ],
     "_draft_glm_restored_note": "glm-5.3-flash re-added to draft 2026-10-15 after a passing probe: the 21 Sep z.ai restore re-added it to reasoning and cross-lineage but missed draft, so an agy quota lockout (3 mornings, 13-15 Oct) sent every premeeting card to the Claude sentinel.",

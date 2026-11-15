@@ -137,6 +137,10 @@ def main():
                          ensure_ascii=False))
         sys.exit(0)
 
+    # Routine "syncing in the background" notes must not reach the model: in the
+    # desktop app any Stop additionalContext re-prompts the session, which then
+    # replies, stops again, and loops (6 Nov 2026, session 3ae180fe).
+    messages = [m for m in messages if "syncing in the background" not in m]
     if messages:
         print(json.dumps({
             "hookSpecificOutput": {

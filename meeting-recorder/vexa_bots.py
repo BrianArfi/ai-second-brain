@@ -24,6 +24,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -513,10 +514,19 @@ def cmd_auto(a):
     calendar_ok = True
     sent = 0
     try:
-        r = subprocess.run([sys.executable, GCAL, "list", "--profile", "work",
-                            "--days-back", "0", "--days-forward", "1", "--json"],
-                           capture_output=True, text=True, timeout=120)
-        events = parse_json_tail(r.stdout)
+        # One retry: about 3% of cycles on 13-15 Nov 2026 got a timeout or an
+        # empty reply from the Calendar API, and each one skipped every join.
+        for attempt in (1, 2):
+            try:
+                r = subprocess.run([sys.executable, GCAL, "list", "--profile", "work",
+                                    "--days-back", "0", "--days-forward", "1", "--json"],
+                                   capture_output=True, text=True, timeout=90)
+                events = parse_json_tail(r.stdout)
+                break
+            except Exception:
+                if attempt == 2:
+                    raise
+                time.sleep(5)
     except Exception as e:
         events = []
         calendar_ok = False
