@@ -25,7 +25,7 @@ ALIASES = {
     "Teammate (Teammate) Shahin": "Teammate Shahin",
     "Teammate Shahin": "Teammate Shahin",
     "Teammate Shahin and Teammate": "Teammate Shahin",
-    "Teammate, Teammate, Teammate": "Teammate",
+    "Teammate": "Teammate",
     "Teammate and Teammate": "Teammate",
     "Teammate and Teammate": "Teammate",
     "Rita": "Rita Alali",

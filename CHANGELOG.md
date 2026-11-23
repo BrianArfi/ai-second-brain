@@ -17,6 +17,8 @@ You can also read this file inside the product: open the local dashboard and pic
 
 ## [Unreleased]
 
+- The Slack triage step of the morning update (`mention_ledger.py classify`) no longer stops on one unreadable line in its message digest, and it now reads the newest 400 messages, not the oldest 400.
+
 - The morning update no longer generates or enriches pre-meeting cards. The two scheduled jobs are removed and the health check no longer expects them. The skill code and the old cards stay in place.
 
 - Weekly planning no longer covers Secondary: the Secondary Slack scan and the Secondary review and plan sections are removed.

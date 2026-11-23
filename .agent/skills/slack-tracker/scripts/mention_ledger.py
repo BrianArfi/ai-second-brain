@@ -822,10 +822,27 @@ def cmd_classify(args):
     if not os.path.exists(DIGEST_PATH):
         print('digest empty, nothing to classify')
         return
-    rows = [json.loads(l) for l in open(DIGEST_PATH, encoding='utf-8') if l.strip()]
+    # Two writers can interleave an append and leave one torn line. Skip it:
+    # one bad line must not stop the triage (it did, from the first torn line
+    # until 23 Nov 2026, and the digest grew to 17,065 rows unread).
+    rows, torn = [], 0
+    with open(DIGEST_PATH, encoding='utf-8') as f:
+        for l in f:
+            if not l.strip():
+                continue
+            try:
+                rows.append(json.loads(l))
+            except json.JSONDecodeError:
+                torn += 1
+    if torn:
+        print(f'skipped {torn} unreadable digest line(s)', file=sys.stderr)
     if not rows:
         print('digest empty, nothing to classify')
         return
+    # The prompt holds 400 messages. Take the newest: a backlog must not push
+    # this morning's messages out of the batch.
+    rows.sort(key=lambda r: float(r.get('ts') or 0))
+    rows = rows[-400:]
     state = load_state()
     open_items = [it for it in state['items'].values() if it['status'] == 'open']
     prompt = (
