@@ -590,6 +590,11 @@ class Importer:
                 self.save()
                 print("project", e["key"], "-> synced project", sp["url"])
                 continue
+            if self.a.fill_synced:
+                # Guard (17 Nov 2026): on 26 Oct this branch made 28 duplicate "Ecom Solutions:" projects because
+                # Linear's sync had not created the epic projects yet. Never create a project in --fill-synced mode.
+                print("project", e["key"], "-> SKIPPED, no synced project yet (run again after Linear's Jira sync)")
+                continue
             used = set()
             body = self.md_of(f.get("description"), e, used)
             content = (body + "\n\n" if body else "") + self.footer(e, None, None)

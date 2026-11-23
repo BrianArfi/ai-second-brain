@@ -43,7 +43,10 @@ BOARD_SQUAD = {"TRAV": "Travel Shop", "MBA": "B2C Super App", "MSP": "Ecom Solut
                "STOR": "Ecom Solutions", "ML": "LiveOps", "MIM": "Peoppl Suite",
                "RP": "Giftcardsby and Rewards", "SP": "ExamplePlatform"}
 SP_SKIP = re.compile(r"\b(LMS|Spotlight|SACO|Offer-to-Product)\b", re.I)
-PRODUCT_TO_SQUAD = {"DevOps": "DevOps Squad"}
+PRODUCT_TO_SQUAD = {"DevOps": "DevOps Squad",
+                    # 17 Nov 2026: Product label split into two products, one squad
+                    "GiftCardsBy": "Giftcardsby and Rewards",
+                    "Rewards Portal": "Giftcardsby and Rewards"}
 
 LABELS_Q = """query($after:String){issueLabels(first:100,after:$after){
  nodes{id name team{key} parent{name} retiredAt} pageInfo{hasNextPage endCursor}}}"""

@@ -58,6 +58,16 @@ def read_transcript(path):
                 continue
             if d.get('isSidechain'):
                 continue
+            if d.get('type') == 'response_item':
+                item = d.get('payload') or {}
+                if item.get('type') == 'function_call':
+                    try:
+                        args = json.loads(item.get('arguments') or '{}')
+                    except ValueError:
+                        continue
+                    if isinstance(args, dict) and isinstance(args.get('command'), str):
+                        commands.append(args['command'])
+                continue
             msg = d.get('message') or {}
             content = msg.get('content')
             if d.get('type') == 'assistant':
@@ -121,10 +131,12 @@ def main():
     if d.get('stop_hook_active'):
         return
     path = d.get('transcript_path')
-    if not path or not os.path.exists(path):
+    turn = d.get('last_assistant_message')
+    if not isinstance(turn, str) and (not path or not os.path.exists(path)):
         return
     session = str(d.get('session_id') or '')
-    turn, commands = read_transcript(path)
+    transcript_turn, commands = read_transcript(path) if path and os.path.isfile(path) else ('', [])
+    turn = turn if isinstance(turn, str) else transcript_turn
     found = findings(turn, commands, session)
     blocks = [f for f in found if f['severity'] == 'block']
     if not blocks:

@@ -618,7 +618,9 @@ def create_issue(project_key, summary, issue_type="Story", priority="High", desc
         # outright: "cannot be set. It is not on the appropriate screen".
         # So the Epic Link field is sent only on the Work site.
         fields["parent"] = {"key": parent}
-        if epic_link_field and domain == "yourcompany.atlassian.net":
+        # A sub-task inherits its parent's epic; Jira rejects the Epic Link on it.
+        is_subtask = issue_type.lower().replace("-", "") == "subtask"
+        if epic_link_field and domain == "yourcompany.atlassian.net" and not is_subtask:
             fields[epic_link_field] = parent
     if labels:
         fields["labels"] = list(labels)

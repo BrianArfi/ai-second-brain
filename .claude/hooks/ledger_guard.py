@@ -58,7 +58,7 @@ def dirty(project):
         return []
     return [ln for ln in out.splitlines() if ln.strip()]
 
-def main():
+def main(*, propagate=True):
     try:
         raw = sys.stdin.read() if not sys.stdin.isatty() else ""
     except Exception:
@@ -73,7 +73,7 @@ def main():
     messages = []
 
     # --- 1. propagate anything still sitting in the working tree -----------
-    if os.path.exists(sync) and dirty(project):
+    if propagate and os.path.exists(sync) and dirty(project):
         # --background: the sync detaches and this returns in well under a
         # second. Run inline it cost 30 to 72 seconds on EVERY turn (renderers
         # plus git fetch/push from Indonesia), and nothing in the turn reads the
@@ -128,7 +128,10 @@ def main():
             "  - a call was made -> decision_log.py decide DEC-xxxx --decision \"...\"\n"
             "  - new obligation created by this action -> ...add\n"
             "  - tick the matching journal/todo.md line\n"
-            "The CLIs re-render the tracker and push automatically.\n\n"
+            + ("The CLIs re-render the tracker and push automatically.\n\n"
+               if propagate else
+               "Check authorization before using a CLI that commits or pushes.\n\n")
+            +
             "If none of these map to a tracked item, say so in one line and stop."
         )
         if messages:

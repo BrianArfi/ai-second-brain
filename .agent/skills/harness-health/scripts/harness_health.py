@@ -134,15 +134,6 @@ CRON_REGISTRY = [
         # outcomes.json last_check is ISO, not epoch — rely on heartbeat/log signal
     },
     {
-        'job': 'premeeting-cards',                   # 32 12 * * 1-5 (weekdays, on-window)
-        'match': 'premeeting-cards/scripts/premeeting_cards.py',
-        'cadence_minutes': 24 * 60,
-        'heartbeat_job': 'premeeting-cards',
-        'log_file': os.path.join(BASE_DIR, '.agent', 'skills', 'premeeting-cards', 'premeeting_cron.log'),
-        'state_file': os.path.join(BASE_DIR, 'journal', 'state', 'premeeting.json'),
-        'state_ts_field': 'last_run',
-    },
-    {
         'job': 'harness-health',                     # 10 13 1 * * (monthly, --full, on-window)
         'match': 'harness-health/scripts/harness_health.py',
         'cadence_minutes': 31 * 24 * 60,

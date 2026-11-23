@@ -1,4 +1,4 @@
-"""Daily Linear rules checker. Read-only: lists every violation of three rules.
+"""Daily Linear rules checker. Read-only: lists every violation of four rules.
 
 Linear cannot block these at write time, so enforcement is a report.
 
@@ -8,6 +8,10 @@ Linear cannot block these at write time, so enforcement is a report.
      Exempt: completed and canceled projects, and the Scratch team (ZZT).
   3. Every initiative has an owner, a target date, and a description with a
      "Success metric" heading followed by non-empty text.
+  4. Every open project has a target date. A project is a dated deliverable; an epic is a
+     parent issue with sub-issues, never a project (handbook v3.2, the owner 17 Nov 2026).
+     A project with no target date is usually an epic filed as a project.
+     Exempt: standing projects named "<Product>: Maintenance", completed and canceled projects, ZZT.
 
     python3 .agent/skills/linear-connector/scripts/linear_rules_check.py [--out PATH] [--json] [--commit]
 
@@ -39,7 +43,7 @@ ISSUES_Q = """query($after:String,$f:IssueFilter){issues(first:50,after:$after,f
   labels(first:15){nodes{name parent{name}}}}
  pageInfo{hasNextPage endCursor}}}"""
 PROJECTS_Q = """query($after:String){projects(first:50,after:$after){
- nodes{id name url state status{type name} lead{name} creator{name} teams(first:5){nodes{key}}
+ nodes{id name url state targetDate status{type name} lead{name} creator{name} teams(first:5){nodes{key}}
   labels(first:15){nodes{name parent{name}}}}
  pageInfo{hasNextPage endCursor}}}"""
 INITS_Q = """query($after:String){initiatives(first:100,after:$after){
@@ -64,7 +68,7 @@ def check_issues():
     return out
 
 def check_projects():
-    out = []
+    out, epics = [], []
     for p in L.paginate(PROJECTS_Q, {}, ["projects"]):
         teams = [t["key"] for t in p["teams"]["nodes"]]
         if teams and all(t == IGNORE_TEAM for t in teams):
@@ -72,14 +76,18 @@ def check_projects():
         st = ((p.get("status") or {}).get("type") or p.get("state") or "").lower()
         if st in DONE_PROJECT:
             continue
+        world = next((t for t in teams if t in WORLDS), None) or (teams[0] if teams else "No team")
+        owner = (p["lead"] or {}).get("name") or (p["creator"] or {}).get("name") or "NO LEAD"
+        if not p.get("targetDate") and not p["name"].rstrip().lower().endswith("maintenance"):
+            epics.append({"world": world, "name": p["name"], "url": p["url"], "owner": owner,
+                          "problem": "no target date: if this is an epic, make it a parent issue with sub-issues"})
         prod = [l["name"] for l in p["labels"]["nodes"] if (l.get("parent") or {}).get("name") == "Product"]
         if len(prod) == 1:
             continue
-        world = next((t for t in teams if t in WORLDS), None) or (teams[0] if teams else "No team")
         out.append({"world": world, "name": p["name"], "url": p["url"],
                     "problem": "no Product label" if not prod else "several Product labels: " + ", ".join(prod),
-                    "owner": (p["lead"] or {}).get("name") or (p["creator"] or {}).get("name") or "NO LEAD"})
-    return out
+                    "owner": owner})
+    return out, epics
 
 def success_metric_ok(text):
     """True when a 'Success metric' heading is followed by non-empty text."""
@@ -113,15 +121,16 @@ def check_initiatives():
     return out
 
 def render(res, date):
-    n1, n2, n3 = (len(res[k]) for k in ("squad", "product", "initiative"))
-    total = n1 + n2 + n3
+    n1, n2, n3, n4 = (len(res[k]) for k in ("squad", "product", "initiative", "epic"))
+    total = n1 + n2 + n3 + n4
     label = "0 violations" if not total else f"{total} violations"
     lines = [f"# Linear rules check {date}", "",
-             f"**{label}** | Rule 1 Squad label: {n1} | Rule 2 Product label: {n2} | Rule 3 Initiative: {n3}", ""]
+             f"**{label}** | Rule 1 Squad label: {n1} | Rule 2 Product label: {n2} | Rule 3 Initiative: {n3} | Rule 4 Project vs epic: {n4}", ""]
     titles = {"squad": "Rule 1: every open W1/W2/W3 issue has a Squad label",
               "product": "Rule 2: every project has exactly one Product label",
-              "initiative": "Rule 3: every initiative has owner, target date, Success metric"}
-    for key in ("squad", "product", "initiative"):
+              "initiative": "Rule 3: every initiative has owner, target date, Success metric",
+              "epic": "Rule 4: every open project has a target date (an epic is a parent issue, not a project)"}
+    for key in ("squad", "product", "initiative", "epic"):
         rows = res[key]
         lines += [f"## {titles[key]} ({len(rows)})", ""]
         if not rows:
@@ -159,7 +168,8 @@ def main():
     ap.add_argument("--json", action="store_true", help="print JSON instead of markdown")
     a = ap.parse_args()
     try:
-        res = {"squad": check_issues(), "product": check_projects(), "initiative": check_initiatives()}
+        product, epic = check_projects()
+        res = {"squad": check_issues(), "product": product, "initiative": check_initiatives(), "epic": epic}
     except Exception as e:  # transport, auth or GraphQL error
         print(f"linear_rules_check: API error: {e}", file=sys.stderr)
         return 2

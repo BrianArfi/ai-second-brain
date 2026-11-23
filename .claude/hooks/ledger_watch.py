@@ -130,6 +130,13 @@ def call_failed(d):
     """True when the tool call reported an error. A send that errored discharged
     nothing, so it must not mark the record as handled."""
     r = d.get("tool_response")
+    if isinstance(r, str) and d.get("tool_name") == "Bash":
+        # Codex may supply the rendered exec result instead of an object.
+        # Read the runner metadata above Output, not the command's own stdout.
+        header = re.split(r"(?m)^(?:Final output|Output):", r, maxsplit=1)[0]
+        if header.startswith(("Chunk ID:", "Wall time:")):
+            code = re.search(r"(?m)^Process exited with code (-?\d+)\s*$", header)
+            return code is not None and int(code[1]) != 0
     if not isinstance(r, dict):
         return False
     if r.get("is_error") or r.get("isError"):
@@ -193,7 +200,7 @@ def emit(context):
     }, ensure_ascii=False))
     sys.exit(0)
 
-def main():
+def main(*, codex=False):
     try:
         raw = sys.stdin.read() if not sys.stdin.isatty() else ""
     except Exception:
@@ -208,8 +215,10 @@ def main():
     tool = str(d.get("tool_name") or "")
     ti = d.get("tool_input") or {}
     project = project_dir()
-    path = session_path(project, str(d.get("session_id") or ""))
-    state = load(path)
+    session_id = str(d.get("session_id") or "")
+    if codex and not session_id:
+        return
+    state = {"discharges": [], "ledger_touches": [], "hand_edits": []}
     now = time.time()
     note = None
 
@@ -236,7 +245,10 @@ def main():
 
     elif tool == "Bash":
         cmd = str(ti.get("command") or "")
-        if LEDGER_MUTATIONS.search(cmd):
+        mutation = LEDGER_MUTATIONS.search(cmd)
+        if mutation and (
+            not codex or (not call_failed(d) and mutation[1] + ".py" in invoked_scripts(cmd))
+        ):
             state["ledger_touches"].append({"at": now, "cmd": cmd[:200]})
         else:
             scripts = None
@@ -278,7 +290,7 @@ def main():
 
     else:
         short = tool.rsplit("__", 1)[-1]
-        if short in MCP_DISCHARGES:
+        if short in MCP_DISCHARGES and not (codex and call_failed(d)):
             label = MCP_DISCHARGES[short]
             state["discharges"].append({"at": now, "what": label, "cmd": short})
             note = (
@@ -287,8 +299,20 @@ def main():
                 "as open."
             )
 
+    if codex and state["discharges"]:
+        note = (
+            "TRACKED ACTION: " + state["discharges"][-1]["what"] +
+            ". Identify the related Ledger record. Check authorization before using a CLI "
+            "that commits or pushes."
+        )
+    if codex and not any(state.values()):
+        return
     try:
-        save(path, state)
+        path = session_path(project, session_id)
+        previous = load(path)
+        for key, entries in state.items():
+            previous[key].extend(entries)
+        save(path, previous)
     except Exception:
         pass
 

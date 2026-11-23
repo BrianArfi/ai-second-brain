@@ -71,7 +71,7 @@ def parse_target(command):
             thread_ts = tok.split("=", 1)[1]
     return channel, thread_ts
 
-def main():
+def main(*, codex=False):
     if os.environ.get("CLAIM_GUARD_DISABLE") == "1":
         sys.exit(0)
 
@@ -99,6 +99,14 @@ def main():
     convs = (json.loads(STATE.read_text(encoding="utf-8")) or {}).get("conversations") or {}
     result = evaluate(convs, channel, thread_ts, me)
     if result:
+        if codex and result[0] == "ask":
+            print(json.dumps({
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "additionalContext": result[1],
+                }
+            }))
+            return
         emit(*result)
 
     sys.exit(0)

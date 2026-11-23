@@ -15,7 +15,7 @@
 **Role**: [e.g., Product Manager, Consultant, Operations Lead]
 **Based in**: [City, Country — affects timezone references]
 **Timezone**: [IANA zone name, e.g. Europe/London or Asia/Jakarta. `/daily-update` reads it to choose morning or evening mode]
-**Languages**: [e.g., English for work docs, Indonesian for personal content]
+**Languages**: English [the app, its Help button and Talk speak English unless this line names another language, e.g. "Bahasa Indonesia"; the assistant follows it too]
 
 Brief context:
 [2–3 sentences about what you do day-to-day. Example: "I manage product for two B2B SaaS clients simultaneously. I run sprints, write PRDs, attend 5–8 meetings per week, and produce a weekly report for each client."]

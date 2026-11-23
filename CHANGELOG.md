@@ -17,6 +17,31 @@ You can also read this file inside the product: open the local dashboard and pic
 
 ## [Unreleased]
 
+- The morning update no longer generates or enriches pre-meeting cards. The two scheduled jobs are removed and the health check no longer expects them. The skill code and the old cards stay in place.
+
+- Weekly planning no longer covers Secondary: the Secondary Slack scan and the Secondary review and plan sections are removed.
+
+- `/session <id>` no longer crashes when a session card lists an output as plain text.
+
+- Codex project hooks reuse the Slack claim and draft checks and track Ledger follow-through without automatic Git propagation.
+
+- Codex workspace instructions and five workflow skills route weekly planning, weekly reports, meeting minutes, tickets, and session references to the shared harness SOPs.
+
+- no-ai-slop: new override 8, "a reference never stands in for the information". Drafts and chat replies must state the content behind any section, appendix, decision number or ticket label, so a reader who opens nothing still knows what to check or decide (18 Nov 2026)
+
+- linear-connector: new `initiative_restructure.py --plan <file>` creates outcome initiatives (dated, with a success metric, checked against the Linear standard) and attaches existing projects to them. Dry run by default; `--apply` refuses to run without `--approved` (18 Nov 2026)
+- linear-connector: `epic_rebuild.py --plan` reads the plan file as UTF-8 (a project name with a dash broke it on Windows), and a parent issue for an epic with no Jira link no longer gets an empty "Original Jira epic" line.
+- linear-connector: `epic_rebuild.py --plan <file>` rebuilds epic-projects from any team and any Jira source, not only the W1 AFM epics. It reads a Rule 4 plan file and converts only rows whose action starts with "parent issue"; parents get the project lead or no assignee, the Jira line is skipped when there is no Jira link, and `--apply` or `--delete-projects` refuses to run without `--approved`. Snapshots go to `epic_rebuild_snapshot_plan_<date>.json` (18 Nov 2026)
+- Linear squad auto-label maps the new `GiftCardsBy` and `Rewards Portal` Product labels to the `Giftcardsby and Rewards` squad, so W3 issues in those projects still get their Squad label after the 17 Nov 2026 label split.
+- linear-connector: a new Rule 4 in `linear_rules_check.py` flags every open project that has no target date. The reason: an epic is a parent issue with sub-issues, never a project (handbook v3.2, DEC-0622). `<Product>: Maintenance` projects are exempt. `linear_standard.check_project` now refuses a project that has no target date, and its message names the parent-issue route. (17 Nov 2026)
+- announce-multichannel gets a release video gate: every ASB minor or major release (X.Y.0) needs an English feature-update explainer video (problem, before, after, real-screen demo, built with story-time) before any announce starts; patch releases (X.Y.Z) are exempt. New script `asb_release_video_gate.py` (classify, brief, mark, waive, check) (17 Nov 2026)
+
+- New Linear connector script `epic_rebuild.py` turns synced Jira epic-projects into parent issues (resumable, snapshot, dry run by default); used 17 Nov 2026 to rebuild the 29 AFM epics after the AFM Jira link was removed (17 Nov 2026)
+
+- Linear importer `jira_archive_import.py --fill-synced` no longer creates projects when Linear's Jira sync has not made the epic project yet; on 26 Oct 2026 it made 28 duplicate "Ecom Solutions:" projects, deleted 17 Nov 2026 (17 Nov 2026)
+
+- Jira connector `create-issue --type Sub-task --parent <KEY>` no longer sends the Epic Link field on the Work site; Jira rejected every sub-task with "You can't add sub-tasks to epics" (17 Nov 2026).
+
 - Meeting bot (`vexa_bots.py auto`) retries the Work calendar read once before it skips a cycle's joins; about 3% of cycles on 13-15 Nov 2026 lost every join to a one-off Calendar API timeout (16 Nov 2026).
 - Harness health no longer age-checks `journal/state/tickets.json`: no cron writes it, so the 48h watch raised a FAIL every quiet week (16 Nov 2026).
 - Public sync holds back the client workshop PDF in `docs/explainer_slide_style/`; the leak audit caught it on 16 Nov 2026 (the grid PNGs still ship).
